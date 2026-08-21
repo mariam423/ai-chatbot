@@ -2,8 +2,14 @@ import { execSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage } from '../lib/types'
+
+// Mock auth context — next-auth can't run in vitest (no next/server).
+// Server actions fall through to anonymous access (userId=null) in tests.
+vi.mock('../lib/auth-context', () => ({
+  getCurrentUserId: vi.fn().mockResolvedValue(null),
+}))
 
 // lib/db.ts reads DATABASE_URL at import time, so the temp DB must be set up
 // and the env var set BEFORE the actions module is (dynamically) imported.

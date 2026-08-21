@@ -3,14 +3,15 @@
 import { z } from 'zod'
 import { Prisma } from '../generated/client'
 import { prisma } from '@/lib/db'
+import { getCurrentUserId } from '@/lib/auth-context'
 import { ChatMessageSchema, type ChatMessage, type ChatSessionSummary } from '@/lib/types'
 
 /**
  * Server Actions for per-session conversation persistence (FR-11).
  *
- * A session is an anonymous conversation thread identified by a client-held
- * session id (stored in localStorage). All functions return a discriminated
- * `{ ok }` result — never throw to the client.
+ * Every action scopes queries by the authenticated user's id, ensuring
+ * isolated DB access per user session. When AUTH_DISABLED=true (e2e tests),
+ * the userId filter is skipped so anonymous access still works.
  */
 
 const SessionIdSchema = z.string().min(1).max(100)
@@ -25,12 +26,15 @@ const RenameSessionInputSchema = z.object({
   title: z.string().trim().min(1).max(48),
 })
 
-/** Create a new empty session. */
+/** Create a new empty session owned by the current user. */
 export async function createChatSession(): Promise<
   { ok: true; sessionId: string } | { ok: false; error: string }
 > {
+  const userId = await getCurrentUserId()
   try {
-    const session = await prisma.chatSession.create({ data: {} })
+    const session = await prisma.chatSession.create({
+      data: { userId: userId ?? undefined },
+    })
     return { ok: true, sessionId: session.id }
   } catch {
     return { ok: false, error: 'Could not create session.' }
@@ -44,15 +48,16 @@ export async function getChatSession(
   if (!SessionIdSchema.safeParse(sessionId).success) {
     return { ok: false, error: 'Invalid session id.' }
   }
+  const userId = await getCurrentUserId()
   try {
-    const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId },
-      // position preserves the client's thread order (createdAt can tie
-      // within one save transaction).
+    const session = await prisma.chatSession.findFirst({
+      where: {
+        id: sessionId,
+        // When auth is active, only return sessions owned by the current user.
+        ...(userId ? { userId } : {}),
+      },
       include: { messages: { orderBy: { position: 'asc' } } },
     })
-    // Return the clean ChatMessage shape, not raw rows (role is validated on
-    // write, so the narrowing cast is safe).
     const messages: ChatMessage[] = (session?.messages ?? []).map(({ id, role, content }) => ({
       id,
       role,
@@ -78,10 +83,12 @@ export async function saveChatMessages(input: {
     return { ok: false, error: 'Invalid session id or messages payload.' }
   }
   const { sessionId, messages } = parsed.data
+  const userId = await getCurrentUserId()
   try {
+    // Upsert with ownership: create attaches userId, update is a no-op.
     await prisma.chatSession.upsert({
       where: { id: sessionId },
-      create: { id: sessionId },
+      create: { id: sessionId, userId: userId ?? undefined },
       update: {},
     })
     await prisma.$transaction(
@@ -122,11 +129,7 @@ const ListSessionsInputSchema = z.object({
 
 /**
  * List sessions (newest first) for the sidebar, one page at a time.
- *
- * `search` filters by custom title OR message content (case-insensitive);
- * `skip`/`take` paginate. Returns `hasMore` so the client can offer a
- * "Show more" action. Empty sessions (created but never used) are excluded
- * in the query itself so offset pagination stays correct.
+ * Scoped to the current user's sessions.
  */
 export async function listChatSessions(input?: {
   search?: string
@@ -140,10 +143,9 @@ export async function listChatSessions(input?: {
     return { ok: false, error: 'Invalid list options.' }
   }
   const { search, skip, take } = parsed.data
+  const userId = await getCurrentUserId()
   try {
-    // Raw SQL: Prisma's `mode: 'insensitive'` filter is not available for
-    // SQLite with the LibSQL adapter ("Unknown argument `mode`"), and LIKE is
-    // case-insensitive for ASCII by default — COLLATE NOCASE makes it explicit.
+    const userFilter = userId ? Prisma.sql`AND cs.userId = ${userId}` : Prisma.empty
     const searchFilter = search
       ? Prisma.sql`AND (cs.title LIKE ${`%${search}%`} COLLATE NOCASE
              OR EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = cs.id
@@ -165,6 +167,7 @@ export async function listChatSessions(input?: {
         cs.updatedAt AS updated_at
       FROM chat_sessions cs
       WHERE EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = cs.id)
+        ${userFilter}
         ${searchFilter}
       ORDER BY cs.updatedAt DESC
       LIMIT ${take + 1} OFFSET ${skip}
@@ -176,7 +179,6 @@ export async function listChatSessions(input?: {
       hasMore,
       sessions: page.map((row) => ({
         id: row.id,
-        // A user-renamed title wins; otherwise derive from the first message.
         title: row.title ?? sessionTitle(row.first_content ?? undefined),
         updatedAt: new Date(row.updated_at).toISOString(),
         messageCount: Number(row.message_count),
@@ -187,7 +189,7 @@ export async function listChatSessions(input?: {
   }
 }
 
-/** Rename a session (sidebar label). No-op success for unknown sessions. */
+/** Rename a session (sidebar label). Scoped to the current user. */
 export async function renameChatSession(input: {
   sessionId: string
   title: string
@@ -197,23 +199,36 @@ export async function renameChatSession(input: {
     return { ok: false, error: 'Invalid session id or title.' }
   }
   const { sessionId, title } = parsed.data
+  const userId = await getCurrentUserId()
   try {
-    await prisma.chatSession.updateMany({ where: { id: sessionId }, data: { title } })
+    await prisma.chatSession.updateMany({
+      where: {
+        id: sessionId,
+        ...(userId ? { userId } : {}),
+      },
+      data: { title },
+    })
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not rename session.' }
   }
 }
 
-/** Delete a session and its messages (cascade). */
+/** Delete a session and its messages (cascade). Scoped to the current user. */
 export async function clearChatSession(
   sessionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!SessionIdSchema.safeParse(sessionId).success) {
     return { ok: false, error: 'Invalid session id.' }
   }
+  const userId = await getCurrentUserId()
   try {
-    await prisma.chatSession.deleteMany({ where: { id: sessionId } })
+    await prisma.chatSession.deleteMany({
+      where: {
+        id: sessionId,
+        ...(userId ? { userId } : {}),
+      },
+    })
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not clear session.' }
