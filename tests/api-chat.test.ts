@@ -135,6 +135,8 @@ describe('POST /api/chat', () => {
 
   it('falls back to OPENAI_API_KEY and OpenAI defaults when OPENROUTER_API_KEY is unset', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', '')
+    vi.stubEnv('OPENROUTER_BASE_URL', undefined)
+    vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_API_KEY', 'sk-openai-test')
     const sse = new ReadableStream<Uint8Array>({
       start(controller) {
