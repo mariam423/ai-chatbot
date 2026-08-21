@@ -1,0 +1,102 @@
+# Project knowledge
+
+This file gives Freebuff context about your project: goals, commands, conventions, and gotchas.
+
+## Quickstart
+
+- Setup: `npm install` (postinstall generates the Prisma client); `npx prisma migrate dev` to apply schema to the local SQLite DB; copy `.env.example` → `.env.local` and set `OPENROUTER_API_KEY` (OpenRouter — OpenAI-compatible, free models available; `OPENAI_API_KEY` also works for other endpoints)
+- Dev: `npm run dev` — Next.js app at localhost:3000 (chat UI at `/`, streaming LLM proxy at `/api/chat`)
+- Test: `npm test` (vitest) — validates agents, skills, and the SSE stream parser; `npm run check` = typecheck + tests
+
+## Architecture
+
+- Key directories:
+  - `app/` — Next.js App Router: `page.tsx` (chat UI), `layout.tsx`, `api/chat/route.ts` (server-side streaming proxy to an OpenAI-compatible LLM API; credentials never reach the client)
+  - `components/` — client chat UI: `chat-app.tsx` (shell: sidebar + drawer + dark mode + session switching), `chat.tsx` (streaming/stop/retry/regenerate/clear + Framer Motion), `sidebar.tsx` (desktop session list + mobile overlay drawer — focus trap, Escape, inert when closed — with per-session rename/delete actions), `markdown.tsx` (LLM replies with highlighted code blocks + copy buttons), `message-bubble.tsx`, `streaming-skeleton.tsx`
+  - `lib/sse.ts` — SSE parsing helpers (extractSSEEvents, deltaText, readSSEStream)
+  - `lib/db.ts` — PrismaClient singleton (LibSQL adapter); `prisma/schema.prisma` — ChatSession (optional user `title`) + ChatMessage; `app/actions.ts` — Server Actions for per-session persistence (FR-11) + `listChatSessions` (search + paginated sidebar list) / `renameChatSession`
+  - `.agents/` — custom Codebuff agents: one file per agent (`<id>.ts`), types in `.agents/types/`, skills in `.agents/skills/<name>/SKILL.md`
+  - `tests/` — vitest suites: agent conventions, skill frontmatter, skill references, SSE parser
+  - `PRD.md` — product requirements for the chatbot
+  - `codebase-overview.md` — architecture map of what exists (components, data flow, conventions, tradeoffs, open questions); consult it before planning or modifying code, and update it when the architecture changes significantly
+- Data flow: chat client POSTs history to `/api/chat`; the route forwards to the configured LLM API with `stream: true` and pipes the SSE stream back; the client parses deltas via `lib/sse.ts` and renders incrementally
+
+## Publishing agents
+
+- Agents in `.agents/` are **local** to this repo. Publishing makes an agent available in the Codebuff **agent store**, where it is addressed by its fully qualified id: `publisher/id@version` (e.g. `codebuff/file-picker@0.0.1`).
+- To publish, the definition must include:
+  - `publisher` — your publisher ID. Required for publishing (see `agent-definition.ts`).
+  - `version` — version string. Optional; defaults to `0.0.1` and is bumped automatically on each publish.
+- Referencing agents:
+  - In `spawnableAgents`, use the short id for repo-local agents (e.g. `'code-reviewer'`) and the fully qualified `'publisher/id@version'` for store agents — publisher and version are required for store references.
+  - `lookup_agent_info` accepts both formats (short local or full published).
+- Publishing is done from the Codebuff CLI; `/init` is the documented first step for building custom agents. The exact publish command isn't in the public docs — confirm it in the Codebuff CLI help, docs, or Discord before publishing.
+
+## Agents
+
+- `project-planner` (`.agents/project-planner.ts`) — turns a goal into a concrete, executable plan. Loads the `planner-pro-max` skill workflow (outcome → phases → tasks → dependencies → range estimates → risks) via the skill tool, pulling in `architecture-designer` for architecture-heavy goals (new systems, restructuring, hard perf/scale/security constraints) and `product-manager-pro` when the goal or metrics are unclear. Spawns the `requirements-writer` agent for requirement-heavy goals (acceptance criteria become task done-criteria) and one `phase-planner` sub-agent per phase (via spawn_agents, in parallel) to detail tasks/estimates/risks, then folds the results into the final plan. Grounds estimates in the actual repo (read-only), asks blocking questions via ask_user, and returns a structured plan: outcome, phases (tasks with ids, dependsOn, estimates, done-criteria), risks with mitigations, open questions. Spawnable by other agents; model `anthropic/claude-sonnet-4.5` with high reasoning effort.
+- `phase-planner` (`.agents/phase-planner.ts`) — sub-agent that details ONE phase of a larger plan: task decomposition with done-criteria, intra-phase dependencies, range estimates, and phase-level risks. Spawned by project-planner; read-only, never asks the user (parent owns interaction); returns a structured phase plan.
+- `requirements-writer` (`.agents/requirements-writer.ts`) — writes atomic, testable functional/non-functional requirements with Given/When/Then acceptance criteria (embodies the `requirements-engineer` skill workflow). Read-only; returns structured requirements (id, category, statement, acceptance criteria, source) plus open questions. Spawnable by the project-planner for requirement-writing subtasks.
+- `codebase-overview` (`.agents/codebase-overview.ts`) — maps the repo using the `architecture-designer` skill in documentation mode (describes the architecture as it exists): components with responsibilities/locations/contracts/dependencies, data flow, observed conventions, and unverified gaps. Read-only; returns a structured map. Useful before planning, reviewing, or modifying code.
+- `code-reviewer` (`.agents/code-reviewer.ts`) — read-only reviewer of code/diffs for correctness, security, performance, and maintainability; returns structured findings (severity/file/line/issue/suggestion) plus an approve/request-changes verdict.
+
+## Skills
+
+Reusable skill instructions live in `.agents/skills/<skill-name>/SKILL.md` — each is a markdown file with YAML frontmatter (name, description, version) that the skill tool auto-loads by name. Current skills:
+
+- `product-manager-pro` — Senior PM: turn vague ideas into problem statements, goals, success metrics, prioritized scope, and a concise PRD.
+- `requirements-engineer` — Write atomic, testable functional/non-functional requirements with Given/When/Then acceptance criteria.
+- `planner-pro-max` — Break goals into phases, tasks, dependencies, estimates, risks, and a trackable execution checklist.
+- `architecture-designer` — Design pragmatic system/component architecture: boundaries, data flow, tradeoffs, ADRs — grounded in requirements and the existing codebase.
+- `test-engineer` — Design and write effective automated tests: behavior-first, edge-case coverage, fast and reliable suites matching project conventions.
+- `react-best-practices` — React component guidance (effects as escape hatches, refs, composition).
+- `vercel-react-best-practices` — Vercel's React/Next.js performance rules (waterfalls, bundle size, localStorage schema versioning).
+- `zod-schema-validation` — Zod schema validation + type inference; validate at system boundaries (API, forms, external storage).
+- `prisma-database-setup` / `prisma-cli` / `prisma-client-api` — official Prisma skills (provider setup, CLI commands, client API).
+- `server-actions` / `nextjs-server-actions` — Next.js Server Actions patterns (form handling, validation, revalidation).
+- `prompt-optimizer` / `arize-prompt-optimization` — prompt optimization with evals and trace data.
+- `session-compression` — conversation context compression (token-budget FIFO, summarization thresholds); user-invocable only.
+- `compression` — JS payload compression (Gzip/Brotli) — not relevant to LLM context.
+- `accessibility` — web accessibility (WCAG 2.2): focus, contrast, keyboard, reduced motion.
+- `assistant-ui` — AI chat UI patterns (message lists, streaming states).
+- `loading-states-and-perceived-performance` — skeleton/spinner loading patterns.
+- `micro-interaction-spec` — micro-interaction specifications (states, motion, a11y).
+
+Invoke one when the task calls for its role (product definition, requirements writing, or planning). New skills follow the same `<skill-name>/SKILL.md` layout; the directory name must match the `name` in the frontmatter.
+
+## Tests
+
+`npm test` (vitest) validates every agent and skill in the repo; `npm run check` runs typecheck + tests. The suites auto-discover files — no test needs updating when you add an agent or skill, only when you add a new convention.
+
+- `tests/agent-definitions.test.ts` — validates every `.agents/*.ts` definition at runtime (the checks TypeScript can't express): at least one agent exists; id matches `^[a-z0-9-]+$`, is unique, and matches its filename; `displayName`/`model` and at least one prompt field are present; `toolNames` is an array of non-empty strings; `outputSchema` requires `outputMode: 'structured_output'` (and vice versa); `reasoningOptions` provides `max_tokens` or `effort`; spawnableAgents entries exist, have spawnerPrompts, and are instructed in the parent's prompts.
+- `tests/skill-frontmatter.test.ts` — parses each `.agents/skills/*/SKILL.md` frontmatter and checks: `name` is present, `^[a-z0-9-]+$`, unique, and matches its directory; `description` is present and action-oriented; `version` is semver (`X.Y.Z`); `invoked_by` is one of `user | agent | both`; `user_invocable` is a boolean; `source` is `builtin | user-custom-rule`.
+- `tests/skill-references.test.ts` — cross-checks agents against skills: every backtick-quoted kebab-case name in an agent's prompts must resolve to a real skill (tokens naming a tool in the agent's `toolNames` or a local agent id are excluded); any agent with the `skill` tool must reference at least one skill; agent ids and skill names must not overlap; every skill is referenced or user-invocable.
+- `tests/sse.test.ts` — unit tests for `lib/sse.ts` (event extraction, delta parsing, streaming with abort).
+- `tests/api-chat.test.ts` — route contract tests for `app/api/chat` (key guard, zod request-body validation with structured issues, 400/502/429 handling, system prompt + Authorization header, streaming passthrough) with mocked fetch.
+- `tests/prd-checklist.test.ts` — PRD traceability checklist: one row per FR/NFR from PRD.md with verification method and status; fails if PRD requirements are missing, renamed, or added without a row. Also asserts PRD.md names the configured provider (OpenRouter) and references `OPENROUTER_API_KEY`.
+- `tests/storage.test.ts` — unit tests for `lib/storage.ts` (versioned localStorage thread persistence: round-trip, corrupt/invalid payloads → empty thread, legacy-format migration with write-back, SSR guard, clear).
+- `tests/actions.test.ts` — integration tests for the FR-11 Server Actions against a temp SQLite DB (persist + load in order, idempotent re-save, in-place update, validation rejects, create/clear session).
+- `tests/context.test.ts` — unit tests for `lib/context.ts` (history truncation to last N, token-budget FIFO, newest message always kept).
+- `e2e/chat.spec.ts` — Playwright e2e for the chat flow (mocked /api/chat, no API key needed): empty state, streamed reply, typing indicator + stop, error + retry, persistence (reload restore + versioned `{ version, messages }` payload shape, asserted against `lib/storage` constants), clear, empty-input guard. Run with `npm run test:e2e` (config in `playwright.config.ts`; runs the production build). Thread-text assertions are scoped to `main` because the sidebar lists conversation titles too. Note: the Next.js route announcer also has `role=alert`, so e2e targets the error via `data-testid="chat-error"`.
+- `e2e/sidebar.spec.ts` — Playwright e2e for Phase 3 UI: sidebar session list + New Chat reset, dark mode toggle persistence, regenerate (replaces the last assistant reply), markdown code blocks (language badge + one-click copy; grants clipboard permissions via `test.use`), the mobile drawer (open → list → New Chat reset → session switch → Escape close), and session rename/delete (row menu → inline rename input; two-step delete confirm that resets the active thread) plus debounced search (title/content, case-insensitive) and Show-more pagination (page of 20; the Show-more test waits for the list to load before checking, since `count()` doesn't auto-wait).
+- `e2e/a11y.spec.ts` — Playwright e2e accessibility checks (NFR-2): keyboard walk through the sidebar with visible focus rings (asserted against the real `:focus-visible` outline, so it uses genuine Tab presses), `aria-current` on the active session (cleared by New Chat, re-marked on select, survives reload), and the mobile drawer focus trap (Tab/Shift+Tab wrap, Escape returns focus to the trigger).
+- `e2e/visual.spec.ts` — visual regression snapshots (baselines in `e2e/visual.spec.ts-snapshots/`; regenerate with `--update-snapshots` after intentional UI changes). Tests force `prefers-reduced-motion` for stable snapshots. Covers the empty state, a mocked stream thread, and the open mobile drawer (mobile project only — the DB-dependent session list is masked so the baseline stays deterministic).
+- `tests/skill-utils.ts` — shared helper: a minimal frontmatter parser for the simple `key: value` frontmatter skills use (swap for js-yaml if skills ever need richer YAML).
+
+Note: the community-installed skills (via `npx skills add`) — `react-best-practices`, `vercel-react-best-practices`, `zod-schema-validation`, `prisma-database-setup`, `prisma-cli`, `prisma-client-api`, `server-actions`, `nextjs-server-actions`, `prompt-optimizer`, `arize-prompt-optimization`, `compression`, `session-compression`, `accessibility`, `assistant-ui`, `loading-states-and-perceived-performance`, `micro-interaction-spec` — have their bundled rule files treated as vendor content and excluded from Prettier (see `.prettierignore`).
+
+Adding a convention that must hold for all agents or skills means adding a case to the relevant suite — keep `npm run check` green.## Conventions
+
+- Formatting/linting: `npm run lint` = `eslint .` (Next core-web-vitals + TypeScript rules) then `prettier --check .` then `tsc --noEmit` (strict); `npm run format` rewrites with Prettier (config in `.prettierrc.json`, style: no semicolons, single quotes, trailing commas, 100 cols)
+- Vendor `.agents/types/**` are upstream Codebuff definitions — `no-explicit-any` / `no-empty-object-type` are disabled for them in `eslint.config.mjs`
+- TypeScript is pinned to ^6 — typescript-eslint does not support TS 7 yet; keep it in sync if that changes
+- Patterns to follow:
+  - Agent file name must match id: `.agents/<id>.ts`, id = `^[a-z0-9-]+$`, unique across repo
+  - `displayName` and `model` required; import types from `./types/agent-definition`
+  - Prefer `instructionsPrompt` over `stepPrompt`/`systemPrompt`
+  - MCP secrets via `'$VAR_NAME'` env syntax, not hardcoded
+  - `outputSchema` only with `outputMode: 'structured_output'`
+  - App secrets only via server env; LLM credentials never in client code
+- Things to avoid:
+  - Agents that modify files unless the agent's purpose is editing (e.g. the code reviewer is intentionally read-only)
+  - New conventions that must hold for all agents — encode them in `tests/agent-definitions.test.ts` and keep `npm run check` green

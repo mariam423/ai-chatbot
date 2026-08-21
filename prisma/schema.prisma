@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// A registered user. Password is hashed with bcrypt. Optional fields
+/// support social login profiles (name, image from OAuth providers).
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  passwordHash  String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  accounts      Account[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+/// OAuth / Credentials account linked to a user.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+/// Active sessions for session-based auth.
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+/// An anonymous chat session. One thread of conversation history per session.
+/// `title` is an optional user-renamed sidebar label; when null, the sidebar
+/// derives the title from the first message.
+model ChatSession {
+  id        String        @id @default(cuid())
+  title     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+/// One message in a session's thread. The id is client-generated (UUID) so
+/// saving a thread is idempotent — re-saving the same message updates rather
+/// than duplicates. `position` preserves client-side thread order (multiple
+/// messages can share a createdAt within one save transaction, so timestamp
+/// ordering alone is not deterministic). `role` is a string because SQLite
+/// has no enums; it is validated against user/assistant in the server action
+/// layer (zod).
+model ChatMessage {
+  id        String      @id
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  position  Int
+  createdAt DateTime    @default(now())
+
+  @@index([sessionId, position])
+  @@map("chat_messages")
+}
