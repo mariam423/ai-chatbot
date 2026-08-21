@@ -19,6 +19,7 @@ model User {
   createdAt     DateTime  @default(now())
   accounts      Account[]
   sessions      Session[]
+  preference    UserPreference?
   passwordResetTokens PasswordResetToken[]
 
   @@map("users")
@@ -59,12 +60,15 @@ model Session {
 /// `title` is an optional user-renamed sidebar label; when null, the sidebar
 /// derives the title from the first message.
 model ChatSession {
-  id        String        @id @default(cuid())
-  userId    String?
-  title     String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  messages  ChatMessage[]
+  id           String        @id @default(cuid())
+  userId       String?
+  title        String?
+  systemPrompt String?
+  pinned       Boolean       @default(false)
+  archived     Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  messages     ChatMessage[]
 
   @@index([userId])
   @@map("chat_sessions")
@@ -88,6 +92,20 @@ model ChatMessage {
 
   @@index([sessionId, position])
   @@map("chat_messages")
+}
+
+/// Per-user preferences: display name, avatar URL, personal API key,
+/// and custom system prompt presets stored as JSON.
+model UserPreference {
+  id                   String  @id @default(cuid())
+  userId               String  @unique
+  displayName          String?
+  avatarUrl            String?
+  apiKey               String?
+  systemPromptPresets  String  @default("[]")
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }
 
 /// Single-use password reset token. `tokenHash` is SHA-256 of the raw token

@@ -44,7 +44,7 @@ export async function createChatSession(): Promise<
 /** Load a session's messages in chronological order (empty when unknown). */
 export async function getChatSession(
   sessionId: string,
-): Promise<{ ok: true; messages: ChatMessage[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; messages: ChatMessage[]; systemPrompt: string | null } | { ok: false; error: string }> {
   if (!SessionIdSchema.safeParse(sessionId).success) {
     return { ok: false, error: 'Invalid session id.' }
   }
@@ -63,7 +63,7 @@ export async function getChatSession(
       role,
       content,
     })) as ChatMessage[]
-    return { ok: true, messages }
+    return { ok: true, messages, systemPrompt: session?.systemPrompt ?? null }
   } catch {
     return { ok: false, error: 'Could not load session.' }
   }
@@ -125,6 +125,7 @@ const ListSessionsInputSchema = z.object({
   search: z.string().trim().max(100).optional(),
   skip: z.number().int().min(0).default(0),
   take: z.number().int().min(1).max(50).default(SESSION_PAGE_SIZE),
+  archived: z.boolean().default(false),
 })
 
 /**
@@ -135,6 +136,7 @@ export async function listChatSessions(input?: {
   search?: string
   skip?: number
   take?: number
+  archived?: boolean
 }): Promise<
   { ok: true; sessions: ChatSessionSummary[]; hasMore: boolean } | { ok: false; error: string }
 > {
@@ -142,7 +144,7 @@ export async function listChatSessions(input?: {
   if (!parsed.success) {
     return { ok: false, error: 'Invalid list options.' }
   }
-  const { search, skip, take } = parsed.data
+  const { search, skip, take, archived } = parsed.data
   const userId = await getCurrentUserId()
   try {
     const userFilter = userId ? Prisma.sql`AND cs.userId = ${userId}` : Prisma.empty
@@ -158,18 +160,21 @@ export async function listChatSessions(input?: {
         first_content: string | null
         message_count: bigint | number
         updated_at: Date | string
+        pinned: number | boolean
+        archived: number | boolean
       }>
     >`
-      SELECT cs.id, cs.title,
+      SELECT cs.id, cs.title, cs.pinned, cs.archived,
         (SELECT m2.content FROM chat_messages m2 WHERE m2.sessionId = cs.id
            ORDER BY m2.position ASC LIMIT 1) AS first_content,
         (SELECT COUNT(*) FROM chat_messages m3 WHERE m3.sessionId = cs.id) AS message_count,
         cs.updatedAt AS updated_at
       FROM chat_sessions cs
-      WHERE EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = cs.id)
+      WHERE cs.archived = ${archived ? 1 : 0}
+        AND EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = cs.id)
         ${userFilter}
         ${searchFilter}
-      ORDER BY cs.updatedAt DESC
+      ORDER BY cs.pinned DESC, cs.updatedAt DESC
       LIMIT ${take + 1} OFFSET ${skip}
     `
     const hasMore = rows.length > take
@@ -182,6 +187,8 @@ export async function listChatSessions(input?: {
         title: row.title ?? sessionTitle(row.first_content ?? undefined),
         updatedAt: new Date(row.updated_at).toISOString(),
         messageCount: Number(row.message_count),
+        pinned: Boolean(row.pinned),
+        archived: Boolean(row.archived),
       })),
     }
   } catch {
@@ -232,5 +239,144 @@ export async function clearChatSession(
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not clear session.' }
+  }
+}
+
+// ─── Pin / Archive ───
+
+/** Toggle the pinned state of a session. Scoped to the current user. */
+export async function togglePinSession(
+  sessionId: string,
+): Promise<{ ok: true; pinned: boolean } | { ok: false; error: string }> {
+  if (!SessionIdSchema.safeParse(sessionId).success) {
+    return { ok: false, error: 'Invalid session id.' }
+  }
+  const userId = await getCurrentUserId()
+  try {
+    const session = await prisma.chatSession.findFirst({
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
+    })
+    if (!session) return { ok: false, error: 'Session not found.' }
+    const pinned = !session.pinned
+    await prisma.chatSession.update({ where: { id: sessionId }, data: { pinned } })
+    return { ok: true, pinned }
+  } catch {
+    return { ok: false, error: 'Could not toggle pin.' }
+  }
+}
+
+/** Toggle the archived state of a session. Scoped to the current user. */
+export async function toggleArchiveSession(
+  sessionId: string,
+): Promise<{ ok: true; archived: boolean } | { ok: false; error: string }> {
+  if (!SessionIdSchema.safeParse(sessionId).success) {
+    return { ok: false, error: 'Invalid session id.' }
+  }
+  const userId = await getCurrentUserId()
+  try {
+    const session = await prisma.chatSession.findFirst({
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
+    })
+    if (!session) return { ok: false, error: 'Session not found.' }
+    const archived = !session.archived
+    await prisma.chatSession.update({ where: { id: sessionId }, data: { archived } })
+    return { ok: true, archived }
+  } catch {
+    return { ok: false, error: 'Could not toggle archive.' }
+  }
+}
+
+// ─── System Prompt ───
+
+/** Update the system prompt for a session. Scoped to the current user. */
+export async function updateSessionSystemPrompt(input: {
+  sessionId: string
+  systemPrompt: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!SessionIdSchema.safeParse(input.sessionId).success) {
+    return { ok: false, error: 'Invalid session id.' }
+  }
+  const userId = await getCurrentUserId()
+  try {
+    await prisma.chatSession.updateMany({
+      where: { id: input.sessionId, ...(userId ? { userId } : {}) },
+      data: { systemPrompt: input.systemPrompt || null },
+    })
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not update system prompt.' }
+  }
+}
+
+// ─── User Preferences ───
+
+const UserPreferencesSchema = z.object({
+  displayName: z.string().trim().max(50).optional(),
+  avatarUrl: z.string().max(500).optional().or(z.literal('')),
+  apiKey: z.string().max(200).optional().or(z.literal('')),
+  systemPromptPresets: z.string().max(10000).optional(),
+})
+
+/** Load user preferences (or defaults when none exist). */
+export async function getUserPreferences(): Promise<
+  { ok: true; data: { displayName: string; avatarUrl: string; apiKey: string; systemPromptPresets: string } } | { ok: false; error: string }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) {
+    return {
+      ok: true,
+      data: { displayName: '', avatarUrl: '', apiKey: '', systemPromptPresets: '[]' },
+    }
+  }
+  try {
+    const pref = await prisma.userPreference.findUnique({ where: { userId } })
+    return {
+      ok: true,
+      data: {
+        displayName: pref?.displayName ?? '',
+        avatarUrl: pref?.avatarUrl ?? '',
+        apiKey: pref?.apiKey ?? '',
+        systemPromptPresets: pref?.systemPromptPresets ?? '[]',
+      },
+    }
+  } catch {
+    return { ok: false, error: 'Could not load preferences.' }
+  }
+}
+
+/** Upsert user preferences. Scoped to the current user. */
+export async function updateUserPreferences(input: {
+  displayName?: string
+  avatarUrl?: string
+  apiKey?: string
+  systemPromptPresets?: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = UserPreferencesSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: 'Invalid preferences.' }
+  }
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'Not authenticated.' }
+  const data = parsed.data
+  try {
+    await prisma.userPreference.upsert({
+      where: { userId },
+      create: {
+        userId,
+        displayName: data.displayName ?? undefined,
+        avatarUrl: data.avatarUrl ?? undefined,
+        apiKey: data.apiKey ?? undefined,
+        systemPromptPresets: data.systemPromptPresets ?? '[]',
+      },
+      update: {
+        ...(data.displayName !== undefined && { displayName: data.displayName || null }),
+        ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl || null }),
+        ...(data.apiKey !== undefined && { apiKey: data.apiKey || null }),
+        ...(data.systemPromptPresets !== undefined && { systemPromptPresets: data.systemPromptPresets }),
+      },
+    })
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not save preferences.' }
   }
 }

@@ -9,16 +9,18 @@ import {
   Sun01Icon,
   Logout01Icon,
   UserIcon,
+  Search01Icon,
 } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useSession, signOut } from 'next-auth/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { clearChatSession, listChatSessions, renameChatSession } from '@/app/actions'
+import { clearChatSession, listChatSessions, renameChatSession, togglePinSession, toggleArchiveSession } from '@/app/actions'
 import { withThemeTransition } from '@/lib/theme-transition'
 import { clearSessionId, clearThread, getSessionId, setSessionId } from '@/lib/storage'
 import type { ChatSessionSummary } from '@/lib/types'
 import Chat from './chat'
 import Sidebar from './sidebar'
+import CommandPalette from './command-palette'
 
 export default function ChatApp() {
   const { data: session } = useSession()
@@ -29,19 +31,22 @@ export default function ChatApp() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [hasMore, setHasMore] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const reducedMotion = useReducedMotion()
   const loadingMoreRef = useRef(false)
 
   const loadSessions = useCallback(
-    async (opts: { search?: string; skip?: number } = {}) => {
+    async (opts: { search?: string; skip?: number; archived?: boolean } = {}) => {
       const term = opts.search ?? search
       const offset = opts.skip ?? 0
-      const result = await listChatSessions({ search: term, skip: offset })
+      const isArchived = opts.archived ?? showArchived
+      const result = await listChatSessions({ search: term, skip: offset, archived: isArchived })
       if (!result.ok) return
       setSessions((prev) => (offset === 0 ? result.sessions : [...prev, ...result.sessions]))
       setHasMore(result.hasMore)
     },
-    [search],
+    [search, showArchived],
   )
 
   const refreshSessions = useCallback(() => void loadSessions(), [loadSessions])
@@ -64,7 +69,7 @@ export default function ChatApp() {
     }
     const timer = setTimeout(() => void loadSessions({ search, skip: 0 }), 250)
     return () => clearTimeout(timer)
-  }, [search, loadSessions])
+  }, [search, showArchived, loadSessions])
 
   /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
@@ -96,6 +101,17 @@ export default function ChatApp() {
     await refreshSessions()
   }
 
+  async function handleTogglePin(id: string) {
+    await togglePinSession(id)
+    await refreshSessions()
+  }
+
+  async function handleToggleArchive(id: string) {
+    await toggleArchiveSession(id)
+    if (id === sessionId) handleSessionChange(null)
+    await refreshSessions()
+  }
+
   function toggleTheme() {
     const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark'
     withThemeTransition(() => {
@@ -120,6 +136,18 @@ export default function ChatApp() {
     }
   }
 
+  // Global keyboard shortcut: Ctrl+K / Cmd+K opens the command palette.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault()
+        setCommandPaletteOpen((prev) => !prev)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   return (
     <div className="flex h-dvh overflow-hidden" style={{ backgroundColor: 'var(--bg-deep)' }}>
       <Sidebar
@@ -128,6 +156,7 @@ export default function ChatApp() {
         theme={theme}
         search={search}
         hasMore={hasMore}
+        showArchived={showArchived}
         onSearchChange={setSearch}
         onLoadMore={() => void loadMore()}
         open={menuOpen}
@@ -142,7 +171,23 @@ export default function ChatApp() {
         onToggleTheme={toggleTheme}
         onRenameSession={renameSession}
         onDeleteSession={deleteSession}
+        onTogglePin={handleTogglePin}
+        onToggleArchive={handleToggleArchive}
+        onToggleArchivedView={() => setShowArchived((prev) => !prev)}
+        onOpenSettings={() => window.location.href = '/settings'}
         onClose={() => setMenuOpen(false)}
+      />
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        sessions={sessions}
+        activeSessionId={sessionId}
+        theme={theme}
+        onSelectSession={(id) => { handleSessionChange(id); setCommandPaletteOpen(false) }}
+        onNewChat={() => { handleSessionChange(null); setCommandPaletteOpen(false) }}
+        onToggleTheme={toggleTheme}
+        onOpenSettings={() => { window.location.href = '/settings'; setCommandPaletteOpen(false) }}
       />
 
       <main id="main" className="flex min-w-0 flex-1 flex-col vt-chat-shell">
@@ -181,6 +226,22 @@ export default function ChatApp() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            {/* Command palette trigger */}
+            <motion.button
+              type="button"
+              onClick={() => setCommandPaletteOpen(true)}
+              whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+              whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+              aria-label="Open command palette"
+              className="hidden items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] md:flex"
+              style={{ border: '1px solid var(--border-subtle)' }}
+            >
+              <HugeiconsIcon icon={Search01Icon} size={13} strokeWidth={1.5} />
+              <span>Search...</span>
+              <kbd className="rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+                ⌘K
+              </kbd>
+            </motion.button>
             {/* User avatar (desktop) */}
             {session?.user && (
               <div className="hidden items-center gap-2 md:flex">

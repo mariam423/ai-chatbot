@@ -49,7 +49,7 @@ describe('conversation persistence server actions', () => {
 
   it('returns an empty thread for an unknown session', async () => {
     const result = await actions.getChatSession('no-such-session')
-    expect(result).toEqual({ ok: true, messages: [] })
+    expect(result).toEqual({ ok: true, messages: [], systemPrompt: null })
   })
 
   it('rejects an invalid session id', async () => {
@@ -62,7 +62,7 @@ describe('conversation persistence server actions', () => {
     expect(saved).toEqual({ ok: true })
 
     const loaded = await actions.getChatSession('sess-a')
-    expect(loaded).toEqual({ ok: true, messages: thread })
+    expect(loaded).toEqual({ ok: true, messages: thread, systemPrompt: null })
   })
 
   it('is idempotent: re-saving the same thread does not duplicate messages', async () => {
@@ -71,7 +71,7 @@ describe('conversation persistence server actions', () => {
     await actions.saveChatMessages({ sessionId: 'sess-b', messages: thread })
 
     const loaded = await actions.getChatSession('sess-b')
-    expect(loaded).toEqual({ ok: true, messages: thread })
+    expect(loaded).toEqual({ ok: true, messages: thread, systemPrompt: null })
   })
 
   it('updates a message in place when content changes', async () => {
@@ -81,7 +81,7 @@ describe('conversation persistence server actions', () => {
     await actions.saveChatMessages({ sessionId: 'sess-c', messages: edited })
 
     const loaded = await actions.getChatSession('sess-c')
-    expect(loaded).toEqual({ ok: true, messages: edited })
+    expect(loaded).toEqual({ ok: true, messages: edited, systemPrompt: null })
     expect((loaded as { messages: ChatMessage[] }).messages).toHaveLength(3)
   })
 
@@ -107,10 +107,10 @@ describe('conversation persistence server actions', () => {
     const thread = threadFor(sessionId)
 
     await actions.saveChatMessages({ sessionId, messages: thread })
-    expect(await actions.getChatSession(sessionId)).toEqual({ ok: true, messages: thread })
+    expect(await actions.getChatSession(sessionId)).toEqual({ ok: true, messages: thread, systemPrompt: null })
 
     expect(await actions.clearChatSession(sessionId)).toEqual({ ok: true })
-    expect(await actions.getChatSession(sessionId)).toEqual({ ok: true, messages: [] })
+    expect(await actions.getChatSession(sessionId)).toEqual({ ok: true, messages: [], systemPrompt: null })
   })
 
   it('clearChatSession on an unknown session is a no-op success', async () => {

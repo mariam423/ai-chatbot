@@ -8,9 +8,10 @@ export const dynamic = 'force-dynamic'
 
 const SYSTEM_PROMPT = 'You are a helpful assistant.'
 
-/** Request body schema: a non-empty list of chat messages. */
+/** Request body schema: a non-empty list of chat messages, with optional system prompt override. */
 const ChatRequestSchema = z.object({
   messages: z.array(ChatWireMessageSchema).min(1),
+  systemPrompt: z.string().max(2000).optional(),
 })
 
 export async function POST(request: Request) {
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
     )
   }
   const messages: ChatWireMessage[] = parsed.data.messages
+  const customSystemPrompt = parsed.data.systemPrompt?.trim() || SYSTEM_PROMPT
 
   // Compress history before sending upstream (FR-3 optimization): truncate to
   // the last N messages and drop the oldest until within the token budget.
@@ -91,7 +93,7 @@ export async function POST(request: Request) {
         model,
         stream: true,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT } satisfies ChatWireMessage,
+          { role: 'system', content: customSystemPrompt } satisfies ChatWireMessage,
           ...history,
         ],
       }),

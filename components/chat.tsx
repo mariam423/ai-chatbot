@@ -31,6 +31,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [retryMessage, setRetryMessage] = useState<string | null>(null)
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -48,8 +49,9 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
       let initial = loadThread()
       if (sessionId) {
         const result = await getChatSession(sessionId)
-        if (!cancelled && gen === threadGenRef.current && result.ok && result.messages.length > 0) {
-          initial = result.messages
+        if (!cancelled && gen === threadGenRef.current && result.ok) {
+          if (result.messages.length > 0) initial = result.messages
+          setSystemPrompt(result.systemPrompt ?? null)
         }
       }
       if (!cancelled && gen === threadGenRef.current) {
@@ -102,6 +104,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: history.map<ChatWireMessage>(({ role, content: c }) => ({ role, content: c })),
+          ...(systemPrompt ? { systemPrompt } : {}),
         }),
         signal: controller.signal,
       })

@@ -24,13 +24,6 @@ export const ChatWireMessageSchema = z.object({
 
 export type ChatWireMessage = z.infer<typeof ChatWireMessageSchema>
 
-/** A session listed in the sidebar (title derived from its first message). */
-export interface ChatSessionSummary {
-  id: string
-  title: string
-  updatedAt: string
-  messageCount: number
-}
 
 /**
  * One SSE event from an OpenAI-compatible chat completions stream: a JSON
@@ -52,4 +45,82 @@ export interface SSEExtract {
 export interface StreamCallbacks {
   onDelta: (text: string) => void
   signal?: AbortSignal
+}
+
+// ─── System Prompt Presets ───
+
+/** A user-defined or built-in system prompt preset. */
+export interface SystemPromptPreset {
+  id: string
+  name: string
+  prompt: string
+}
+
+/** Built-in presets shipped with the app. */
+export const BUILTIN_PRESETS: SystemPromptPreset[] = [
+  {
+    id: 'default',
+    name: 'General Assistant',
+    prompt: 'You are a helpful assistant.',
+  },
+  {
+    id: 'software-engineer',
+    name: 'Software Engineer Expert',
+    prompt:
+      'You are a senior software engineer. Provide precise, well-structured answers with code examples when applicable. Follow best practices and suggest improvements.',
+  },
+  {
+    id: 'academic-reviewer',
+    name: 'Academic Reviewer',
+    prompt:
+      'You are an academic reviewer. Provide thorough, citation-aware analysis. Be critical but constructive, and clearly separate facts from interpretations.',
+  },
+  {
+    id: 'ui-ux-designer',
+    name: 'UI/UX Designer',
+    prompt:
+      'You are an experienced UI/UX designer. Provide actionable design feedback, suggest improvements for usability and accessibility, and reference modern design principles.',
+  },
+  {
+    id: 'creative-writer',
+    name: 'Creative Writer',
+    prompt:
+      'You are a creative writing assistant. Help with storytelling, character development, dialogue, and prose. Be imaginative and offer alternatives.',
+  },
+]
+
+// ─── Chat Session (extended) ───
+
+/** Session summary extended with pin/archive metadata. */
+export interface ChatSessionSummary {
+  id: string
+  title: string
+  updatedAt: string
+  messageCount: number
+  pinned: boolean
+  archived: boolean
+  systemPrompt?: string | null
+}
+
+// ─── User Preferences ───
+
+/** User preferences stored in the DB. */
+export interface UserPreferences {
+  displayName: string
+  avatarUrl: string
+  apiKey: string
+  systemPromptPresets: SystemPromptPreset[]
+}
+
+// ─── Command Palette ───
+
+/** Command palette action item. */
+export interface CommandAction {
+  id: string
+  label: string
+  description?: string
+  icon?: string
+  shortcut?: string
+  action: () => void
+  section: string
 }
