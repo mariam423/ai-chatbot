@@ -1,13 +1,13 @@
 'use client'
 
 import { HugeiconsIcon } from '@hugeicons/react'
-import { RefreshIcon, SendIcon, TrashIcon } from '@hugeicons/core-free-icons'
+import { AiSparklesIcon, RefreshIcon, SendIcon, TrashIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useEffect, useRef, useState } from 'react'
-import { clearChatSession, getChatSession, saveChatMessages } from '@/app/actions'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { clearChatSession, getChatSession, getUserPreferences, saveChatMessages, updateSessionSystemPrompt } from '@/app/actions'
 import { readSSEStream } from '@/lib/sse'
 import { clearThread, loadThread, saveThread } from '@/lib/storage'
-import type { ChatMessage, ChatWireMessage } from '@/lib/types'
+import { BUILTIN_PRESETS, type ChatMessage, type ChatWireMessage, type SystemPromptPreset } from '@/lib/types'
 import { MAX_INPUT_LENGTH, isValidMessageInput } from '@/lib/validation'
 import MessageBubble from './message-bubble'
 import StreamingSkeleton from './streaming-skeleton'
@@ -32,6 +32,9 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   const [error, setError] = useState<string | null>(null)
   const [retryMessage, setRetryMessage] = useState<string | null>(null)
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null)
+  const [customPresets, setCustomPresets] = useState<SystemPromptPreset[]>([])
+  const [presetMenuOpen, setPresetMenuOpen] = useState(false)
+  const presetMenuRef = useRef<HTMLDivElement>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -73,6 +76,55 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
     if (!restored || isStreaming) return
     saveThread(messages)
   }, [messages, isStreaming, restored])
+
+  // Load custom presets from user preferences on mount.
+  useEffect(() => {
+    let cancelled = false
+    void getUserPreferences().then((result) => {
+      if (cancelled || !result.ok) return
+      try {
+        setCustomPresets(JSON.parse(result.data.systemPromptPresets) as SystemPromptPreset[])
+      } catch {
+        /* ignore */
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Close preset menu on outside click.
+  useEffect(() => {
+    if (!presetMenuOpen) return
+    function handleClick(e: MouseEvent) {
+      if (presetMenuRef.current && !presetMenuRef.current.contains(e.target as Node)) {
+        setPresetMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [presetMenuOpen])
+
+  const allPresets = [...BUILTIN_PRESETS, ...customPresets]
+
+  const activePresetName = systemPrompt
+    ? allPresets.find((p) => p.prompt === systemPrompt)?.name ?? 'Custom'
+    : 'Default'
+
+  const selectPreset = useCallback(
+    async (preset: SystemPromptPreset | null) => {
+      const newPrompt = preset?.prompt ?? null
+      setSystemPrompt(newPrompt)
+      setPresetMenuOpen(false)
+      if (sessionId) {
+        await updateSessionSystemPrompt({
+          sessionId,
+          systemPrompt: newPrompt ?? '',
+        })
+      }
+    },
+    [sessionId],
+  )
 
   async function send(text: string, base?: ChatMessage[]) {
     const content = text.trim()
@@ -345,6 +397,113 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
           void send(input)
         }}
       >
+        {/* System prompt preset selector */}
+        <div className="relative shrink-0" ref={presetMenuRef}>
+          <motion.button
+            type="button"
+            onClick={() => setPresetMenuOpen((prev) => !prev)}
+            aria-label="Select system prompt"
+            aria-expanded={presetMenuOpen}
+            aria-haspopup="listbox"
+            whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+            whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+            className="flex items-center gap-1.5 rounded-xl px-2 py-2 text-xs font-medium transition-colors"
+            style={{
+              color: systemPrompt ? 'var(--text-secondary)' : 'var(--text-muted)',
+              background: presetMenuOpen ? 'var(--bg-input)' : 'transparent',
+              border: presetMenuOpen ? '1px solid var(--border-subtle)' : '1px solid transparent',
+            }}
+          >
+            <HugeiconsIcon icon={AiSparklesIcon} size={16} strokeWidth={1.5} className={systemPrompt ? 'text-cyan-500' : ''} />
+            <span className="hidden max-w-[100px] truncate sm:inline">{activePresetName}</span>
+          </motion.button>
+
+          <AnimatePresence>
+            {presetMenuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 4, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 4, scale: 0.97 }}
+                transition={{ duration: 0.12 }}
+                role="listbox"
+                aria-label="System prompt presets"
+                className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-xl py-1"
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
+                }}
+              >
+                <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
+                  Presets
+                </p>
+                {/* Default option */}
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={!systemPrompt}
+                  onClick={() => void selectPreset(null)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+                  style={{
+                    background: !systemPrompt ? 'var(--accent-soft)' : 'transparent',
+                    color: !systemPrompt ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  }}
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
+                  <span className="truncate font-medium">Default</span>
+                  {!systemPrompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
+                </button>
+                {/* Built-in presets */}
+                {BUILTIN_PRESETS.filter((p) => p.id !== 'default').map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    role="option"
+                    aria-selected={systemPrompt === preset.prompt}
+                    onClick={() => void selectPreset(preset)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+                    style={{
+                      background: systemPrompt === preset.prompt ? 'var(--accent-soft)' : 'transparent',
+                      color: systemPrompt === preset.prompt ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    <span className="size-1.5 shrink-0 rounded-full bg-cyan-500" />
+                    <span className="truncate font-medium">{preset.name}</span>
+                    {systemPrompt === preset.prompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
+                  </button>
+                ))}
+                {/* Custom presets */}
+                {customPresets.length > 0 && (
+                  <>
+                    <div className="mx-3 my-1 border-t" style={{ borderColor: 'var(--border-subtle)' }} />
+                    <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
+                      Custom
+                    </p>
+                    {customPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        role="option"
+                        aria-selected={systemPrompt === preset.prompt}
+                        onClick={() => void selectPreset(preset)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+                        style={{
+                          background: systemPrompt === preset.prompt ? 'var(--accent-soft)' : 'transparent',
+                          color: systemPrompt === preset.prompt ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        }}
+                      >
+                        <span className="size-1.5 shrink-0 rounded-full bg-indigo-500" />
+                        <span className="truncate font-medium">{preset.name}</span>
+                        {systemPrompt === preset.prompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
         <motion.button
           type="button"
           onClick={clearConversation}
