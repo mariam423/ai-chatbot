@@ -22,11 +22,18 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   }
 
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-zinc-800/80 bg-zinc-900/90 shadow-[0_4px_16px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.04)]">
-      <div className="flex items-center justify-between border-b border-zinc-800/80 bg-zinc-800/40 px-3 py-2">
+    <div className="code-block my-3 overflow-hidden rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.1)]">
+      <div className="code-block-header flex items-center justify-between px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <HugeiconsIcon icon={CodeIcon} size={12} strokeWidth={1.5} className="text-zinc-500" />
-          <span className="font-mono text-[11px] font-medium text-zinc-400">{language}</span>
+          <HugeiconsIcon
+            icon={CodeIcon}
+            size={12}
+            strokeWidth={1.5}
+            className="text-[var(--text-muted)]"
+          />
+          <span className="font-mono text-[11px] font-medium text-[var(--text-muted)]">
+            {language}
+          </span>
         </div>
         <motion.button
           type="button"
@@ -34,7 +41,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           aria-label={copied ? 'Code copied' : 'Copy code'}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-700/50 hover:text-zinc-200"
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-white/10 hover:text-[var(--text-primary)]"
         >
           <AnimatePresence mode="wait">
             {copied ? (
@@ -70,7 +77,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           </AnimatePresence>
         </motion.button>
       </div>
-      <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed">
+      <pre className="code-block overflow-x-auto p-3 text-[13px] leading-relaxed">
         <code className="hljs">{code}</code>
       </pre>
     </div>

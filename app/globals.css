@@ -1,16 +1,138 @@
 @import 'tailwindcss';
 @import 'highlight.js/styles/github-dark-dimmed.css';
 
-/* Class-based dark mode: toggled by the theme script in layout.tsx. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ─── Theme Variables ─── */
 :root {
-  --glass-bg: rgba(255, 255, 255, 0.06);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-hover: rgba(255, 255, 255, 0.14);
-  --glass-glow: rgba(120, 119, 198, 0.04);
+  /* Surfaces */
+  --bg-deep: #f8f9fc;
+  --bg-card: #ffffff;
+  --bg-surface: #f1f3f9;
+  --bg-elevated: #ebedf5;
+  --bg-input: rgba(0, 0, 0, 0.03);
+  --bg-input-hover: rgba(0, 0, 0, 0.05);
+
+  /* Text */
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #a1a1aa;
+  --text-muted: #d4d4d8;
+
+  /* Borders */
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.15);
+
+  /* Accent */
+  --accent: #7c3aed;
+  --accent-soft: rgba(124, 58, 237, 0.08);
+  --accent-medium: rgba(124, 58, 237, 0.15);
+  --accent-glow: rgba(124, 58, 237, 0.2);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-border-hover: rgba(0, 0, 0, 0.1);
+  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+
+  /* Sidebar */
+  --sidebar-bg: rgba(255, 255, 255, 0.85);
+  --sidebar-border: rgba(0, 0, 0, 0.06);
+
+  /* Markdown */
+  --md-text: #3f3f46;
+  --md-heading: #18181b;
+  --md-link: #7c3aed;
+  --md-link-hover: #6d28d9;
+  --md-code-bg: rgba(124, 58, 237, 0.06);
+  --md-code-border: rgba(124, 58, 237, 0.12);
+  --md-blockquote: #71717a;
+  --md-table-header: rgba(0, 0, 0, 0.04);
+  --md-table-border: rgba(0, 0, 0, 0.08);
+
+  /* Code blocks */
+  --code-bg: #1e1e2e;
+  --code-header-bg: #181825;
+  --code-border: #313244;
+  --code-text: #cdd6f4;
+
+  /* Skeleton */
+  --skeleton-bg: rgba(0, 0, 0, 0.06);
+  --skeleton-shimmer: rgba(124, 58, 237, 0.04);
+
+  /* Status */
+  --error-bg: rgba(239, 68, 68, 0.06);
+  --error-border: rgba(239, 68, 68, 0.15);
+  --error-text: #dc2626;
+
+  /* Overlay */
+  --overlay: rgba(0, 0, 0, 0.4);
+
+  /* Focus ring */
+  --focus-ring: rgba(124, 58, 237, 0.4);
+  --focus-ring-soft: rgba(124, 58, 237, 0.12);
 }
 
+.dark {
+  --bg-deep: #0c0e14;
+  --bg-card: #12151e;
+  --bg-surface: #181c28;
+  --bg-elevated: #1e2232;
+  --bg-input: rgba(255, 255, 255, 0.04);
+  --bg-input-hover: rgba(255, 255, 255, 0.07);
+
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --text-muted: #52525b;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --accent: #a78bfa;
+  --accent-soft: rgba(139, 92, 246, 0.08);
+  --accent-medium: rgba(139, 92, 246, 0.15);
+  --accent-glow: rgba(139, 92, 246, 0.25);
+
+  --glass-bg: rgba(18, 21, 30, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-border-hover: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+
+  --sidebar-bg: rgba(12, 14, 20, 0.85);
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  --md-text: #d4d4d8;
+  --md-heading: #fafafa;
+  --md-link: #a78bfa;
+  --md-link-hover: #c4b5fd;
+  --md-code-bg: rgba(139, 92, 246, 0.1);
+  --md-code-border: rgba(139, 92, 246, 0.15);
+  --md-blockquote: #71717a;
+  --md-table-header: rgba(255, 255, 255, 0.04);
+  --md-table-border: rgba(255, 255, 255, 0.06);
+
+  --code-bg: #1e1e2e;
+  --code-header-bg: #181825;
+  --code-border: #313244;
+  --code-text: #cdd6f4;
+
+  --skeleton-bg: rgba(30, 32, 44, 0.7);
+  --skeleton-shimmer: rgba(139, 92, 246, 0.06);
+
+  --error-bg: rgba(239, 68, 68, 0.08);
+  --error-border: rgba(239, 68, 68, 0.2);
+  --error-text: #fca5a5;
+
+  --overlay: rgba(0, 0, 0, 0.6);
+
+  --focus-ring: rgba(167, 139, 250, 0.45);
+  --focus-ring-soft: rgba(167, 139, 250, 0.12);
+}
+
+/* ─── Body ─── */
 body {
   font-family:
     'Inter',
@@ -22,31 +144,81 @@ body {
     'Helvetica Neue',
     Arial,
     sans-serif;
-  @apply bg-white text-neutral-900 antialiased;
+  @apply antialiased;
+  background-color: var(--bg-deep);
+  color: var(--text-primary);
   font-feature-settings: 'ss01', 'ss02', 'cv01';
 }
 
-.dark body,
-body.dark {
-  @apply bg-zinc-950 text-zinc-100;
-  background-color: #09090b;
+/* ─── Autofill ─── */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-card) inset !important;
+  -webkit-text-fill-color: var(--text-primary) !important;
+  caret-color: var(--text-primary) !important;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
-/* Keyboard-only focus indicator (WCAG 2.4.7, 1.4.11). */
+/* ─── Focus indicators ─── */
 :focus {
   outline: none;
 }
 
 :focus-visible {
-  outline: 2px solid rgba(120, 119, 198, 0.5);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
-.dark :focus-visible {
-  outline-color: rgba(161, 160, 212, 0.5);
+/* ─── Purple glow focus ring utility ─── */
+.focus-glow {
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.focus-glow:focus {
+  border-color: var(--accent) !important;
+  box-shadow:
+    0 0 0 3px var(--focus-ring-soft),
+    0 0 20px var(--accent-glow);
 }
 
-/* Skip link (WCAG 2.4.1) — visible on focus only. */
+/* ─── Floating label ─── */
+.floating-label-group {
+  position: relative;
+}
+.floating-label-group input,
+.floating-label-group textarea {
+  padding-top: 1.625rem;
+  padding-bottom: 0.625rem;
+}
+.floating-label-group label {
+  position: absolute;
+  top: 50%;
+  left: 0.75rem;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: left center;
+}
+.floating-label-group input:focus ~ label,
+.floating-label-group input:not(:placeholder-shown) ~ label,
+.floating-label-group textarea:focus ~ label,
+.floating-label-group textarea:not(:placeholder-shown) ~ label {
+  top: 0.625rem;
+  transform: translateY(0) scale(0.75);
+  color: var(--accent);
+}
+
+/* ─── Skip link ─── */
 .skip-link {
   position: absolute;
   left: 0.75rem;
@@ -54,18 +226,43 @@ body.dark {
   z-index: 50;
   transform: translateY(-200%);
   transition: transform 150ms ease-in-out;
-  @apply rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white;
+  @apply rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white;
 }
-
-.dark .skip-link {
-  @apply bg-zinc-100 text-zinc-900;
-}
-
 .skip-link:focus {
   transform: translateY(0);
 }
 
-/* Streaming skeleton shimmer (premium layered effect). */
+/* ─── Ambient glow pulse ─── */
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(1.08);
+  }
+}
+@keyframes glowPulseSlow {
+  0%,
+  100% {
+    opacity: 0.08;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.18;
+    transform: scale(1.12);
+  }
+}
+.ambient-glow {
+  animation: glowPulse 6s ease-in-out infinite;
+}
+.ambient-glow-slow {
+  animation: glowPulseSlow 8s ease-in-out infinite;
+}
+
+/* ─── Streaming skeleton shimmer ─── */
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
@@ -75,170 +272,266 @@ body.dark {
   }
 }
 
-@keyframes shimmerPulse {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
 .skeleton-bar {
   border-radius: 0.5rem;
-  @apply bg-zinc-200/60;
+  background-color: var(--skeleton-bg);
   background-image: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.5) 50%,
+    var(--skeleton-shimmer) 50%,
     rgba(255, 255, 255, 0) 100%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.8s ease-in-out infinite;
+  animation: shimmer 2s ease-in-out infinite;
 }
 
-.dark .skeleton-bar {
-  @apply bg-zinc-800/50;
-  background-image: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.06) 50%,
-    rgba(255, 255, 255, 0) 100%
-  );
+/* ─── Streaming pulse bar ─── */
+@keyframes streamingPulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    width: 30%;
+  }
+  50% {
+    opacity: 1;
+    width: 70%;
+  }
+}
+.streaming-pulse-bar {
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: streamingPulse 1.5s ease-in-out infinite;
 }
 
-/* Glassmorphism utility classes. */
+/* ─── Glassmorphism panel ─── */
 .glass-panel {
-  @apply bg-white/80 backdrop-blur-xl;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.03),
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 4px 12px rgba(0, 0, 0, 0.03);
-}
-
-.dark .glass-panel {
-  @apply bg-zinc-900/80;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--glass-border);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 1px 2px rgba(0, 0, 0, 0.2),
-    0 8px 24px rgba(0, 0, 0, 0.15),
+    var(--glass-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.glass-surface {
-  @apply bg-white/60 backdrop-blur-md;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-}
-
-.dark .glass-surface {
-  @apply bg-zinc-900/60;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-
-/* Markdown rendering (assistant messages — see components/markdown.tsx).
-   Raw HTML is never rendered (react-markdown without rehype-raw), so the
-   plain-text security property of NFR-3 holds. */
+/* ─── Markdown ─── */
 .markdown {
   @apply text-sm leading-relaxed;
-  color: #d4d4d8;
+  color: var(--md-text);
 }
-
-.dark .markdown {
-  color: #d4d4d8;
-}
-
 .markdown > :first-child {
   margin-top: 0;
 }
-
 .markdown > :last-child {
   margin-bottom: 0;
 }
-
 .markdown p {
   @apply my-2;
 }
-
 .markdown h1,
 .markdown h2,
 .markdown h3 {
   @apply mt-4 mb-2 font-semibold;
-  color: #fafafa;
+  color: var(--md-heading);
 }
-
 .markdown h1 {
   @apply text-base;
 }
-
 .markdown h2 {
   @apply text-[15px];
 }
-
 .markdown h3 {
   @apply text-sm;
 }
-
 .markdown ul {
   @apply my-2 list-disc space-y-1 pl-5;
 }
-
 .markdown ol {
   @apply my-2 list-decimal space-y-1 pl-5;
 }
-
 .markdown li {
-  color: #a1a1aa;
+  color: var(--text-secondary);
 }
-
-.dark .markdown li {
-  color: #a1a1aa;
-}
-
 .markdown a {
   @apply font-medium underline underline-offset-2;
-  color: #818cf8;
+  color: var(--md-link);
 }
-
 .markdown a:hover {
-  color: #a5b4fc;
+  color: var(--md-link-hover);
 }
-
 .markdown blockquote {
   @apply my-2 border-l-2 pl-3;
-  border-color: rgba(161, 160, 212, 0.3);
-  color: #71717a;
+  border-color: var(--accent-medium);
+  color: var(--md-blockquote);
 }
-
 .markdown table {
   @apply my-3 block max-w-full overflow-x-auto border-collapse text-sm;
 }
-
 .markdown th,
 .markdown td {
   @apply border px-2 py-1 text-left;
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--md-table-border);
 }
-
 .markdown th {
-  @apply bg-zinc-800/50 font-semibold;
+  background: var(--md-table-header);
+  @apply font-semibold;
 }
-
 .markdown code:not(pre code) {
   @apply rounded px-1.5 py-0.5 font-mono text-[0.85em];
-  background: rgba(161, 160, 212, 0.1);
-  color: #c4b5fd;
-  border: 1px solid rgba(161, 160, 212, 0.15);
+  background: var(--md-code-bg);
+  color: var(--accent);
+  border: 1px solid var(--md-code-border);
 }
-
 .markdown pre {
   @apply my-2;
 }
 
-/* Respect prefers-reduced-motion (WCAG 2.3.3). */
+/* ─── Code blocks ─── */
+.code-block {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+}
+.code-block-header {
+  background: var(--code-header-bg);
+  border-bottom: 1px solid var(--code-border);
+}
+.code-block-header span {
+  color: var(--text-tertiary);
+}
+.code-block pre {
+  color: var(--code-text);
+}
+
+/* ─── View Transitions ─── */
+.vt-login-card {
+  view-transition-name: login-card;
+}
+.vt-chat-shell {
+  view-transition-name: chat-shell;
+}
+.vt-neon-logo {
+  view-transition-name: neon-logo;
+}
+.vt-brand-icon {
+  view-transition-name: brand-icon;
+}
+.vt-ambient-bg {
+  view-transition-name: ambient-bg;
+}
+.vt-chat-bg {
+  view-transition-name: chat-bg;
+}
+
+::view-transition-old(root) {
+  animation: vt-crossfade-out 0.3s ease-in forwards;
+}
+::view-transition-new(root) {
+  animation: vt-crossfade-in 0.3s ease-out;
+}
+::view-transition-old(neon-logo),
+::view-transition-old(brand-icon) {
+  animation: vt-morph-out 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+::view-transition-new(neon-logo),
+::view-transition-new(brand-icon) {
+  animation: vt-morph-in 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+::view-transition-old(login-card) {
+  animation: vt-card-out 0.3s ease-in forwards;
+}
+::view-transition-new(login-card) {
+  animation: vt-card-in 0.3s ease-out;
+}
+::view-transition-old(chat-shell) {
+  animation: vt-card-out 0.3s ease-in forwards;
+}
+::view-transition-new(chat-shell) {
+  animation: vt-card-in 0.3s ease-out;
+}
+
+@keyframes vt-crossfade-out {
+  from {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  to {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+@keyframes vt-crossfade-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+@keyframes vt-morph-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.85);
+    filter: blur(6px);
+  }
+}
+@keyframes vt-morph-in {
+  from {
+    opacity: 0;
+    transform: scale(1.15);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+}
+@keyframes vt-card-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes vt-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(1.02);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-old(neon-logo),
+  ::view-transition-new(neon-logo),
+  ::view-transition-old(brand-icon),
+  ::view-transition-new(brand-icon),
+  ::view-transition-old(login-card),
+  ::view-transition-new(login-card),
+  ::view-transition-old(chat-shell),
+  ::view-transition-new(chat-shell) {
+    animation: none !important;
+  }
+}
+
+/* ─── Reduced motion ─── */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

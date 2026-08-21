@@ -14,12 +14,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
+import { useViewTransitionRouter } from '@/hooks/use-view-transition-router'
 import { registerUser } from '@/app/actions/auth'
 
 type Mode = 'login' | 'signup'
 
 export default function LoginPage() {
   const router = useRouter()
+  const { navigate } = useViewTransitionRouter()
   const [mode, setMode] = useState<Mode>('login')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -68,7 +70,7 @@ export default function LoginPage() {
         )
         if (mode === 'signup') setMode('login')
       } else {
-        router.push('/')
+        navigate('/')
         router.refresh()
       }
     } catch {
@@ -79,47 +81,114 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-zinc-950 px-4">
-      {/* Ambient background gradients */}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-40 -top-40 size-[500px] rounded-full bg-violet-600/20 blur-[120px]" />
-        <div className="absolute -bottom-40 -right-40 size-[500px] rounded-full bg-indigo-600/15 blur-[120px]" />
-        <div className="absolute left-1/2 top-1/2 size-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-500/10 blur-[100px]" />
+    <div
+      className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4"
+      style={{ backgroundColor: 'var(--bg-deep)' }}
+    >
+      {/* ─── Ambient background glows ─── */}
+      <div className="pointer-events-none absolute inset-0 vt-ambient-bg">
+        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-violet-600/20 blur-[140px]" />
+        <div className="ambient-glow-slow absolute -bottom-32 -right-32 size-[480px] rounded-full bg-indigo-500/15 blur-[130px]" />
+        <div
+          className="ambient-glow absolute left-1/2 top-1/2 size-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-500/10 blur-[110px]"
+          style={{ animationDelay: '2s' }}
+        />
+        {/* Subtle grid pattern */}
+        <div
+          className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(139,92,246,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(139,92,246,0.3) 1px, transparent 1px)',
+            backgroundSize: '64px 64px',
+          }}
+        />
       </div>
 
-      {/* Glass card */}
+      {/* ─── Glass card ─── */}
       <motion.div
-        initial={{ opacity: 0, y: 20, scale: 0.98 }}
+        initial={{ opacity: 0, y: 30, scale: 0.96 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="relative w-full max-w-[400px] rounded-2xl border border-white/[0.08] bg-white/[0.04] p-8 shadow-[0_0_60px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-2xl"
+        transition={{ type: 'spring', stiffness: 260, damping: 24, mass: 0.8 }}
+        className="relative w-full max-w-[420px] rounded-3xl p-8 vt-login-card"
+        style={{
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(40px) saturate(1.5)',
+          WebkitBackdropFilter: 'blur(40px) saturate(1.5)',
+          border: '1px solid var(--glass-border)',
+          boxShadow:
+            '0 0 0 1px rgba(255,255,255,0.03), 0 8px 40px rgba(0,0,0,0.1), 0 0 80px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.06)',
+        }}
       >
-        {/* Logo */}
+        {/* ─── Neon logo ─── */}
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-[0_4px_16px_rgba(124,58,237,0.4)]">
-            <HugeiconsIcon
-              icon={AiSparklesIcon}
-              size={22}
-              strokeWidth={1.5}
-              className="text-white"
-            />
-          </div>
-          <h1 className="text-xl font-semibold tracking-tight text-white">
+          <motion.div
+            initial={{ scale: 0, rotate: -180 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.15 }}
+            className="mb-5 relative vt-neon-logo"
+          >
+            {/* Glow behind logo */}
+            <div className="absolute inset-0 -m-3 rounded-2xl bg-violet-500/25 blur-xl" />
+            <div
+              className="relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 via-purple-500 to-indigo-600"
+              style={{
+                boxShadow:
+                  '0 0 32px rgba(139,92,246,0.4), 0 4px 16px rgba(139,92,246,0.3), inset 0 1px 0 rgba(255,255,255,0.15)',
+              }}
+            >
+              <HugeiconsIcon
+                icon={AiSparklesIcon}
+                size={26}
+                strokeWidth={1.5}
+                className="text-white"
+              />
+            </div>
+          </motion.div>
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 0.4 }}
+            className="text-xl font-bold tracking-tight text-[var(--text-primary)]"
+          >
             {mode === 'login' ? 'Welcome back' : 'Create your account'}
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            className="mt-1.5 text-sm text-[var(--text-secondary)]"
+          >
             {mode === 'login'
               ? 'Sign in to continue to Chatbot'
               : 'Get started with your free account'}
-          </p>
+          </motion.p>
         </div>
 
-        {/* Social login buttons */}
-        <div className="mb-6 space-y-3">
+        {/* ─── SSO buttons ─── */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="mb-6 space-y-3"
+        >
           <button
             type="button"
             onClick={() => signIn('github', { callbackUrl: '/' })}
-            className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-300 transition-all hover:border-white/[0.14] hover:bg-white/[0.08]"
+            className="group flex w-full items-center justify-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition-all duration-200 hover:text-[var(--text-primary)]"
+            style={{
+              background: 'var(--bg-input)',
+              border: '1px solid var(--border-medium)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-input-hover)'
+              e.currentTarget.style.borderColor = 'var(--border-strong)'
+              e.currentTarget.style.boxShadow = '0 0 20px var(--accent-glow)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--bg-input)'
+              e.currentTarget.style.borderColor = 'var(--border-medium)'
+              e.currentTarget.style.boxShadow = 'none'
+            }}
           >
             <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
@@ -129,7 +198,21 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={() => signIn('google', { callbackUrl: '/' })}
-            className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-300 transition-all hover:border-white/[0.14] hover:bg-white/[0.08]"
+            className="flex w-full items-center justify-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition-all duration-200 hover:text-[var(--text-primary)]"
+            style={{
+              background: 'var(--bg-input)',
+              border: '1px solid var(--border-medium)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-input-hover)'
+              e.currentTarget.style.borderColor = 'var(--border-strong)'
+              e.currentTarget.style.boxShadow = '0 0 20px var(--accent-glow)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--bg-input)'
+              e.currentTarget.style.borderColor = 'var(--border-medium)'
+              e.currentTarget.style.boxShadow = 'none'
+            }}
           >
             <svg className="size-5" viewBox="0 0 24 24">
               <path
@@ -151,33 +234,43 @@ export default function LoginPage() {
             </svg>
             Continue with Google
           </button>
-        </div>
+        </motion.div>
 
-        {/* Divider */}
+        {/* ─── Divider ─── */}
         <div className="relative mb-6">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-white/[0.08]" />
+            <div className="w-full" style={{ borderTop: '1px solid var(--border-medium)' }} />
           </div>
           <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-transparent px-3 text-zinc-500">or continue with email</span>
+            <span
+              className="px-3 text-[var(--text-tertiary)]"
+              style={{ background: 'var(--glass-bg)' }}
+            >
+              or continue with email
+            </span>
           </div>
         </div>
 
-        {/* Error message */}
+        {/* ─── Error ─── */}
         <AnimatePresence>
           {error && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mb-4 overflow-hidden rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+              className="mb-4 overflow-hidden rounded-xl px-3 py-2.5 text-sm"
+              style={{
+                background: 'var(--error-bg)',
+                border: '1px solid var(--error-border)',
+                color: 'var(--error-text)',
+              }}
             >
               {error}
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Form */}
+        {/* ─── Form ─── */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <AnimatePresence mode="wait">
             {mode === 'signup' && (
@@ -188,118 +281,133 @@ export default function LoginPage() {
                 exit={{ opacity: 0, height: 0 }}
                 className="overflow-hidden"
               >
-                <label htmlFor="name" className="sr-only">
-                  Name
-                </label>
-                <div className="relative">
-                  <HugeiconsIcon
-                    icon={UserIcon}
-                    size={16}
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
-                  />
+                <div className="floating-label-group">
                   <input
                     id="name"
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Your name"
-                    className={`w-full rounded-xl border bg-white/[0.04] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-zinc-500 outline-none transition-colors focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 ${
-                      fieldErrors.name ? 'border-red-500/50' : 'border-white/[0.08]'
+                    placeholder=" "
+                    autoComplete="name"
+                    className={`focus-glow w-full rounded-xl py-3 pl-10 pr-3 text-sm text-[var(--text-primary)] outline-none ${
+                      fieldErrors.name ? 'border-red-500/50' : ''
                     }`}
+                    style={{
+                      background: 'var(--bg-input)',
+                      border: `1px solid ${fieldErrors.name ? 'rgba(239,68,68,0.5)' : 'var(--border-medium)'}`,
+                    }}
                   />
+                  <label htmlFor="name">
+                    <HugeiconsIcon
+                      icon={UserIcon}
+                      size={14}
+                      className="mr-1.5 inline text-[var(--text-muted)]"
+                    />
+                    Your name
+                  </label>
                 </div>
                 {fieldErrors.name && (
-                  <p className="mt-1 text-xs text-red-400">{fieldErrors.name}</p>
+                  <p className="mt-1 text-xs text-red-500">{fieldErrors.name}</p>
                 )}
               </motion.div>
             )}
           </AnimatePresence>
 
-          <div>
-            <label htmlFor="email" className="sr-only">
-              Email
-            </label>
-            <div className="relative">
+          <div className="floating-label-group">
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder=" "
+              required
+              autoComplete="email"
+              className={`focus-glow w-full rounded-xl py-3 pl-10 pr-3 text-sm text-[var(--text-primary)] outline-none ${
+                fieldErrors.email ? 'border-red-500/50' : ''
+              }`}
+              style={{
+                background: 'var(--bg-input)',
+                border: `1px solid ${fieldErrors.email ? 'rgba(239,68,68,0.5)' : 'var(--border-medium)'}`,
+              }}
+            />
+            <label htmlFor="email">
               <HugeiconsIcon
                 icon={Mail01Icon}
-                size={16}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                size={14}
+                className="mr-1.5 inline text-[var(--text-muted)]"
               />
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                className={`w-full rounded-xl border bg-white/[0.04] py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-zinc-500 outline-none transition-colors focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 ${
-                  fieldErrors.email ? 'border-red-500/50' : 'border-white/[0.08]'
-                }`}
-              />
-            </div>
-            {fieldErrors.email && <p className="mt-1 text-xs text-red-400">{fieldErrors.email}</p>}
+              Email address
+            </label>
+            {fieldErrors.email && <p className="mt-1 text-xs text-red-500">{fieldErrors.email}</p>}
           </div>
 
-          <div>
-            <label htmlFor="password" className="sr-only">
-              Password
-            </label>
-            <div className="relative">
+          <div className="floating-label-group">
+            <input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder=" "
+              required
+              minLength={8}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              className={`focus-glow w-full rounded-xl py-3 pl-10 pr-10 text-sm text-[var(--text-primary)] outline-none ${
+                fieldErrors.password ? 'border-red-500/50' : ''
+              }`}
+              style={{
+                background: 'var(--bg-input)',
+                border: `1px solid ${fieldErrors.password ? 'rgba(239,68,68,0.5)' : 'var(--border-medium)'}`,
+              }}
+            />
+            <label htmlFor="password">
               <HugeiconsIcon
                 icon={LockIcon}
+                size={14}
+                className="mr-1.5 inline text-[var(--text-muted)]"
+              />
+              {mode === 'login' ? 'Password' : 'Min. 8 characters'}
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              <HugeiconsIcon
+                icon={showPassword ? ViewOffIcon : ViewIcon}
                 size={16}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                strokeWidth={1.5}
               />
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'login' ? 'Your password' : 'Min. 8 characters'}
-                required
-                minLength={8}
-                className={`w-full rounded-xl border bg-white/[0.04] py-2.5 pl-10 pr-10 text-sm text-white placeholder:text-zinc-500 outline-none transition-colors focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 ${
-                  fieldErrors.password ? 'border-red-500/50' : 'border-white/[0.08]'
-                }`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 transition-colors hover:text-zinc-300"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                <HugeiconsIcon
-                  icon={showPassword ? ViewOffIcon : ViewIcon}
-                  size={16}
-                  strokeWidth={1.5}
-                />
-              </button>
-            </div>
+            </button>
             {fieldErrors.password && (
-              <p className="mt-1 text-xs text-red-400">{fieldErrors.password}</p>
+              <p className="mt-1 text-xs text-red-500">{fieldErrors.password}</p>
             )}
           </div>
 
           <motion.button
             type="submit"
             disabled={loading}
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-violet-600 to-indigo-700 px-4 py-2.5 text-sm font-medium text-white shadow-[0_4px_16px_rgba(124,58,237,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] transition-all hover:from-violet-500 hover:to-indigo-600 disabled:opacity-50"
+            whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(139,92,246,0.3)' }}
+            whileTap={{ scale: 0.98 }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-all"
+            style={{
+              background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #4f46e5 100%)',
+              boxShadow: '0 4px 20px rgba(124,58,237,0.35), inset 0 1px 0 rgba(255,255,255,0.12)',
+            }}
           >
             {loading ? (
               <span className="size-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
             ) : (
               <>
                 {mode === 'login' ? 'Sign in' : 'Create account'}
-                <HugeiconsIcon icon={ArrowRight01Icon} size={16} strokeWidth={1.5} />
+                <HugeiconsIcon icon={ArrowRight01Icon} size={16} strokeWidth={2} />
               </>
             )}
           </motion.button>
         </form>
 
-        {/* Toggle mode */}
-        <p className="mt-6 text-center text-sm text-zinc-400">
+        {/* ─── Toggle mode ─── */}
+        <p className="mt-6 text-center text-sm text-[var(--text-secondary)]">
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
           <button
             type="button"
@@ -308,7 +416,7 @@ export default function LoginPage() {
               setError(null)
               setFieldErrors({})
             }}
-            className="font-medium text-violet-400 transition-colors hover:text-violet-300"
+            className="font-medium text-violet-500 transition-colors hover:text-violet-600"
           >
             {mode === 'login' ? 'Sign up' : 'Sign in'}
           </button>

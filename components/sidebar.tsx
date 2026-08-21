@@ -21,11 +21,8 @@ interface SidebarProps {
   sessions: ChatSessionSummary[]
   activeSessionId: string | null
   theme: 'light' | 'dark'
-  /** Current search term (server-side filtering). */
   search: string
-  /** Whether another page of sessions is available ("Show more"). */
   hasMore: boolean
-  /** Mobile drawer open state (the desktop aside ignores it). */
   open: boolean
   onSearchChange: (term: string) => void
   onLoadMore: () => void
@@ -52,7 +49,6 @@ interface SidebarContentProps {
   onDeleteSession: (id: string) => void
 }
 
-/** The session list + New Chat + theme toggle, shared by desktop and drawer. */
 function SidebarContent({
   sessions,
   activeSessionId,
@@ -107,40 +103,55 @@ function SidebarContent({
 
   return (
     <>
+      {/* New Chat button */}
       <div className="p-3">
         <motion.button
           type="button"
           onClick={onNewChat}
           whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.98 }}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-zinc-800 to-zinc-900 px-3 py-2.5 text-sm font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.06)] transition-all hover:from-zinc-700 hover:to-zinc-800 dark:from-zinc-700 dark:to-zinc-800 dark:shadow-[0_1px_2px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.08)] dark:hover:from-zinc-600 dark:hover:to-zinc-700"
+          whileTap={{ scale: 0.97 }}
+          className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-white transition-all"
+          style={{
+            background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+            boxShadow: '0 2px 12px rgba(124,58,237,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+          }}
         >
           <HugeiconsIcon icon={PlusIcon} size={16} strokeWidth={2} />
           New Chat
         </motion.button>
       </div>
 
+      {/* Search */}
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         <div className="relative pb-2">
+          <label htmlFor="session-search" className="sr-only">
+            Search conversations
+          </label>
           <HugeiconsIcon
             icon={Search01Icon}
-            size={14}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500"
+            size={13}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
           />
           <input
             id="session-search"
             type="search"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search conversations..."
-            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-zinc-700"
+            placeholder="Search..."
+            className="focus-glow w-full rounded-lg py-1.5 pl-8 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+            style={{
+              background: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+            }}
           />
         </div>
-        <h2 className="px-1 pb-2 text-[11px] font-semibold tracking-wider text-zinc-400 uppercase dark:text-zinc-500">
+
+        <h2 className="px-1 pb-2 text-[10px] font-semibold tracking-widest text-[var(--text-tertiary)] uppercase">
           Conversations
         </h2>
+
         {sessions.length === 0 ? (
-          <p className="px-1 py-2 text-sm text-zinc-400 dark:text-zinc-500">
+          <p className="px-1 py-2 text-sm text-[var(--text-tertiary)]">
             {search ? 'No conversations found.' : 'No conversations yet.'}
           </p>
         ) : (
@@ -162,22 +173,34 @@ function SidebarContent({
                         aria-current={active ? 'page' : undefined}
                         whileHover={{ scale: 1.005 }}
                         whileTap={{ scale: 0.995 }}
-                        className={`flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-all duration-150 ${
-                          active
-                            ? 'bg-zinc-800/80 font-medium text-zinc-100 shadow-[0_1px_3px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.04)] dark:bg-zinc-800 dark:text-zinc-100 dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.06)]'
-                            : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100'
-                        }`}
+                        className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-all duration-150"
+                        style={{
+                          background: active ? 'var(--accent-soft)' : 'transparent',
+                          color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          boxShadow: active
+                            ? 'inset 0 0 0 1px var(--accent-medium), 0 0 16px var(--accent-glow)'
+                            : 'none',
+                          border: active
+                            ? '1px solid var(--accent-medium)'
+                            : '1px solid transparent',
+                        }}
                       >
+                        {active && (
+                          <div
+                            className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-violet-500"
+                            style={{ boxShadow: '0 0 8px var(--accent-glow)' }}
+                          />
+                        )}
                         <HugeiconsIcon
                           icon={ChatIcon}
-                          size={14}
+                          size={13}
                           strokeWidth={1.5}
-                          className={`mt-0.5 shrink-0 ${active ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-400 dark:text-zinc-600'}`}
+                          className={`mt-0.5 shrink-0 ${active ? 'text-violet-500' : 'text-[var(--text-muted)]'}`}
                         />
                         <span className="min-w-0">
                           <span className="block truncate">{session.title}</span>
-                          <span className="block text-[11px] text-zinc-400 dark:text-zinc-500">
-                            {session.messageCount} message{session.messageCount === 1 ? '' : 's'}
+                          <span className="block text-[10px] text-[var(--text-tertiary)]">
+                            {session.messageCount} msg{session.messageCount === 1 ? '' : 's'}
                           </span>
                         </span>
                       </motion.button>
@@ -186,9 +209,9 @@ function SidebarContent({
                         onClick={() => openMenu(session.id)}
                         aria-label={`More actions for ${session.title}`}
                         aria-expanded={menuOpenId === session.id}
-                        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-all duration-150 hover:bg-zinc-100 hover:text-zinc-700 focus-visible:opacity-100 group-hover:opacity-100 md:opacity-0 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                        className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-all duration-150 hover:text-[var(--text-secondary)] focus-visible:opacity-100 group-hover:opacity-100 md:opacity-0"
                       >
-                        <HugeiconsIcon icon={MoreIcon} size={14} strokeWidth={1.5} />
+                        <HugeiconsIcon icon={MoreIcon} size={12} strokeWidth={1.5} />
                       </button>
                     </div>
 
@@ -198,24 +221,24 @@ function SidebarContent({
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: 'auto', opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.15, ease: 'easeOut' }}
+                          transition={{ duration: 0.15 }}
                           className="overflow-hidden"
                         >
                           <div className="flex items-center gap-1 px-2.5 pb-1.5">
                             <button
                               type="button"
                               onClick={() => startRename(session.id, session.title)}
-                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
                             >
-                              <HugeiconsIcon icon={PencilIcon} size={12} strokeWidth={1.5} />
+                              <HugeiconsIcon icon={PencilIcon} size={11} strokeWidth={1.5} />
                               Rename
                             </button>
                             <button
                               type="button"
                               onClick={() => startDelete(session.id)}
-                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-red-500 transition-colors hover:bg-red-500/10"
                             >
-                              <HugeiconsIcon icon={TrashIcon} size={12} strokeWidth={1.5} />
+                              <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
                               Delete
                             </button>
                           </div>
@@ -229,7 +252,7 @@ function SidebarContent({
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: 'auto', opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.15, ease: 'easeOut' }}
+                          transition={{ duration: 0.15 }}
                           className="overflow-hidden"
                           onSubmit={(event) => submitRename(event, session.id)}
                         >
@@ -243,22 +266,26 @@ function SidebarContent({
                               onChange={(event) => setDraft(event.target.value)}
                               maxLength={48}
                               autoFocus
-                              className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-600 dark:focus:ring-zinc-700"
+                              className="focus-glow min-w-0 flex-1 rounded-lg px-2 py-1 text-sm text-[var(--text-primary)] outline-none"
+                              style={{
+                                background: 'var(--bg-input)',
+                                border: '1px solid var(--border-medium)',
+                              }}
                             />
                             <button
                               type="submit"
                               aria-label="Save session title"
-                              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                              className="flex size-6 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-500/10"
                             >
-                              <HugeiconsIcon icon={CheckIcon} size={14} strokeWidth={2} />
+                              <HugeiconsIcon icon={CheckIcon} size={13} strokeWidth={2} />
                             </button>
                             <button
                               type="button"
                               onClick={closeRowActions}
                               aria-label="Cancel rename"
-                              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                              className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
                             >
-                              <HugeiconsIcon icon={CircleXIcon} size={14} strokeWidth={1.5} />
+                              <HugeiconsIcon icon={CircleXIcon} size={13} strokeWidth={1.5} />
                             </button>
                           </div>
                         </motion.form>
@@ -271,11 +298,11 @@ function SidebarContent({
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: 'auto', opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.15, ease: 'easeOut' }}
+                          transition={{ duration: 0.15 }}
                           className="overflow-hidden"
                         >
                           <div className="flex items-center gap-1 px-2.5 pb-1.5 text-sm">
-                            <span className="text-zinc-400 dark:text-zinc-500">Delete?</span>
+                            <span className="text-[var(--text-tertiary)]">Delete?</span>
                             <button
                               type="button"
                               onClick={() => {
@@ -283,18 +310,18 @@ function SidebarContent({
                                 closeRowActions()
                               }}
                               aria-label="Confirm delete"
-                              className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-500"
+                              className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-500"
                             >
-                              <HugeiconsIcon icon={TrashIcon} size={12} strokeWidth={1.5} />
-                              Delete
+                              <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
+                              Yes
                             </button>
                             <button
                               type="button"
                               onClick={closeRowActions}
                               aria-label="Cancel delete"
-                              className="rounded-lg px-2 py-1 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                              className="rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)]"
                             >
-                              Cancel
+                              No
                             </button>
                           </div>
                         </motion.div>
@@ -309,7 +336,7 @@ function SidebarContent({
                 <button
                   type="button"
                   onClick={onLoadMore}
-                  className="w-full rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
+                  className="w-full rounded-lg px-2 py-1.5 text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
                 >
                   Show more
                 </button>
@@ -319,18 +346,19 @@ function SidebarContent({
         )}
       </div>
 
-      <div className="border-t border-zinc-100 p-3 dark:border-zinc-800/80">
+      {/* Theme toggle */}
+      <div className="p-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <motion.button
           type="button"
           onClick={onToggleTheme}
           whileHover={{ scale: 1.005 }}
           whileTap={{ scale: 0.995 }}
           aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-zinc-500 transition-all duration-150 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
+          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-[var(--text-secondary)] transition-all duration-150 hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
         >
           <HugeiconsIcon
             icon={theme === 'dark' ? Sun01Icon : MoonIcon}
-            size={15}
+            size={14}
             strokeWidth={1.5}
           />
           {theme === 'dark' ? 'Light mode' : 'Dark mode'}
@@ -363,8 +391,6 @@ export default function Sidebar({
     onCloseRef.current = onClose
   })
 
-  // While the drawer is open: move focus into it, trap Tab inside, close on
-  // Escape, and restore focus to the trigger on close.
   useEffect(() => {
     if (!open) return
     const panel = panelRef.current
@@ -423,15 +449,21 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Desktop sidebar — always visible at md and up. */}
+      {/* Desktop sidebar */}
       <aside
         aria-label="Conversations"
-        className="hidden w-64 shrink-0 flex-col border-r border-zinc-100 bg-zinc-50/80 backdrop-blur-sm md:flex dark:border-zinc-800/60 dark:bg-zinc-900/60"
+        className="hidden w-64 shrink-0 flex-col md:flex"
+        style={{
+          background: 'var(--sidebar-bg)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          borderRight: '1px solid var(--sidebar-border)',
+        }}
       >
         <SidebarContent {...contentProps} />
       </aside>
 
-      {/* Mobile drawer — overlay + sliding panel, hidden at md and up. */}
+      {/* Mobile drawer */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -440,7 +472,6 @@ export default function Sidebar({
             initial={false}
             aria-hidden={!open}
           >
-            {/* Backdrop */}
             <motion.button
               type="button"
               aria-hidden="true"
@@ -450,9 +481,9 @@ export default function Sidebar({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              className="absolute inset-0 backdrop-blur-sm"
+              style={{ background: 'var(--overlay)' }}
             />
-            {/* Panel */}
             <motion.div
               ref={panelRef}
               role="dialog"
@@ -463,19 +494,27 @@ export default function Sidebar({
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={sidebarTransition}
-              className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-zinc-200 bg-white/95 shadow-2xl outline-none backdrop-blur-xl dark:border-zinc-800/60 dark:bg-zinc-900/95 dark:shadow-[0_0_40px_rgba(0,0,0,0.5)]"
+              className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col outline-none"
+              style={{
+                background: 'var(--sidebar-bg)',
+                backdropFilter: 'blur(32px)',
+                WebkitBackdropFilter: 'blur(32px)',
+                borderRight: '1px solid var(--sidebar-border)',
+                boxShadow: '8px 0 40px rgba(0,0,0,0.2)',
+              }}
             >
-              <div className="flex items-center justify-between border-b border-zinc-100 px-3 py-3 dark:border-zinc-800/60">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  Conversations
-                </h2>
+              <div
+                className="flex items-center justify-between px-3 py-3"
+                style={{ borderBottom: '1px solid var(--border-subtle)' }}
+              >
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">Conversations</h2>
                 <button
                   type="button"
                   onClick={onClose}
                   aria-label="Close conversation list"
-                  className="flex size-8 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                  className="flex size-7 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
                 >
-                  <HugeiconsIcon icon={CircleXIcon} size={16} strokeWidth={1.5} />
+                  <HugeiconsIcon icon={CircleXIcon} size={15} strokeWidth={1.5} />
                 </button>
               </div>
               <SidebarContent {...contentProps} />

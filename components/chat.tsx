@@ -13,11 +13,8 @@ import MessageBubble from './message-bubble'
 import StreamingSkeleton from './streaming-skeleton'
 
 interface ChatProps {
-  /** The active DB session, or null for a fresh chat. */
   sessionId: string | null
-  /** Called when a session id is created or cleared. */
   onSessionChange: (id: string | null) => void
-  /** Called after a DB write so the sidebar can refresh its session list. */
   onConversationChanged: () => void
 }
 
@@ -38,15 +35,12 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const reducedMotion = useReducedMotion()
-  // Bumped on every local thread mutation (send/regenerate/clear) so a
-  // stale async restore can detect it is out of date (see the restore effect).
   const threadGenRef = useRef(0)
 
   const scrollToBottom = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }
 
-  // Restore the persisted thread after mount.
   useEffect(() => {
     let cancelled = false
     const gen = threadGenRef.current
@@ -73,7 +67,6 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
     scrollToBottom()
   }, [messages, isStreaming])
 
-  // Persist stable conversation states (FR-9).
   useEffect(() => {
     if (!restored || isStreaming) return
     saveThread(messages)
@@ -108,10 +101,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: history.map<ChatWireMessage>(({ role, content: c }) => ({
-            role,
-            content: c,
-          })),
+          messages: history.map<ChatWireMessage>(({ role, content: c }) => ({ role, content: c })),
         }),
         signal: controller.signal,
       })
@@ -122,14 +112,12 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
           const body = (await response.json()) as { error?: string; detail?: string }
           if (body.error) message = body.detail ? `${body.error} ${body.detail}` : body.error
         } catch {
-          // keep the status-based message
+          /* keep status-based message */
         }
         throw new Error(message)
       }
 
-      if (!response.body) {
-        throw new Error('The server returned an empty response.')
-      }
+      if (!response.body) throw new Error('The server returned an empty response.')
 
       const aborted = await readSSEStream(response.body, {
         signal: controller.signal,
@@ -143,13 +131,10 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
         },
       })
       settled = true
-
-      if (!aborted) {
-        setError(null)
-      }
+      if (!aborted) setError(null)
     } catch (err) {
       if (controller.signal.aborted) {
-        // Cancelled
+        /* Cancelled */
       } else {
         setError(err instanceof Error ? err.message : 'Something went wrong.')
         setMessages((prev) =>
@@ -184,11 +169,9 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   function stop() {
     abortRef.current?.abort()
   }
-
   function retry() {
     if (retryMessage) void send(retryMessage)
   }
-
   function regenerate() {
     const last = messages[messages.length - 1]
     if (!last || last.role !== 'assistant' || isStreaming) return
@@ -218,18 +201,24 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-24">
-            <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/10 to-indigo-500/10 dark:from-violet-500/20 dark:to-indigo-500/20">
+            <div
+              className="mb-4 flex size-12 items-center justify-center rounded-2xl"
+              style={{
+                background: 'var(--accent-soft)',
+                border: '1px solid var(--accent-medium)',
+              }}
+            >
               <HugeiconsIcon
                 icon={RefreshIcon}
                 size={20}
                 strokeWidth={1.5}
-                className="text-violet-500 dark:text-violet-400"
+                className="text-violet-500"
               />
             </div>
-            <p className="text-center text-sm font-medium text-zinc-500 dark:text-zinc-400">
+            <p className="text-center text-sm font-medium text-[var(--text-secondary)]">
               Ask me anything
             </p>
-            <p className="mt-1 text-center text-xs text-zinc-400 dark:text-zinc-500">
+            <p className="mt-1 text-center text-xs text-[var(--text-tertiary)]">
               I stream replies as they are generated
             </p>
           </div>
@@ -256,7 +245,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
                       transition={{ delay: 0.2 }}
                       whileHover={reducedMotion ? undefined : { scale: 1.02 }}
                       whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-                      className="mt-1 ml-10 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      className="mt-1 ml-10 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
                     >
                       <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.5} />
                       Regenerate
@@ -280,13 +269,19 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="rounded-xl border border-red-200/80 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
+              className="rounded-xl px-3 py-2.5 text-sm"
+              style={{
+                background: 'var(--error-bg)',
+                border: '1px solid var(--error-border)',
+                color: 'var(--error-text)',
+              }}
             >
               <p>{error}</p>
               <button
                 type="button"
                 onClick={retry}
-                className="mt-1 font-medium text-red-700 underline underline-offset-2 hover:text-red-900 dark:text-red-300 dark:hover:text-red-200"
+                className="mt-1 font-medium underline underline-offset-2 hover:opacity-80"
+                style={{ color: 'var(--error-text)' }}
               >
                 Retry
               </button>
@@ -295,8 +290,53 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
         </AnimatePresence>
       </div>
 
+      {/* ─── Streaming status bar ─── */}
+      <AnimatePresence>
+        {isStreaming && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden px-4 py-2"
+            style={{
+              background: 'var(--accent-soft)',
+              borderTop: '1px solid var(--accent-medium)',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                <span className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400" />
+                <span>Generating...</span>
+              </div>
+              <motion.button
+                type="button"
+                onClick={stop}
+                whileHover={reducedMotion ? undefined : { scale: 1.02 }}
+                whileTap={reducedMotion ? undefined : { scale: 0.98 }}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)]"
+                style={{
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                Cancel
+              </motion.button>
+            </div>
+            <div className="mt-1.5 streaming-pulse-bar" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── Input form ─── */}
       <form
-        className="flex items-end gap-2 border-t border-zinc-100 bg-white/80 px-4 py-3 backdrop-blur-md dark:border-zinc-800/60 dark:bg-zinc-950/80"
+        className="flex items-end gap-2 px-4 py-3"
+        style={{
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          borderTop: '1px solid var(--border-subtle)',
+        }}
         onSubmit={(event) => {
           event.preventDefault()
           void send(input)
@@ -309,7 +349,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
           aria-label="Clear"
           whileHover={reducedMotion ? undefined : { scale: 1.05 }}
           whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-          className="shrink-0 rounded-xl p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-30 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+          className="shrink-0 rounded-xl p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-30"
         >
           <HugeiconsIcon icon={TrashIcon} size={18} strokeWidth={1.5} />
         </motion.button>
@@ -329,7 +369,11 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
           rows={1}
           maxLength={MAX_INPUT_LENGTH}
           placeholder="Type a message..."
-          className="max-h-40 min-h-10 flex-1 resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-zinc-700"
+          className="focus-glow max-h-40 min-h-10 flex-1 resize-none rounded-xl px-3.5 py-2.5 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          style={{
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border-medium)',
+          }}
         />
         {isStreaming ? (
           <motion.button
@@ -337,7 +381,11 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
             onClick={stop}
             whileHover={reducedMotion ? undefined : { scale: 1.02 }}
             whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-            className="rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm font-medium text-zinc-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:shadow-[0_1px_2px_rgba(0,0,0,0.2)] dark:hover:bg-zinc-750"
+            className="rounded-xl px-3.5 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)]"
+            style={{
+              background: 'var(--bg-input)',
+              border: '1px solid var(--border-medium)',
+            }}
           >
             Stop
           </motion.button>
@@ -346,9 +394,17 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
             type="submit"
             disabled={!canSend}
             aria-label="Send"
-            whileHover={reducedMotion ? undefined : { scale: 1.02 }}
+            whileHover={
+              reducedMotion
+                ? undefined
+                : { scale: 1.02, boxShadow: '0 0 20px rgba(139,92,246,0.25)' }
+            }
             whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-            className="rounded-xl bg-gradient-to-b from-zinc-800 to-zinc-900 px-4 py-2.5 text-sm font-medium text-white shadow-[0_2px_8px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)] transition-all hover:from-zinc-700 hover:to-zinc-800 disabled:cursor-not-allowed disabled:opacity-30 dark:from-zinc-700 dark:to-zinc-800 dark:shadow-[0_2px_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)] dark:hover:from-zinc-600 dark:hover:to-zinc-700"
+            className="rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-all disabled:cursor-not-allowed disabled:opacity-30"
+            style={{
+              background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+              boxShadow: '0 2px 12px rgba(139,92,246,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
+            }}
           >
             <HugeiconsIcon icon={SendIcon} size={16} strokeWidth={1.5} />
           </motion.button>

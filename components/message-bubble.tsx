@@ -18,15 +18,28 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="max-w-[80%] break-words rounded-2xl rounded-br-md bg-gradient-to-br from-zinc-800 to-zinc-900 px-4 py-2.5 text-[13.5px] leading-relaxed text-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.15),inset_0_1px_0_rgba(255,255,255,0.06)] dark:from-zinc-800 dark:to-zinc-900 dark:text-zinc-100 dark:shadow-[0_2px_12px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <div
+          className="max-w-[80%] break-words rounded-2xl rounded-br-md px-4 py-2.5 text-[13.5px] leading-relaxed text-[var(--text-primary)]"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-subtle)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.04)',
+          }}
+        >
           <span className="whitespace-pre-wrap">{message.content}</span>
         </div>
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700">
+        <div
+          className="flex size-7 shrink-0 items-center justify-center rounded-full"
+          style={{
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
           <HugeiconsIcon
             icon={UserIcon}
-            size={14}
+            size={13}
             strokeWidth={1.5}
-            className="text-zinc-600 dark:text-zinc-300"
+            className="text-[var(--text-secondary)]"
           />
         </div>
       </motion.div>
@@ -40,27 +53,37 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 shadow-[0_2px_8px_rgba(124,58,237,0.25)]">
+      <div
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600"
+        style={{ boxShadow: '0 2px 10px rgba(139,92,246,0.3)' }}
+      >
         <HugeiconsIcon
           icon={BotMessageSquareIcon}
-          size={14}
+          size={13}
           strokeWidth={1.5}
           className="text-white"
         />
       </div>
       <div
         aria-live="polite"
-        className="max-w-[80%] break-words rounded-2xl rounded-bl-md border border-zinc-200/80 bg-white px-4 py-2.5 text-[13.5px] leading-relaxed text-zinc-900 shadow-[0_1px_3px_rgba(0,0,0,0.04)] dark:border-zinc-800/80 dark:bg-zinc-900/80 dark:text-zinc-100 dark:shadow-[0_1px_3px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.03)]"
+        className="max-w-[80%] break-words rounded-2xl rounded-bl-md px-4 py-2.5 text-[13.5px] leading-relaxed text-[var(--text-primary)]"
+        style={{
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid var(--glass-border)',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.04)',
+        }}
       >
         {message.content === '' ? (
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block size-1.5 animate-pulse rounded-full bg-zinc-400 dark:bg-zinc-500" />
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400" />
             <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-zinc-400 dark:bg-zinc-500"
+              className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400"
               style={{ animationDelay: '0.15s' }}
             />
             <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-zinc-400 dark:bg-zinc-500"
+              className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400"
               style={{ animationDelay: '0.3s' }}
             />
           </span>
