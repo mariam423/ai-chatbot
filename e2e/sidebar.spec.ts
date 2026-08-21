@@ -318,6 +318,50 @@ test('loads older sessions with Show more', async ({ page, isMobile }) => {
   await expect.poll(() => sidebar.locator('li').count()).toBeGreaterThan(before)
 })
 
+test('sidebar collapse/expand animates and persists across reloads', async ({ page, isMobile }) => {
+  test.skip(isMobile)
+
+  // Start with a clean slate — expanded sidebar.
+  await page.goto('/')
+  await page.evaluate(() => localStorage.removeItem('chat.sidebarCollapsed'))
+  await page.reload()
+
+  const sidebar = page.getByRole('complementary', { name: 'Conversations' })
+  const collapseBtn = sidebar.getByRole('button', { name: 'Collapse sidebar' })
+
+  await test.step('sidebar starts expanded with search visible', async () => {
+    await expect(sidebar.getByRole('searchbox', { name: 'Search conversations' })).toBeVisible()
+    await expect(sidebar.getByRole('button', { name: 'New Chat' })).toContainText('New Chat')
+  })
+
+  await test.step('clicking collapse shrinks sidebar and hides search', async () => {
+    await collapseBtn.click()
+    // The expand button should now be present.
+    await expect(sidebar.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+    // Search box should be hidden.
+    await expect(sidebar.getByRole('searchbox', { name: 'Search conversations' })).toBeHidden()
+  })
+
+  await test.step('collapsed state persists across a reload', async () => {
+    await page.reload()
+    await expect(sidebar.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+    await expect(sidebar.getByRole('searchbox', { name: 'Search conversations' })).toBeHidden()
+  })
+
+  await test.step('clicking expand restores the full sidebar', async () => {
+    await sidebar.getByRole('button', { name: 'Expand sidebar' }).click()
+    await expect(sidebar.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible()
+    await expect(sidebar.getByRole('searchbox', { name: 'Search conversations' })).toBeVisible()
+  })
+
+  await test.step('Ctrl+\\ keyboard shortcut toggles collapse', async () => {
+    await page.keyboard.press('Control+\\')
+    await expect(sidebar.getByRole('button', { name: 'Expand sidebar' })).toBeVisible()
+    await page.keyboard.press('Control+\\')
+    await expect(sidebar.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible()
+  })
+})
+
 test('renders markdown code blocks with a language badge and copy button', async ({ page }) => {
   await page.route('**/api/chat', (route) =>
     route.fulfill({

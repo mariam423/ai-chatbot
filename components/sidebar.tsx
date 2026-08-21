@@ -512,6 +512,18 @@ export default function Sidebar({
     })
   }
 
+  // Global keyboard shortcut: Ctrl+\ (or Cmd+\ on Mac) toggles collapse.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === '\\') {
+        event.preventDefault()
+        toggleCollapsed()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   useEffect(() => {
     if (!open) return
     const panel = panelRef.current
