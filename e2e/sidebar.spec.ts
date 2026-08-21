@@ -38,7 +38,11 @@ test('sidebar lists the conversation and New Chat resets the thread', async ({
 test('toggles dark mode and persists it across reloads', async ({ page, isMobile }) => {
   test.skip(isMobile)
 
+  // Clear sidebar collapse state so the sidebar is always expanded — the
+  // spring animation can make buttons unstable if collapsed from a prior run.
   await page.goto('/')
+  await page.evaluate(() => localStorage.removeItem('chat.sidebarCollapsed'))
+  await page.reload()
   const html = page.locator('html')
 
   await expect(html).not.toHaveClass(/dark/)
@@ -56,6 +60,59 @@ test('toggles dark mode and persists it across reloads', async ({ page, isMobile
   await test.step('toggle off', async () => {
     await page.getByRole('button', { name: 'Switch to light mode' }).click()
     await expect(html).not.toHaveClass(/dark/)
+  })
+})
+
+test('theme toggle triggers a View Transition crossfade animation', async ({ page, isMobile }) => {
+  test.skip(isMobile)
+
+  await page.goto('/')
+  const html = page.locator('html')
+  await expect(html).not.toHaveClass(/dark/)
+
+  // Inject a spy on document.startViewTransition before clicking the toggle
+  // so we can confirm the crossfade animation was actually triggered.
+  await page.evaluate(() => {
+    ;(window as unknown as { __vtCalls: number }).__vtCalls = 0
+    const original = document.startViewTransition.bind(document)
+    document.startViewTransition = (...args: Parameters<typeof original>) => {
+      ;(window as unknown as { __vtCalls: number }).__vtCalls++
+      return original(...args)
+    }
+  })
+
+  await test.step('toggling to dark triggers startViewTransition', async () => {
+    await page.getByRole('button', { name: 'Switch to dark mode' }).click()
+    await expect(html).toHaveClass(/dark/)
+    const calls = await page.evaluate(() => (window as unknown as { __vtCalls: number }).__vtCalls)
+    expect(calls).toBeGreaterThanOrEqual(1)
+  })
+
+  await test.step('toggling back to light triggers startViewTransition again', async () => {
+    await page.getByRole('button', { name: 'Switch to light mode' }).click()
+    await expect(html).not.toHaveClass(/dark/)
+    const calls = await page.evaluate(() => (window as unknown as { __vtCalls: number }).__vtCalls)
+    expect(calls).toBeGreaterThanOrEqual(2)
+  })
+
+  await test.step('view-transition pseudo-elements appear during the animation', async () => {
+    // Verify the CSS transition classes exist in the stylesheet (the browser
+    // creates the pseudo-elements only during an active transition, which is
+    // too fast to query, so we confirm the CSS rules are in place).
+    const hasRules = await page.evaluate(() => {
+      for (const sheet of document.styleSheets) {
+        try {
+          for (const rule of sheet.cssRules) {
+            const sel = (rule as CSSStyleRule).selectorText ?? ''
+            if (sel.includes('::view-transition-old(root)')) return true
+          }
+        } catch {
+          // Cross-origin stylesheet — skip.
+        }
+      }
+      return false
+    })
+    expect(hasRules, 'expected ::view-transition-old(root) CSS rule to exist').toBe(true)
   })
 })
 
