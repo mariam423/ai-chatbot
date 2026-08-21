@@ -54,8 +54,8 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
     >
       <div
-        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600"
-        style={{ boxShadow: '0 2px 10px rgba(139,92,246,0.3)' }}
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600"
+        style={{ boxShadow: '0 2px 10px rgba(16,185,129,0.3)' }}
       >
         <HugeiconsIcon
           icon={BotMessageSquareIcon}
@@ -77,13 +77,13 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
       >
         {message.content === '' ? (
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400" />
+            <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400" />
             <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400"
+              className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
               style={{ animationDelay: '0.15s' }}
             />
             <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400"
+              className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
               style={{ animationDelay: '0.3s' }}
             />
           </span>

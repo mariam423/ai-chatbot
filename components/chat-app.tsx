@@ -170,8 +170,8 @@ export default function ChatApp() {
             </motion.button>
             <div className="flex items-center gap-2">
               <div
-                className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 vt-brand-icon"
-                style={{ boxShadow: '0 2px 10px rgba(139,92,246,0.3)' }}
+                className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 vt-brand-icon"
+                style={{ boxShadow: '0 2px 10px rgba(16,185,129,0.3)' }}
               >
                 <HugeiconsIcon icon={MenuIcon} size={13} strokeWidth={2} className="text-white" />
               </div>
@@ -200,7 +200,7 @@ export default function ChatApp() {
                       className="size-6 rounded-full"
                     />
                   ) : (
-                    <div className="flex size-6 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-indigo-600">
+                    <div className="flex size-6 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600">
                       <HugeiconsIcon
                         icon={UserIcon}
                         size={12}

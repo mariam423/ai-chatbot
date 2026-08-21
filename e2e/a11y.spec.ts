@@ -38,8 +38,9 @@ test.describe('accessibility', () => {
     const newChat = sidebar.getByRole('button', { name: 'New Chat' })
     const searchInput = sidebar.getByRole('searchbox', { name: 'Search conversations' })
     // Newest-first order (listChatSessions), so the first entry is the
-    // session just created — and it is the active one.
-    const firstSession = sidebar.getByRole('button').nth(1)
+    // session just created — and it is the active one. The sidebar now has
+    // a collapse toggle button at the top, so use a specific selector.
+    const firstSession = sidebar.getByRole('button', { name: /A11y question/ }).first()
     await expect(firstSession).toContainText('A11y question')
     await expect(firstSession).toHaveAttribute('aria-current', 'page')
 
@@ -55,9 +56,13 @@ test.describe('accessibility', () => {
     await expect(page.locator('main').getByText('A11y question')).toBeVisible()
     await expect(firstSession).toHaveAttribute('aria-current', 'page')
 
-    await test.step('Tab walks skip link → New Chat → search → first session', async () => {
+    const collapseToggle = sidebar.getByRole('button', { name: 'Collapse sidebar' })
+
+    await test.step('Tab walks skip link → collapse toggle → New Chat → search → first session', async () => {
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(skipLink)
+      await page.keyboard.press('Tab')
+      await expectVisibleFocusRing(collapseToggle)
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(newChat)
       await page.keyboard.press('Tab')
@@ -71,6 +76,8 @@ test.describe('accessibility', () => {
       await expect(searchInput).toBeFocused()
       await page.keyboard.press('Shift+Tab')
       await expect(newChat).toBeFocused()
+      await page.keyboard.press('Shift+Tab')
+      await expect(collapseToggle).toBeFocused()
       await page.keyboard.press('Shift+Tab')
       await expect(skipLink).toBeFocused()
     })

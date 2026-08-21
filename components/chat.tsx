@@ -212,7 +212,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
                 icon={RefreshIcon}
                 size={20}
                 strokeWidth={1.5}
-                className="text-violet-500"
+                className="text-emerald-400"
               />
             </div>
             <p className="text-center text-sm font-medium text-[var(--text-secondary)]">
@@ -306,7 +306,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                <span className="inline-block size-1.5 animate-pulse rounded-full bg-violet-400" />
+                <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400" />
                 <span>Generating...</span>
               </div>
               <motion.button
@@ -397,13 +397,13 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
             whileHover={
               reducedMotion
                 ? undefined
-                : { scale: 1.02, boxShadow: '0 0 20px rgba(139,92,246,0.25)' }
+                : { scale: 1.02, boxShadow: '0 0 20px rgba(16,185,129,0.25)' }
             }
             whileTap={reducedMotion ? undefined : { scale: 0.98 }}
             className="rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-all disabled:cursor-not-allowed disabled:opacity-30"
             style={{
-              background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-              boxShadow: '0 2px 12px rgba(139,92,246,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
+              background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)',
+              boxShadow: '0 2px 12px rgba(16,185,129,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
             }}
           >
             <HugeiconsIcon icon={SendIcon} size={16} strokeWidth={1.5} />

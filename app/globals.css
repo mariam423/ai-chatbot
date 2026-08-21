@@ -25,10 +25,10 @@
   --border-strong: rgba(0, 0, 0, 0.15);
 
   /* Accent */
-  --accent: #7c3aed;
-  --accent-soft: rgba(124, 58, 237, 0.08);
-  --accent-medium: rgba(124, 58, 237, 0.15);
-  --accent-glow: rgba(124, 58, 237, 0.2);
+  --accent: #059669;
+  --accent-soft: rgba(5, 150, 105, 0.08);
+  --accent-medium: rgba(5, 150, 105, 0.15);
+  --accent-glow: rgba(5, 150, 105, 0.2);
 
   /* Glass */
   --glass-bg: rgba(255, 255, 255, 0.7);
@@ -43,23 +43,23 @@
   /* Markdown */
   --md-text: #3f3f46;
   --md-heading: #18181b;
-  --md-link: #7c3aed;
-  --md-link-hover: #6d28d9;
-  --md-code-bg: rgba(124, 58, 237, 0.06);
-  --md-code-border: rgba(124, 58, 237, 0.12);
+  --md-link: #059669;
+  --md-link-hover: #047857;
+  --md-code-bg: rgba(5, 150, 105, 0.06);
+  --md-code-border: rgba(5, 150, 105, 0.12);
   --md-blockquote: #71717a;
   --md-table-header: rgba(0, 0, 0, 0.04);
   --md-table-border: rgba(0, 0, 0, 0.08);
 
   /* Code blocks */
-  --code-bg: #1e1e2e;
-  --code-header-bg: #181825;
-  --code-border: #313244;
-  --code-text: #cdd6f4;
+  --code-bg: #0f172a;
+  --code-header-bg: #0b1220;
+  --code-border: #1e293b;
+  --code-text: #cbd5e1;
 
   /* Skeleton */
   --skeleton-bg: rgba(0, 0, 0, 0.06);
-  --skeleton-shimmer: rgba(124, 58, 237, 0.04);
+  --skeleton-shimmer: rgba(5, 150, 105, 0.05);
 
   /* Status */
   --error-bg: rgba(239, 68, 68, 0.06);
@@ -70,15 +70,15 @@
   --overlay: rgba(0, 0, 0, 0.4);
 
   /* Focus ring */
-  --focus-ring: rgba(124, 58, 237, 0.4);
-  --focus-ring-soft: rgba(124, 58, 237, 0.12);
+  --focus-ring: rgba(16, 185, 129, 0.45);
+  --focus-ring-soft: rgba(16, 185, 129, 0.12);
 }
 
 .dark {
-  --bg-deep: #0c0e14;
-  --bg-card: #12151e;
-  --bg-surface: #181c28;
-  --bg-elevated: #1e2232;
+  --bg-deep: #0b0f12;
+  --bg-card: #10161b;
+  --bg-surface: #151c22;
+  --bg-elevated: #1a232b;
   --bg-input: rgba(255, 255, 255, 0.04);
   --bg-input-hover: rgba(255, 255, 255, 0.07);
 
@@ -91,36 +91,36 @@
   --border-medium: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
 
-  --accent: #a78bfa;
-  --accent-soft: rgba(139, 92, 246, 0.08);
-  --accent-medium: rgba(139, 92, 246, 0.15);
-  --accent-glow: rgba(139, 92, 246, 0.25);
+  --accent: #34d399;
+  --accent-soft: rgba(52, 211, 153, 0.08);
+  --accent-medium: rgba(52, 211, 153, 0.15);
+  --accent-glow: rgba(16, 185, 129, 0.2);
 
-  --glass-bg: rgba(18, 21, 30, 0.55);
-  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-bg: rgba(15, 23, 42, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.05);
   --glass-border-hover: rgba(255, 255, 255, 0.12);
   --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 
-  --sidebar-bg: rgba(12, 14, 20, 0.85);
-  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-bg: rgba(15, 23, 42, 0.4);
+  --sidebar-border: rgba(255, 255, 255, 0.05);
 
   --md-text: #d4d4d8;
   --md-heading: #fafafa;
-  --md-link: #a78bfa;
-  --md-link-hover: #c4b5fd;
-  --md-code-bg: rgba(139, 92, 246, 0.1);
-  --md-code-border: rgba(139, 92, 246, 0.15);
+  --md-link: #34d399;
+  --md-link-hover: #6ee7b7;
+  --md-code-bg: rgba(52, 211, 153, 0.08);
+  --md-code-border: rgba(52, 211, 153, 0.14);
   --md-blockquote: #71717a;
   --md-table-header: rgba(255, 255, 255, 0.04);
   --md-table-border: rgba(255, 255, 255, 0.06);
 
-  --code-bg: #1e1e2e;
-  --code-header-bg: #181825;
-  --code-border: #313244;
-  --code-text: #cdd6f4;
+  --code-bg: #0f172a;
+  --code-header-bg: #0b1220;
+  --code-border: #1e293b;
+  --code-text: #cbd5e1;
 
-  --skeleton-bg: rgba(30, 32, 44, 0.7);
-  --skeleton-shimmer: rgba(139, 92, 246, 0.06);
+  --skeleton-bg: rgba(30, 41, 59, 0.7);
+  --skeleton-shimmer: rgba(52, 211, 153, 0.06);
 
   --error-bg: rgba(239, 68, 68, 0.08);
   --error-border: rgba(239, 68, 68, 0.2);
@@ -128,8 +128,8 @@
 
   --overlay: rgba(0, 0, 0, 0.6);
 
-  --focus-ring: rgba(167, 139, 250, 0.45);
-  --focus-ring-soft: rgba(167, 139, 250, 0.12);
+  --focus-ring: rgba(52, 211, 153, 0.45);
+  --focus-ring-soft: rgba(52, 211, 153, 0.12);
 }
 
 /* ─── Body ─── */
@@ -176,7 +176,7 @@ select:-webkit-autofill:focus {
   outline-offset: 2px;
 }
 
-/* ─── Purple glow focus ring utility ─── */
+/* ─── Emerald glow focus ring utility ─── */
 .focus-glow {
   transition:
     box-shadow 0.2s ease,
@@ -226,7 +226,7 @@ select:-webkit-autofill:focus {
   z-index: 50;
   transform: translateY(-200%);
   transition: transform 150ms ease-in-out;
-  @apply rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white;
+  @apply rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white;
 }
 .skip-link:focus {
   transform: translateY(0);

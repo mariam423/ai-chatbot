@@ -12,10 +12,16 @@ import {
   TrashIcon,
   CircleXIcon,
   Search01Icon,
+  ArrowRight01Icon,
+  ArrowLeft01Icon,
 } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { ChatSessionSummary } from '@/lib/types'
+
+const SIDEBAR_WIDTH_EXPANDED = 256
+const SIDEBAR_WIDTH_COLLAPSED = 64
+const STORAGE_KEY = 'chat.sidebarCollapsed'
 
 interface SidebarProps {
   sessions: ChatSessionSummary[]
@@ -40,6 +46,7 @@ interface SidebarContentProps {
   theme: 'light' | 'dark'
   search: string
   hasMore: boolean
+  collapsed: boolean
   onSearchChange: (term: string) => void
   onLoadMore: () => void
   onNewChat: () => void
@@ -55,6 +62,7 @@ function SidebarContent({
   theme,
   search,
   hasMore,
+  collapsed,
   onSearchChange,
   onLoadMore,
   onNewChat,
@@ -110,243 +118,310 @@ function SidebarContent({
           onClick={onNewChat}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.97 }}
-          className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-white transition-all"
+          className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-white transition-all ${
+            collapsed ? 'px-0' : ''
+          }`}
           style={{
             background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
             boxShadow: '0 2px 12px rgba(124,58,237,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           }}
+          title={collapsed ? 'New Chat' : undefined}
         >
           <HugeiconsIcon icon={PlusIcon} size={16} strokeWidth={2} />
-          New Chat
+          <AnimatePresence>
+            {!collapsed && (
+              <motion.span
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 'auto', opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="overflow-hidden whitespace-nowrap"
+              >
+                New Chat
+              </motion.span>
+            )}
+          </AnimatePresence>
         </motion.button>
       </div>
 
-      {/* Search */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        <div className="relative pb-2">
-          <label htmlFor="session-search" className="sr-only">
-            Search conversations
-          </label>
-          <HugeiconsIcon
-            icon={Search01Icon}
-            size={13}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
-          />
-          <input
-            id="session-search"
-            type="search"
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search..."
-            className="focus-glow w-full rounded-lg py-1.5 pl-8 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-            style={{
-              background: 'var(--bg-input)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          />
-        </div>
+      {/* Search — hidden when collapsed */}
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+              <div className="relative pb-2">
+                <label htmlFor="session-search" className="sr-only">
+                  Search conversations
+                </label>
+                <HugeiconsIcon
+                  icon={Search01Icon}
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
+                />
+                <input
+                  id="session-search"
+                  type="search"
+                  value={search}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder="Search..."
+                  className="focus-glow w-full rounded-lg py-1.5 pl-8 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                  style={{
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                />
+              </div>
 
-        <h2 className="px-1 pb-2 text-[10px] font-semibold tracking-widest text-[var(--text-tertiary)] uppercase">
-          Conversations
-        </h2>
+              <h2 className="px-1 pb-2 text-[10px] font-semibold tracking-widest text-[var(--text-tertiary)] uppercase">
+                Conversations
+              </h2>
 
-        {sessions.length === 0 ? (
-          <p className="px-1 py-2 text-sm text-[var(--text-tertiary)]">
-            {search ? 'No conversations found.' : 'No conversations yet.'}
-          </p>
-        ) : (
+              {sessions.length === 0 ? (
+                <p className="px-1 py-2 text-sm text-[var(--text-tertiary)]">
+                  {search ? 'No conversations found.' : 'No conversations yet.'}
+                </p>
+              ) : (
+                <ul className="space-y-0.5">
+                  {sessions.map((session) => {
+                    const active = session.id === activeSessionId
+                    return (
+                      <li key={session.id}>
+                        <div
+                          className="group rounded-xl"
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') closeRowActions()
+                          }}
+                        >
+                          <div className="flex items-center gap-0.5">
+                            <motion.button
+                              type="button"
+                              onClick={() => onSelectSession(session.id)}
+                              aria-current={active ? 'page' : undefined}
+                              whileHover={{ scale: 1.005 }}
+                              whileTap={{ scale: 0.995 }}
+                              className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-all duration-150"
+                              style={{
+                                background: active ? 'var(--accent-soft)' : 'transparent',
+                                color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                boxShadow: active
+                                  ? 'inset 0 0 0 1px var(--accent-medium), 0 0 16px var(--accent-glow)'
+                                  : 'none',
+                                border: active
+                                  ? '1px solid var(--accent-medium)'
+                                  : '1px solid transparent',
+                              }}
+                            >
+                              {active && (
+                                <div
+                                  className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-violet-500"
+                                  style={{ boxShadow: '0 0 8px var(--accent-glow)' }}
+                                />
+                              )}
+                              <HugeiconsIcon
+                                icon={ChatIcon}
+                                size={13}
+                                strokeWidth={1.5}
+                                className={`mt-0.5 shrink-0 ${active ? 'text-violet-500' : 'text-[var(--text-muted)]'}`}
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate">{session.title}</span>
+                                <span className="block text-[10px] text-[var(--text-tertiary)]">
+                                  {session.messageCount} msg{session.messageCount === 1 ? '' : 's'}
+                                </span>
+                              </span>
+                            </motion.button>
+                            <button
+                              type="button"
+                              onClick={() => openMenu(session.id)}
+                              aria-label={`More actions for ${session.title}`}
+                              aria-expanded={menuOpenId === session.id}
+                              className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-all duration-150 hover:text-[var(--text-secondary)] focus-visible:opacity-100 group-hover:opacity-100 md:opacity-0"
+                            >
+                              <HugeiconsIcon icon={MoreIcon} size={12} strokeWidth={1.5} />
+                            </button>
+                          </div>
+
+                          <AnimatePresence>
+                            {menuOpenId === session.id && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="flex items-center gap-1 px-2.5 pb-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => startRename(session.id, session.title)}
+                                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+                                  >
+                                    <HugeiconsIcon icon={PencilIcon} size={11} strokeWidth={1.5} />
+                                    Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => startDelete(session.id)}
+                                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-red-500 transition-colors hover:bg-red-500/10"
+                                  >
+                                    <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
+                                    Delete
+                                  </button>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
+                          <AnimatePresence>
+                            {renamingId === session.id && (
+                              <motion.form
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="overflow-hidden"
+                                onSubmit={(event) => submitRename(event, session.id)}
+                              >
+                                <div className="flex items-center gap-1 px-2.5 pb-1.5">
+                                  <label htmlFor={`rename-${session.id}`} className="sr-only">
+                                    Session title
+                                  </label>
+                                  <input
+                                    id={`rename-${session.id}`}
+                                    value={draft}
+                                    onChange={(event) => setDraft(event.target.value)}
+                                    maxLength={48}
+                                    autoFocus
+                                    className="focus-glow min-w-0 flex-1 rounded-lg px-2 py-1 text-sm text-[var(--text-primary)] outline-none"
+                                    style={{
+                                      background: 'var(--bg-input)',
+                                      border: '1px solid var(--border-medium)',
+                                    }}
+                                  />
+                                  <button
+                                    type="submit"
+                                    aria-label="Save session title"
+                                    className="flex size-6 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-500/10"
+                                  >
+                                    <HugeiconsIcon icon={CheckIcon} size={13} strokeWidth={2} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={closeRowActions}
+                                    aria-label="Cancel rename"
+                                    className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
+                                  >
+                                    <HugeiconsIcon icon={CircleXIcon} size={13} strokeWidth={1.5} />
+                                  </button>
+                                </div>
+                              </motion.form>
+                            )}
+                          </AnimatePresence>
+
+                          <AnimatePresence>
+                            {confirmingId === session.id && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="flex items-center gap-1 px-2.5 pb-1.5 text-sm">
+                                  <span className="text-[var(--text-tertiary)]">Delete?</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onDeleteSession(session.id)
+                                      closeRowActions()
+                                    }}
+                                    aria-label="Confirm delete"
+                                    className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-500"
+                                  >
+                                    <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
+                                    Yes
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={closeRowActions}
+                                    aria-label="Cancel delete"
+                                    className="rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)]"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </li>
+                    )
+                  })}
+                  {hasMore && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={onLoadMore}
+                        className="w-full rounded-lg px-2 py-1.5 text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
+                      >
+                        Show more
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Collapsed session list — icon-only */}
+      {collapsed && (
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+          <h2 className="sr-only">Conversations</h2>
           <ul className="space-y-0.5">
             {sessions.map((session) => {
               const active = session.id === activeSessionId
               return (
                 <li key={session.id}>
-                  <div
-                    className="group rounded-xl"
-                    onKeyDown={(event) => {
-                      if (event.key === 'Escape') closeRowActions()
+                  <motion.button
+                    type="button"
+                    onClick={() => onSelectSession(session.id)}
+                    aria-current={active ? 'page' : undefined}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    title={session.title}
+                    className="flex size-10 items-center justify-center rounded-xl transition-all duration-150"
+                    style={{
+                      background: active ? 'var(--accent-soft)' : 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      boxShadow: active
+                        ? 'inset 0 0 0 1px var(--accent-medium), 0 0 16px var(--accent-glow)'
+                        : 'none',
+                      border: active ? '1px solid var(--accent-medium)' : '1px solid transparent',
                     }}
                   >
-                    <div className="flex items-center gap-0.5">
-                      <motion.button
-                        type="button"
-                        onClick={() => onSelectSession(session.id)}
-                        aria-current={active ? 'page' : undefined}
-                        whileHover={{ scale: 1.005 }}
-                        whileTap={{ scale: 0.995 }}
-                        className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-all duration-150"
-                        style={{
-                          background: active ? 'var(--accent-soft)' : 'transparent',
-                          color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-                          boxShadow: active
-                            ? 'inset 0 0 0 1px var(--accent-medium), 0 0 16px var(--accent-glow)'
-                            : 'none',
-                          border: active
-                            ? '1px solid var(--accent-medium)'
-                            : '1px solid transparent',
-                        }}
-                      >
-                        {active && (
-                          <div
-                            className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-violet-500"
-                            style={{ boxShadow: '0 0 8px var(--accent-glow)' }}
-                          />
-                        )}
-                        <HugeiconsIcon
-                          icon={ChatIcon}
-                          size={13}
-                          strokeWidth={1.5}
-                          className={`mt-0.5 shrink-0 ${active ? 'text-violet-500' : 'text-[var(--text-muted)]'}`}
-                        />
-                        <span className="min-w-0">
-                          <span className="block truncate">{session.title}</span>
-                          <span className="block text-[10px] text-[var(--text-tertiary)]">
-                            {session.messageCount} msg{session.messageCount === 1 ? '' : 's'}
-                          </span>
-                        </span>
-                      </motion.button>
-                      <button
-                        type="button"
-                        onClick={() => openMenu(session.id)}
-                        aria-label={`More actions for ${session.title}`}
-                        aria-expanded={menuOpenId === session.id}
-                        className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-all duration-150 hover:text-[var(--text-secondary)] focus-visible:opacity-100 group-hover:opacity-100 md:opacity-0"
-                      >
-                        <HugeiconsIcon icon={MoreIcon} size={12} strokeWidth={1.5} />
-                      </button>
-                    </div>
-
-                    <AnimatePresence>
-                      {menuOpenId === session.id && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="flex items-center gap-1 px-2.5 pb-1.5">
-                            <button
-                              type="button"
-                              onClick={() => startRename(session.id, session.title)}
-                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
-                            >
-                              <HugeiconsIcon icon={PencilIcon} size={11} strokeWidth={1.5} />
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => startDelete(session.id)}
-                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-red-500 transition-colors hover:bg-red-500/10"
-                            >
-                              <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
-                              Delete
-                            </button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <AnimatePresence>
-                      {renamingId === session.id && (
-                        <motion.form
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="overflow-hidden"
-                          onSubmit={(event) => submitRename(event, session.id)}
-                        >
-                          <div className="flex items-center gap-1 px-2.5 pb-1.5">
-                            <label htmlFor={`rename-${session.id}`} className="sr-only">
-                              Session title
-                            </label>
-                            <input
-                              id={`rename-${session.id}`}
-                              value={draft}
-                              onChange={(event) => setDraft(event.target.value)}
-                              maxLength={48}
-                              autoFocus
-                              className="focus-glow min-w-0 flex-1 rounded-lg px-2 py-1 text-sm text-[var(--text-primary)] outline-none"
-                              style={{
-                                background: 'var(--bg-input)',
-                                border: '1px solid var(--border-medium)',
-                              }}
-                            />
-                            <button
-                              type="submit"
-                              aria-label="Save session title"
-                              className="flex size-6 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-500/10"
-                            >
-                              <HugeiconsIcon icon={CheckIcon} size={13} strokeWidth={2} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={closeRowActions}
-                              aria-label="Cancel rename"
-                              className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
-                            >
-                              <HugeiconsIcon icon={CircleXIcon} size={13} strokeWidth={1.5} />
-                            </button>
-                          </div>
-                        </motion.form>
-                      )}
-                    </AnimatePresence>
-
-                    <AnimatePresence>
-                      {confirmingId === session.id && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="flex items-center gap-1 px-2.5 pb-1.5 text-sm">
-                            <span className="text-[var(--text-tertiary)]">Delete?</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onDeleteSession(session.id)
-                                closeRowActions()
-                              }}
-                              aria-label="Confirm delete"
-                              className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-500"
-                            >
-                              <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
-                              Yes
-                            </button>
-                            <button
-                              type="button"
-                              onClick={closeRowActions}
-                              aria-label="Cancel delete"
-                              className="rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)]"
-                            >
-                              No
-                            </button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
+                    <HugeiconsIcon
+                      icon={ChatIcon}
+                      size={14}
+                      strokeWidth={1.5}
+                      className={active ? 'text-violet-500' : 'text-[var(--text-muted)]'}
+                    />
+                  </motion.button>
                 </li>
               )
             })}
-            {hasMore && (
-              <li>
-                <button
-                  type="button"
-                  onClick={onLoadMore}
-                  className="w-full rounded-lg px-2 py-1.5 text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
-                >
-                  Show more
-                </button>
-              </li>
-            )}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Theme toggle */}
+      {/* Bottom actions */}
       <div className="p-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <motion.button
           type="button"
@@ -354,14 +429,29 @@ function SidebarContent({
           whileHover={{ scale: 1.005 }}
           whileTap={{ scale: 0.995 }}
           aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-[var(--text-secondary)] transition-all duration-150 hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+          className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-[var(--text-secondary)] transition-all duration-150 hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)] ${
+            collapsed ? 'justify-center px-0' : ''
+          }`}
+          title={collapsed ? (theme === 'dark' ? 'Light mode' : 'Dark mode') : undefined}
         >
           <HugeiconsIcon
             icon={theme === 'dark' ? Sun01Icon : MoonIcon}
             size={14}
             strokeWidth={1.5}
           />
-          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          <AnimatePresence>
+            {!collapsed && (
+              <motion.span
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 'auto', opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="overflow-hidden whitespace-nowrap"
+              >
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </motion.span>
+            )}
+          </AnimatePresence>
         </motion.button>
       </div>
     </>
@@ -387,9 +477,40 @@ export default function Sidebar({
   const panelRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(onClose)
   const reducedMotion = useReducedMotion()
+  const [collapsed, setCollapsed] = useState(false)
+  const [hydrated, setHydrated] = useState(false)
+
   useEffect(() => {
     onCloseRef.current = onClose
   })
+
+  // Hydrate collapsed state from localStorage (client-only).
+  /* eslint-disable react-hooks/set-state-in-effect -- Intentional: reading the
+     persisted collapsed state into state after mount is the SSR-safe alternative
+     to lazy initializers (no window access during render); `hydrated` gates the
+     sidebar width animation on that restore completing. */
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY)
+      if (stored === 'true') setCollapsed(true)
+    } catch {
+      // Best-effort.
+    }
+    setHydrated(true)
+  }, [])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(STORAGE_KEY, String(next))
+      } catch {
+        // Best-effort.
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!open) return
@@ -434,6 +555,7 @@ export default function Sidebar({
     theme,
     search,
     hasMore,
+    collapsed,
     onSearchChange,
     onLoadMore,
     onNewChat,
@@ -447,12 +569,17 @@ export default function Sidebar({
     ? ({ duration: 0 } as const)
     : { type: 'spring' as const, stiffness: 400, damping: 30, mass: 0.8 }
 
+  const sidebarWidth = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED
+
   return (
     <>
       {/* Desktop sidebar */}
-      <aside
+      <motion.aside
         aria-label="Conversations"
-        className="hidden w-64 shrink-0 flex-col md:flex"
+        className="hidden flex-col md:flex"
+        initial={false}
+        animate={{ width: hydrated ? sidebarWidth : SIDEBAR_WIDTH_EXPANDED }}
+        transition={sidebarTransition}
         style={{
           background: 'var(--sidebar-bg)',
           backdropFilter: 'blur(12px)',
@@ -460,8 +587,26 @@ export default function Sidebar({
           borderRight: '1px solid var(--sidebar-border)',
         }}
       >
+        {/* Collapse toggle */}
+        <div className="flex items-center justify-end p-3 pb-0">
+          <motion.button
+            type="button"
+            onClick={toggleCollapsed}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
+          >
+            <HugeiconsIcon
+              icon={collapsed ? ArrowRight01Icon : ArrowLeft01Icon}
+              size={14}
+              strokeWidth={1.5}
+            />
+          </motion.button>
+        </div>
+
         <SidebarContent {...contentProps} />
-      </aside>
+      </motion.aside>
 
       {/* Mobile drawer */}
       <AnimatePresence>
@@ -517,7 +662,7 @@ export default function Sidebar({
                   <HugeiconsIcon icon={CircleXIcon} size={15} strokeWidth={1.5} />
                 </button>
               </div>
-              <SidebarContent {...contentProps} />
+              <SidebarContent {...contentProps} collapsed={false} />
             </motion.div>
           </motion.div>
         )}

@@ -87,10 +87,10 @@ export default function LoginPage() {
     >
       {/* ─── Ambient background glows ─── */}
       <div className="pointer-events-none absolute inset-0 vt-ambient-bg">
-        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-violet-600/20 blur-[140px]" />
-        <div className="ambient-glow-slow absolute -bottom-32 -right-32 size-[480px] rounded-full bg-indigo-500/15 blur-[130px]" />
+        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-emerald-600/20 blur-[140px]" />
+        <div className="ambient-glow-slow absolute -bottom-32 -right-32 size-[480px] rounded-full bg-teal-500/15 blur-[130px]" />
         <div
-          className="ambient-glow absolute left-1/2 top-1/2 size-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-500/10 blur-[110px]"
+          className="ambient-glow absolute left-1/2 top-1/2 size-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500/10 blur-[110px]"
           style={{ animationDelay: '2s' }}
         />
         {/* Subtle grid pattern */}
@@ -98,7 +98,7 @@ export default function LoginPage() {
           className="absolute inset-0 opacity-[0.03]"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(139,92,246,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(139,92,246,0.3) 1px, transparent 1px)',
+              'linear-gradient(rgba(16,185,129,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.3) 1px, transparent 1px)',
             backgroundSize: '64px 64px',
           }}
         />
@@ -128,12 +128,12 @@ export default function LoginPage() {
             className="mb-5 relative vt-neon-logo"
           >
             {/* Glow behind logo */}
-            <div className="absolute inset-0 -m-3 rounded-2xl bg-violet-500/25 blur-xl" />
+            <div className="absolute inset-0 -m-3 rounded-2xl bg-emerald-500/25 blur-xl" />
             <div
-              className="relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 via-purple-500 to-indigo-600"
+              className="relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700"
               style={{
                 boxShadow:
-                  '0 0 32px rgba(139,92,246,0.4), 0 4px 16px rgba(139,92,246,0.3), inset 0 1px 0 rgba(255,255,255,0.15)',
+                  '0 0 32px rgba(16,185,129,0.35), 0 4px 16px rgba(16,185,129,0.25), inset 0 1px 0 rgba(255,255,255,0.15)',
               }}
             >
               <HugeiconsIcon
@@ -387,12 +387,12 @@ export default function LoginPage() {
           <motion.button
             type="submit"
             disabled={loading}
-            whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(139,92,246,0.3)' }}
+            whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(16,185,129,0.3)' }}
             whileTap={{ scale: 0.98 }}
             className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-all"
             style={{
-              background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #4f46e5 100%)',
-              boxShadow: '0 4px 20px rgba(124,58,237,0.35), inset 0 1px 0 rgba(255,255,255,0.12)',
+              background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)',
+              boxShadow: '0 4px 20px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
             }}
           >
             {loading ? (
@@ -416,7 +416,7 @@ export default function LoginPage() {
               setError(null)
               setFieldErrors({})
             }}
-            className="font-medium text-violet-500 transition-colors hover:text-violet-600"
+            className="font-medium text-emerald-500 transition-colors hover:text-emerald-400"
           >
             {mode === 'login' ? 'Sign up' : 'Sign in'}
           </button>
