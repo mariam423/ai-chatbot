@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import { useViewTransitionRouter } from '@/hooks/use-view-transition-router'
 import { registerUser } from '@/app/actions/auth'
@@ -87,10 +88,10 @@ export default function LoginPage() {
     >
       {/* ─── Ambient background glows ─── */}
       <div className="pointer-events-none absolute inset-0 vt-ambient-bg">
-        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-emerald-600/20 blur-[140px]" />
-        <div className="ambient-glow-slow absolute -bottom-32 -right-32 size-[480px] rounded-full bg-teal-500/15 blur-[130px]" />
+        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-cyan-600/20 blur-[140px]" />
+        <div className="ambient-glow-slow absolute -bottom-32 -right-32 size-[480px] rounded-full bg-indigo-500/15 blur-[130px]" />
         <div
-          className="ambient-glow absolute left-1/2 top-1/2 size-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-500/10 blur-[110px]"
+          className="ambient-glow absolute left-1/2 top-1/2 size-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-500/10 blur-[110px]"
           style={{ animationDelay: '2s' }}
         />
         {/* Subtle grid pattern */}
@@ -98,7 +99,7 @@ export default function LoginPage() {
           className="absolute inset-0 opacity-[0.03]"
           style={{
             backgroundImage:
-              'linear-gradient(rgba(16,185,129,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,0.3) 1px, transparent 1px)',
+              'linear-gradient(rgba(6,182,212,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.3) 1px, transparent 1px)',
             backgroundSize: '64px 64px',
           }}
         />
@@ -128,12 +129,12 @@ export default function LoginPage() {
             className="mb-5 relative vt-neon-logo"
           >
             {/* Glow behind logo */}
-            <div className="absolute inset-0 -m-3 rounded-2xl bg-emerald-500/25 blur-xl" />
+            <div className="absolute inset-0 -m-3 rounded-2xl bg-cyan-500/25 blur-xl" />
             <div
-              className="relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700"
+              className="relative flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 via-cyan-600 to-indigo-600"
               style={{
                 boxShadow:
-                  '0 0 32px rgba(16,185,129,0.35), 0 4px 16px rgba(16,185,129,0.25), inset 0 1px 0 rgba(255,255,255,0.15)',
+                  '0 0 32px rgba(6,182,212,0.35), 0 4px 16px rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.15)',
               }}
             >
               <HugeiconsIcon
@@ -384,15 +385,24 @@ export default function LoginPage() {
             )}
           </div>
 
+          <div className="flex items-center justify-end">
+            <Link
+              href="/forgot-password"
+              className="text-xs font-medium text-cyan-500 transition-colors hover:text-cyan-400"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
           <motion.button
             type="submit"
             disabled={loading}
-            whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(16,185,129,0.3)' }}
+            whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(6,182,212,0.3)' }}
             whileTap={{ scale: 0.98 }}
             className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-all"
             style={{
-              background: 'linear-gradient(135deg, #059669 0%, #0d9488 100%)',
-              boxShadow: '0 4px 20px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
+              background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
+              boxShadow: '0 4px 20px rgba(6,182,212,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
             }}
           >
             {loading ? (
@@ -416,7 +426,7 @@ export default function LoginPage() {
               setError(null)
               setFieldErrors({})
             }}
-            className="font-medium text-emerald-500 transition-colors hover:text-emerald-400"
+            className="font-medium text-cyan-500 transition-colors hover:text-cyan-400"
           >
             {mode === 'login' ? 'Sign up' : 'Sign in'}
           </button>

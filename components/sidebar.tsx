@@ -122,8 +122,8 @@ function SidebarContent({
             collapsed ? 'px-0' : ''
           }`}
           style={{
-            background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-            boxShadow: '0 2px 12px rgba(124,58,237,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+            background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
+            boxShadow: '0 2px 12px rgba(8,145,178,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           }}
           title={collapsed ? 'New Chat' : undefined}
         >
@@ -219,7 +219,7 @@ function SidebarContent({
                             >
                               {active && (
                                 <div
-                                  className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-violet-500"
+                                  className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-cyan-500"
                                   style={{ boxShadow: '0 0 8px var(--accent-glow)' }}
                                 />
                               )}
@@ -227,7 +227,7 @@ function SidebarContent({
                                 icon={ChatIcon}
                                 size={13}
                                 strokeWidth={1.5}
-                                className={`mt-0.5 shrink-0 ${active ? 'text-violet-500' : 'text-[var(--text-muted)]'}`}
+                                className={`mt-0.5 shrink-0 ${active ? 'text-cyan-500' : 'text-[var(--text-muted)]'}`}
                               />
                               <span className="min-w-0">
                                 <span className="block truncate">{session.title}</span>
@@ -307,7 +307,7 @@ function SidebarContent({
                                   <button
                                     type="submit"
                                     aria-label="Save session title"
-                                    className="flex size-6 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-500/10"
+                                    className="flex size-6 shrink-0 items-center justify-center rounded-lg text-cyan-500 transition-colors hover:bg-cyan-500/10"
                                   >
                                     <HugeiconsIcon icon={CheckIcon} size={13} strokeWidth={2} />
                                   </button>
@@ -411,7 +411,7 @@ function SidebarContent({
                       icon={ChatIcon}
                       size={14}
                       strokeWidth={1.5}
-                      className={active ? 'text-violet-500' : 'text-[var(--text-muted)]'}
+                      className={active ? 'text-cyan-500' : 'text-[var(--text-muted)]'}
                     />
                   </motion.button>
                 </li>

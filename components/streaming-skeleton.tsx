@@ -17,8 +17,8 @@ export default function StreamingSkeleton() {
       aria-label="Assistant is typing"
     >
       <div
-        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600"
-        style={{ boxShadow: '0 2px 10px rgba(16,185,129,0.3)' }}
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600"
+        style={{ boxShadow: '0 2px 10px rgba(6,182,212),0.3)' }}
       >
         <HugeiconsIcon
           icon={BotMessageSquareIcon}

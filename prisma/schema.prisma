@@ -19,6 +19,7 @@ model User {
   createdAt     DateTime  @default(now())
   accounts      Account[]
   sessions      Session[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -87,4 +88,19 @@ model ChatMessage {
 
   @@index([sessionId, position])
   @@map("chat_messages")
+}
+
+/// Single-use password reset token. `tokenHash` is SHA-256 of the raw token
+/// sent in the email link — the raw value is never stored.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }

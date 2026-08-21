@@ -1,5 +1,6 @@
 'use server'
 
+import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
@@ -44,5 +45,107 @@ export async function registerUser(input: {
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not create account. Please try again.' }
+  }
+}
+const RequestResetSchema = z.object({
+  email: z.string().trim().email('Invalid email address').max(255),
+})
+
+const ResetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be at most 128 characters'),
+})
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+/**
+ * Request a password reset link. Always returns ok (beyond validation) so the
+ * endpoint can't be used to probe which emails have accounts. The token is
+ * stored hashed (SHA-256); only the raw value rides in the reset link.
+ *
+ * No email provider is configured yet, so the link is logged server-side.
+ * Swap the `console.info` for a real send call when SMTP/Resend is added.
+ */
+export async function requestPasswordReset(input: {
+  email: string
+}): Promise<{ ok: true } | { ok: false; error: string; issues?: Array<{ message: string }> }> {
+  const parsed = RequestResetSchema.safeParse(input)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'Invalid input.',
+      issues: parsed.error.issues.map((i) => ({ message: i.message })),
+    }
+  }
+
+  const normalisedEmail = parsed.data.email.toLowerCase()
+  try {
+    const user = await prisma.user.findUnique({ where: { email: normalisedEmail } })
+    if (user?.passwordHash !== undefined && user.passwordHash !== null) {
+      const rawToken = randomUUID() + '.' + randomUUID()
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex')
+      await prisma.passwordResetToken.create({
+        data: {
+          tokenHash,
+          userId: user.id,
+          expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+        },
+      })
+      console.info(
+        `[password-reset] link for ${normalisedEmail}: /reset-password?token=${rawToken}`,
+      )
+    }
+    return { ok: true }
+  } catch {
+    // Don't leak internals — the caller sees the same neutral success either way.
+    return { ok: true }
+  }
+}
+
+/**
+ * Complete a password reset: consume a single-use, unexpired token and set the
+ * new password. Deleting the token row also invalidates every older token for
+ * that user (one active reset at a time is enough).
+ */
+export async function resetPassword(input: {
+  token: string
+  password: string
+}): Promise<{ ok: true } | { ok: false; error: string; issues?: Array<{ message: string }> }> {
+  const parsed = ResetPasswordSchema.safeParse(input)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'Invalid input.',
+      issues: parsed.error.issues.map((i) => ({ message: i.message })),
+    }
+  }
+
+  const { token, password } = parsed.data
+  const tokenHash = createHash('sha256').update(token).digest('hex')
+
+  try {
+    const record = await prisma.passwordResetToken.findUnique({ where: { tokenHash } })
+    if (!record || record.expiresAt < new Date() || record.usedAt !== null) {
+      return {
+        ok: false,
+        error: 'This reset link is invalid or has expired. Please request a new one.',
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12)
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      prisma.passwordResetToken.deleteMany({
+        where: { userId: record.userId, id: { not: record.id } },
+      }),
+    ])
+
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not reset password. Please try again.' }
   }
 }
