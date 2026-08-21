@@ -295,8 +295,8 @@ function SidebarContent({
             collapsed ? 'px-0' : ''
           }`}
           style={{
-            background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
-            boxShadow: '0 2px 12px rgba(8,145,178,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+            background: 'linear-gradient(to right, #06b6d4, #0891b2)',
+            boxShadow: '0 4px 14px 0 rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           }}
           title={collapsed ? 'New Chat' : undefined}
         >

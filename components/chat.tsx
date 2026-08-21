@@ -492,7 +492,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
                           color: systemPrompt === preset.prompt ? 'var(--text-primary)' : 'var(--text-secondary)',
                         }}
                       >
-                        <span className="size-1.5 shrink-0 rounded-full bg-indigo-500" />
+                        <span className="size-1.5 shrink-0 rounded-full bg-cyan-400" />
                         <span className="truncate font-medium">{preset.name}</span>
                         {systemPrompt === preset.prompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
                       </button>
@@ -562,10 +562,10 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
                 : { scale: 1.02, boxShadow: '0 0 20px rgba(6,182,212),0.25)' }
             }
             whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-            className="rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-all disabled:cursor-not-allowed disabled:opacity-30"
+            className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-950 transition-all disabled:cursor-not-allowed disabled:opacity-30"
             style={{
-              background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
-              boxShadow: '0 2px 12px rgba(6,182,212),0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+              background: 'linear-gradient(to right, #06b6d4, #0891b2)',
+              boxShadow: '0 4px 14px 0 rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
             }}
           >
             <HugeiconsIcon icon={SendIcon} size={16} strokeWidth={1.5} />

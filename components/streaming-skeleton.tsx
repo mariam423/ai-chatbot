@@ -17,14 +17,14 @@ export default function StreamingSkeleton() {
       aria-label="Assistant is typing"
     >
       <div
-        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600"
-        style={{ boxShadow: '0 2px 10px rgba(6,182,212),0.3)' }}
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/10 border border-cyan-500/20"
+        style={{ boxShadow: '0 2px 10px rgba(6,182,212,0.3)' }}
       >
         <HugeiconsIcon
           icon={BotMessageSquareIcon}
           size={13}
           strokeWidth={1.5}
-          className="text-white"
+          className="text-cyan-400"
         />
       </div>
       <div

@@ -215,10 +215,9 @@ export default function ChatApp() {
             </motion.button>
             <div className="flex items-center gap-2">
               <div
-                className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-indigo-600 vt-brand-icon"
-                style={{ boxShadow: '0 2px 10px rgba(6,182,212,0.3)' }}
+                className="flex size-7 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/20 vt-brand-icon"
               >
-                <HugeiconsIcon icon={MenuIcon} size={13} strokeWidth={2} className="text-white" />
+                <HugeiconsIcon icon={MenuIcon} size={13} strokeWidth={2} className="text-cyan-400" />
               </div>
               <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
                 Chatbot
@@ -261,12 +260,12 @@ export default function ChatApp() {
                       className="size-6 rounded-full"
                     />
                   ) : (
-                    <div className="flex size-6 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600">
+                    <div className="flex size-6 items-center justify-center rounded-full bg-cyan-500/10 border border-cyan-500/20">
                       <HugeiconsIcon
                         icon={UserIcon}
                         size={12}
                         strokeWidth={1.5}
-                        className="text-white"
+                        className="text-cyan-400"
                       />
                     </div>
                   )}
