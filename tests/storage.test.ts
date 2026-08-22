@@ -4,14 +4,15 @@ import {
   THREAD_STORAGE_VERSION,
   clearThread,
   loadThread,
+  loadThreadState,
   normalizeThread,
   saveThread,
+  saveThreadState,
 } from '../lib/storage'
 import type { ChatMessage } from '../lib/types'
 
 // vitest runs in node, so there is no real localStorage or window. Provide an
-// in-memory Storage implementation behind a fake window for the module under
-// test.
+// in-memory Storage implementation behind a fake window for the module under test.
 const store = new Map<string, string>()
 
 const storageStub: Storage = {
@@ -46,6 +47,8 @@ const sample: ChatMessage[] = [
   { id: '2', role: 'assistant', content: 'Hi there' },
 ]
 
+const v1Payload = () => ({ version: 1, messages: sample })
+
 describe('loadThread', () => {
   it('returns an empty thread when nothing is stored', () => {
     expect(loadThread()).toEqual([])
@@ -53,13 +56,30 @@ describe('loadThread', () => {
 
   it('returns an empty thread when window is unavailable (SSR guard)', () => {
     delete (globalThis as { window?: unknown }).window
-    store.set(THREAD_STORAGE_KEY, JSON.stringify({ version: 1, messages: sample }))
+    store.set(THREAD_STORAGE_KEY, JSON.stringify(v1Payload()))
     expect(loadThread()).toEqual([])
   })
 
   it('round-trips a saved thread', () => {
     saveThread(sample)
     expect(loadThread()).toEqual(sample)
+  })
+
+  it('returns the active branch when multiple branches are stored', () => {
+    const branchB: ChatMessage[] = [
+      { id: '1', role: 'user', content: 'Hello' },
+      { id: '9', role: 'user', content: 'Hello (edited)' },
+      { id: '10', role: 'assistant', content: 'Forked reply' },
+    ]
+    store.set(
+      THREAD_STORAGE_KEY,
+      JSON.stringify({
+        version: THREAD_STORAGE_VERSION,
+        branches: [sample, branchB],
+        active: 1,
+      }),
+    )
+    expect(loadThread()).toEqual(branchB)
   })
 
   it('returns an empty thread for corrupt JSON', () => {
@@ -72,13 +92,23 @@ describe('loadThread', () => {
     expect(loadThread()).toEqual([])
   })
 
-  it('migrates a legacy unversioned payload and writes it back in the current format', () => {
-    // Pre-versioning format was a bare array of messages.
+  it('migrates a v1 payload and writes it back in the current format', () => {
+    store.set(THREAD_STORAGE_KEY, JSON.stringify(v1Payload()))
+    expect(loadThread()).toEqual(sample)
+    expect(JSON.parse(storedRaw()!)).toEqual({
+      version: THREAD_STORAGE_VERSION,
+      branches: [sample],
+      active: 0,
+    })
+  })
+
+  it('migrates a legacy unversioned payload and writes it back', () => {
     store.set(THREAD_STORAGE_KEY, JSON.stringify(sample))
     expect(loadThread()).toEqual(sample)
     expect(JSON.parse(storedRaw()!)).toEqual({
       version: THREAD_STORAGE_VERSION,
-      messages: sample,
+      branches: [sample],
+      active: 0,
     })
   })
 
@@ -95,7 +125,8 @@ describe('loadThread', () => {
       THREAD_STORAGE_KEY,
       JSON.stringify({
         version: THREAD_STORAGE_VERSION,
-        messages: [{ id: '1', role: 'system', content: 'nope' }],
+        branches: [[{ id: '1', role: 'system', content: 'nope' }]],
+        active: 0,
       }),
     )
     expect(loadThread()).toEqual([])
@@ -104,7 +135,11 @@ describe('loadThread', () => {
   it('returns an empty thread when a message is missing fields', () => {
     store.set(
       THREAD_STORAGE_KEY,
-      JSON.stringify({ version: THREAD_STORAGE_VERSION, messages: [{ id: '1' }] }),
+      JSON.stringify({
+        version: THREAD_STORAGE_VERSION,
+        branches: [[{ id: '1' } as ChatMessage]],
+        active: 0,
+      }),
     )
     expect(loadThread()).toEqual([])
   })
@@ -115,7 +150,8 @@ describe('saveThread', () => {
     saveThread(sample)
     expect(JSON.parse(storedRaw()!)).toEqual({
       version: THREAD_STORAGE_VERSION,
-      messages: sample,
+      branches: [sample],
+      active: 0,
     })
   })
 
@@ -135,15 +171,42 @@ describe('saveThread', () => {
   })
 })
 
+describe('loadThreadState / saveThreadState', () => {
+  it('round-trips a branched thread state', () => {
+    const state = { branches: [sample, []], active: 1 }
+    saveThreadState(state)
+    expect(loadThreadState()).toEqual(state)
+  })
+
+  it('clamps an out-of-range active index to an empty thread on load', () => {
+    store.set(
+      THREAD_STORAGE_KEY,
+      JSON.stringify({ version: THREAD_STORAGE_VERSION, branches: [sample], active: 5 }),
+    )
+    expect(loadThread()).toEqual([])
+  })
+
+  it('returns an empty single branch when nothing is stored', () => {
+    expect(loadThreadState()).toEqual({ branches: [[]], active: 0 })
+  })
+})
+
 describe('normalizeThread', () => {
   it('passes through a current-version payload without migration', () => {
-    const payload = { version: THREAD_STORAGE_VERSION, messages: sample }
-    expect(normalizeThread(payload)).toEqual({ thread: payload, migrated: false })
+    const payload = { version: THREAD_STORAGE_VERSION, branches: [sample], active: 0 }
+    expect(normalizeThread(payload)).toEqual({ state: payload, migrated: false })
+  })
+
+  it('migrates a v1 payload to a single branch', () => {
+    expect(normalizeThread(v1Payload())).toEqual({
+      state: { version: THREAD_STORAGE_VERSION, branches: [sample], active: 0 },
+      migrated: true,
+    })
   })
 
   it('migrates a legacy bare-array payload', () => {
     expect(normalizeThread(sample)).toEqual({
-      thread: { version: THREAD_STORAGE_VERSION, messages: sample },
+      state: { version: THREAD_STORAGE_VERSION, branches: [sample], active: 0 },
       migrated: true,
     })
   })
@@ -153,8 +216,9 @@ describe('normalizeThread', () => {
       'nope',
       42,
       null,
-      { version: THREAD_STORAGE_VERSION, messages: 'nope' },
+      { version: THREAD_STORAGE_VERSION, branches: 'nope' },
       { version: THREAD_STORAGE_VERSION + 1, messages: sample },
+      { version: THREAD_STORAGE_VERSION, branches: [], active: 0 },
       [{ id: '1', role: 'system', content: 'x' }],
       [{ id: '1' }],
     ]) {

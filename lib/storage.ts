@@ -2,14 +2,21 @@ import { z } from 'zod'
 import { ChatMessageSchema, type ChatMessage } from './types'
 
 /**
- * Chat thread persistence (PRD FR-9).
+ * Chat thread persistence (PRD FR-9), extended for conversation branching.
  *
- * Stored payload is versioned (`{ version: 1, messages }`) so future schema
- * changes can migrate old data instead of silently dropping it (see the
+ * A thread is stored as a set of linear *branches* plus the index of the active
+ * one. Each branch is a full linear sequence of messages; branching happens
+ * when the user edits a past prompt, forking a new branch from a shared prefix
+ * (see lib/storage.ts helpers and the message editing UI in components/chat.tsx).
+ * The active branch is what the UI renders; switching branches re-renders the
+ * stored conversation without losing any branch's context.
+ *
+ * Stored payload is versioned (`{ version: 2, branches, active }`) so future
+ * schema changes can migrate old data instead of silently dropping it (see the
  * vercel-react-best-practices `client-localstorage-schema` rule). Reading is
- * validated with Zod at the storage boundary — corrupt or partial payloads
- * are treated as an empty thread, never trusted, while legacy formats are
- * migrated to the current version (see `normalizeThread`).
+ * validated with Zod at the storage boundary — corrupt or partial payloads are
+ * treated as an empty thread, never trusted, while legacy formats are migrated
+ * to the current version (see `normalizeThread`).
  */
 
 export const THREAD_STORAGE_KEY = 'chat.messages'
@@ -45,21 +52,35 @@ export function clearSessionId(): void {
 }
 
 /** Current persisted format version. Bump + add a migration when the shape changes. */
-export const THREAD_STORAGE_VERSION = 1
+export const THREAD_STORAGE_VERSION = 2
 
-const ThreadSchema = z.object({
+const ThreadStateSchema = z.object({
   version: z.literal(THREAD_STORAGE_VERSION),
+  branches: z.array(z.array(ChatMessageSchema)).min(1),
+  active: z.number().int().min(0),
+})
+
+/** The persisted, versioned thread payload. */
+export type StoredThread = z.infer<typeof ThreadStateSchema>
+
+/** In-memory thread state: every branch plus the active branch index. */
+export interface ThreadState {
+  branches: ChatMessage[][]
+  active: number
+}
+
+/** Version 1 format (pre-branching): a single linear thread. */
+const Version1Schema = z.object({
+  version: z.literal(1),
   messages: z.array(ChatMessageSchema),
 })
 
-export type StoredThread = z.infer<typeof ThreadSchema>
-
-/** Legacy pre-versioning format: a bare array of messages (pre FR-9 hardening). */
+/** Legacy pre-versioning format: a bare array of messages. */
 const LegacyThreadSchema = z.array(ChatMessageSchema)
 
 /**
  * Normalize a parsed storage payload to the current versioned shape,
- * migrating legacy formats.
+ * migrating legacy formats (v1 and the pre-versioning bare array).
  *
  * Returns `null` when the payload is not a valid thread (corrupt, partial,
  * or an unknown future version). `migrated` is true when the payload was a
@@ -67,43 +88,72 @@ const LegacyThreadSchema = z.array(ChatMessageSchema)
  */
 export function normalizeThread(
   payload: unknown,
-): { thread: StoredThread; migrated: boolean } | null {
-  const current = ThreadSchema.safeParse(payload)
-  if (current.success) return { thread: current.data, migrated: false }
+): { state: StoredThread; migrated: boolean } | null {
+  const current = ThreadStateSchema.safeParse(payload)
+  if (current.success) return { state: current.data, migrated: false }
+
+  const v1 = Version1Schema.safeParse(payload)
+  if (v1.success) {
+    return {
+      state: { version: THREAD_STORAGE_VERSION, branches: [v1.data.messages], active: 0 },
+      migrated: true,
+    }
+  }
 
   const legacy = LegacyThreadSchema.safeParse(payload)
   if (legacy.success) {
-    return { thread: { version: THREAD_STORAGE_VERSION, messages: legacy.data }, migrated: true }
+    return {
+      state: { version: THREAD_STORAGE_VERSION, branches: [legacy.data], active: 0 },
+      migrated: true,
+    }
   }
 
   return null
 }
 
-/** Load the persisted thread, or an empty one if absent, corrupt, or invalid. */
-export function loadThread(): ChatMessage[] {
-  if (typeof window === 'undefined') return []
+/** Load the persisted thread state, or the empty single-branch state. */
+export function loadThreadState(): ThreadState {
+  if (typeof window === 'undefined') return { branches: [[]], active: 0 }
   try {
     const raw = window.localStorage.getItem(THREAD_STORAGE_KEY)
-    if (!raw) return []
+    if (!raw) return { branches: [[]], active: 0 }
     const result = normalizeThread(JSON.parse(raw))
-    if (!result) return []
+    if (!result) return { branches: [[]], active: 0 }
     // One-time migration: write legacy data back in the current format so the
     // next load skips the migration path. Best-effort like all writes.
-    if (result.migrated) saveThread(result.thread.messages)
-    return result.thread.messages
+    if (result.migrated) saveThreadState(result.state)
+    return { branches: result.state.branches, active: result.state.active }
   } catch {
-    return []
+    return { branches: [[]], active: 0 }
   }
 }
 
-/** Persist the thread. Best-effort: storage can be unavailable (private mode, quota). */
-export function saveThread(messages: ChatMessage[]): void {
+/** Persist the thread state. Best-effort: storage can be unavailable. */
+export function saveThreadState(state: ThreadState): void {
   try {
-    const payload: StoredThread = { version: THREAD_STORAGE_VERSION, messages }
+    const payload: StoredThread = {
+      version: THREAD_STORAGE_VERSION,
+      branches: state.branches,
+      active: state.active,
+    }
     window.localStorage.setItem(THREAD_STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // Storage unavailable — persistence is best-effort.
   }
+}
+
+/** Load the active branch's messages, or an empty thread when none stored. */
+export function loadThread(): ChatMessage[] {
+  const state = loadThreadState()
+  return state.branches[state.active] ?? []
+}
+
+/**
+ * Persist a single-branch thread (convenience for the pre-branching call
+ * sites). The stored state is always normalized to the versioned shape.
+ */
+export function saveThread(messages: ChatMessage[]): void {
+  saveThreadState({ branches: [messages], active: 0 })
 }
 
 /** Remove the persisted thread. */

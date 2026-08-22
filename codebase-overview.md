@@ -44,7 +44,11 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   retry, regenerate, stop, clear, document attachments, video frame state,
   SSE consumption, and persistence. Normal deltas are coalesced into
   word-sized UI updates. Structured JSON is validated and rendered as Markdown
-  after completion.
+  after completion. The thread is stored as a branch-aware `ThreadState`
+  (see `components/message-bubble.tsx`): editing a past user prompt forks a new
+  branch from the shared prefix and regenerates the reply, and a version
+  switcher bar lets the user toggle between branches without losing context.
+  Also wires the voice mic and the export menu into the composer.
 - **`components/file-upload.tsx`** — PDF/TXT/MD/CSV attachment picker with
   compact removable badges and processing errors.
 - **`components/media-upload.tsx`** — MP4/WebM picker that previews sampled
@@ -56,7 +60,20 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`components/message-bubble.tsx`**, **`components/markdown.tsx`**, and
   **`components/streaming-skeleton.tsx`** — User/assistant presentation,
   highlighted Markdown/code rendering with copy buttons, citation badge
-  handling, and loading state.
+  handling, and loading state. User bubbles expose an **Edit prompt** action
+  that swaps the bubble for an inline textarea; saving calls back into
+  `chat.tsx` to fork a new branch (tree-branching).
+- **`components/chat-export.tsx`** + **`lib/export-chat.ts`** — An **Export
+  chat** menu in the composer that downloads the active branch as Markdown
+  (`lib/export-chat.ts` also holds the Node-testable pure `chatToMarkdown`/
+  `chatToJson`/`exportFileName` helpers) or JSON via a generated Blob, and
+  renders a styled self-contained transcript into a hidden iframe for the
+  browser's native **Print → Save-as-PDF** flow (no PDF dependency).
+- **`components/audio-input.tsx`** — A mic button in the composer using the
+  browser Web Speech `SpeechRecognition` API (Chrome/Edge only; renders
+  nothing when unsupported). While listening it shows a pulsing red indicator
+  and an animated equalizer, and the finalized transcript is appended to the
+  composer input via `onTranscript`.
 - **`components/diagram-card.tsx`** + **`lib/svg-data-url.ts`** — When a reply
   embeds an SVG data URL (the `diagram_render` tool's `imageUrl`), the Markdown
   `img` override routes it into a diagram card rendered via `<img>` (data URLs
@@ -153,7 +170,12 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   abort-aware stream reading.
 - **`lib/types.ts`** — Shared Zod-backed chat, uploaded-document, video-frame,
   session, memory, and prompt-preset types.
-- **`lib/storage.ts`** — Versioned localStorage fallback for chat messages.
+- **`lib/storage.ts`** — Versioned localStorage fallback for chat messages,
+  extended for branching. The payload is version 2 and stores a `ThreadState`
+  (`{ version: 2, branches, active }`) — a list of linear branches plus the
+  active index. `loadThread`/`saveThread` remain as active-branch
+  conveniences; v1 and pre-versioning payloads auto-migrate to a single
+  branch.
 - **`lib/db.ts`** — Hot-reload-safe Prisma singleton using the LibSQL adapter.
 
 ## Database
