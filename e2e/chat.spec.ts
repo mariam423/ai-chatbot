@@ -122,19 +122,27 @@ test('persists the versioned storage payload (FR-9)', async ({ page }) => {
     return raw ? (JSON.parse(raw) as unknown) : null
   }, THREAD_STORAGE_KEY)
 
-  await test.step('payload is the versioned { version, messages } shape', async () => {
+  await test.step('payload is the versioned { version, branches, active } shape', async () => {
     expect(payload).toEqual({
       version: THREAD_STORAGE_VERSION,
-      messages: [
-        expect.objectContaining({ role: 'user', content: 'Check payload' }),
-        expect.objectContaining({ role: 'assistant', content: 'Versioned reply' }),
+      branches: [
+        [
+          expect.objectContaining({ role: 'user', content: 'Check payload' }),
+          expect.objectContaining({ role: 'assistant', content: 'Versioned reply' }),
+        ],
       ],
+      active: 0,
     })
   })
 
   await test.step('every message has an id, a valid role, and string content', async () => {
-    const messages = (payload as { messages: Array<{ id: string; role: string; content: string }> })
-      .messages
+    const branches = (
+      payload as {
+        branches: Array<Array<{ id: string; role: string; content: string }>>
+      }
+    ).branches
+    expect(branches.length).toBe(1)
+    const messages = branches[0]!
     expect(messages.length).toBe(2)
     for (const message of messages) {
       expect(message.id.length).toBeGreaterThan(0)

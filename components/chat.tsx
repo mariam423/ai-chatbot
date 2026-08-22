@@ -1,9 +1,15 @@
 'use client'
 
 import { HugeiconsIcon } from '@hugeicons/react'
-import { AiSparklesIcon, RefreshIcon, SendIcon, TrashIcon } from '@hugeicons/core-free-icons'
+import {
+  AiSparklesIcon,
+  RefreshIcon,
+  SendIcon,
+  TrashIcon,
+  GitBranchIcon,
+} from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearChatSession,
   createChatSession,
@@ -13,7 +19,7 @@ import {
   updateSessionSystemPrompt,
 } from '@/app/actions'
 import { readSSEStream } from '@/lib/sse'
-import { clearThread, loadThread, saveThread } from '@/lib/storage'
+import { clearThread, loadThreadState, saveThreadState, type ThreadState } from '@/lib/storage'
 import { detectStructuredOutputKind, renderStructuredResponse } from '@/lib/structured-output'
 import type { VideoFrame } from '@/lib/video'
 import type { ModelKey } from '@/lib/models'
@@ -31,6 +37,8 @@ import MessageBubble from './message-bubble'
 import StreamingSkeleton from './streaming-skeleton'
 import FileUpload from './file-upload'
 import MediaUpload from './media-upload'
+import AudioInput from './audio-input'
+import ChatExport from './chat-export'
 
 interface ChatProps {
   sessionId: string | null
@@ -47,6 +55,9 @@ function newId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/** The initial single-branch, empty thread state. */
+const EMPTY_THREAD: ThreadState = { branches: [[]], active: 0 }
+
 export default function Chat({
   sessionId,
   modelKey,
@@ -54,7 +65,7 @@ export default function Chat({
   onSessionChange,
   onConversationChanged,
 }: ChatProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD)
   const [restored, setRestored] = useState(false)
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -75,6 +86,21 @@ export default function Chat({
   const threadGenRef = useRef(0)
   const documentsRevisionRef = useRef(0)
 
+  // The active branch is what the UI renders; other branches are preserved for
+  // toggling when a past prompt has been edited (tree-branching / forks).
+  const messages = useMemo(() => thread.branches[thread.active] ?? [], [thread])
+
+  /** Update the currently active branch in place (streaming appends, etc.). */
+  const updateActive = useCallback((updater: (msgs: ChatMessage[]) => ChatMessage[]) => {
+    setThread((prev) => {
+      if (prev.active < 0 || prev.active >= prev.branches.length) return prev
+      return {
+        ...prev,
+        branches: prev.branches.map((branch, i) => (i === prev.active ? updater(branch) : branch)),
+      }
+    })
+  }, [])
+
   const scrollToBottom = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }
@@ -83,16 +109,18 @@ export default function Chat({
     let cancelled = false
     const gen = threadGenRef.current
     async function restore() {
-      let initial = loadThread()
+      let initial = loadThreadState()
       if (sessionId) {
         const result = await getChatSession(sessionId)
         if (!cancelled && gen === threadGenRef.current && result.ok) {
-          if (result.messages.length > 0) initial = result.messages
+          if (result.messages.length > 0) {
+            initial = { branches: [result.messages], active: 0 }
+          }
           setSystemPrompt(result.systemPrompt ?? null)
         }
       }
       if (!cancelled && gen === threadGenRef.current) {
-        setMessages(initial)
+        setThread(initial)
         setRestored(true)
       }
     }
@@ -139,8 +167,8 @@ export default function Chat({
 
   useEffect(() => {
     if (!restored || isStreaming) return
-    saveThread(messages)
-  }, [messages, isStreaming, restored])
+    saveThreadState(thread)
+  }, [thread, isStreaming, restored])
 
   // Load custom presets from user preferences on mount.
   useEffect(() => {
@@ -201,7 +229,7 @@ export default function Chat({
       base && base[base.length - 1]?.role === 'user' && base[base.length - 1]!.content === content
         ? base
         : [...(base ?? messages), userMessage]
-    setMessages(history)
+    updateActive(() => history)
     setInput('')
     setError(null)
     setRetryMessage(content)
@@ -215,13 +243,13 @@ export default function Chat({
     let pendingReply = ''
     let settled = false
     const structuredOutput = detectStructuredOutputKind(content, documents.length > 0)
-    setMessages([...history, { id: assistantId, role: 'assistant', content: '' }])
+    updateActive(() => [...history, { id: assistantId, role: 'assistant', content: '' }])
 
     const flushReply = () => {
       if (pendingReply === '') return
       const chunk = pendingReply
       pendingReply = ''
-      setMessages((prev) => {
+      updateActive((prev) => {
         const last = prev[prev.length - 1]
         if (!last || last.role !== 'assistant' || last.id !== assistantId) return prev
         return [...prev.slice(0, -1), { ...last, content: last.content + chunk }]
@@ -273,7 +301,7 @@ export default function Chat({
       flushReply()
       if (structuredOutput && reply !== '') {
         const rendered = structuredOutput === 'chart' ? reply : renderStructuredResponse(reply)
-        setMessages((prev) => {
+        updateActive((prev) => {
           const last = prev[prev.length - 1]
           if (!last || last.role !== 'assistant' || last.id !== assistantId) return prev
           return [...prev.slice(0, -1), { ...last, content: rendered }]
@@ -286,7 +314,7 @@ export default function Chat({
         /* Cancelled */
       } else {
         setError(err instanceof Error ? err.message : 'Something went wrong.')
-        setMessages((prev) =>
+        updateActive((prev) =>
           prev[prev.length - 1]?.role === 'assistant' && prev[prev.length - 1]!.content === ''
             ? prev.slice(0, -1)
             : prev,
@@ -305,11 +333,28 @@ export default function Chat({
       settled && settledReply !== ''
         ? [...history, { id: assistantId, role: 'assistant', content: settledReply }]
         : history
-    saveThread(settledThread)
     void persistToDb(settledThread)
   }
 
-  async function persistToDb(thread: ChatMessage[]): Promise<void> {
+  /**
+   * Inline-edit a past user message: fork a NEW branch from the shared context
+   * prefix (dropping the old continuation) and regenerate from there. The old
+   * branch is preserved so the user can toggle back without losing context.
+   */
+  async function editMessage(index: number, newText: string) {
+    const content = newText.trim()
+    if (content === '' || content === messages[index]?.content) return
+    const prefix = messages.slice(0, index)
+    // Activate a fresh fork from the shared prefix; send() appends the edited
+    // prompt and streams the regenerated reply onto this new active branch.
+    setThread((prev) => ({
+      branches: [...prev.branches, prefix],
+      active: prev.branches.length,
+    }))
+    void send(content, prefix)
+  }
+
+  async function persistToDb(threadMsgs: ChatMessage[]): Promise<void> {
     let sid = sessionId
     if (!sid) {
       sid = newId()
@@ -319,7 +364,7 @@ export default function Chat({
     // with session creation (upsert `create` includes it).
     const result = await saveChatMessages({
       sessionId: sid,
-      messages: thread,
+      messages: threadMsgs,
       ...(enabledSkills !== null ? { enabledSkills } : {}),
     })
     if (result.ok) onConversationChanged()
@@ -337,7 +382,7 @@ export default function Chat({
     const trimmed = messages.slice(0, -1)
     const userText = [...trimmed].reverse().find((m) => m.role === 'user')?.content
     if (!userText) return
-    setMessages(trimmed)
+    updateActive(() => trimmed)
     void send(userText, trimmed)
   }
 
@@ -347,7 +392,7 @@ export default function Chat({
     if (sessionId) void clearChatSession(sessionId)
     onSessionChange(null)
     clearThread()
-    setMessages([])
+    setThread(EMPTY_THREAD)
     setError(null)
     setRetryMessage(null)
     setInput('')
@@ -374,6 +419,50 @@ export default function Chat({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* ─── Branch switcher (visible only once a thread has forked) ─── */}
+      {thread.branches.length > 1 && (
+        <div
+          className="flex items-center gap-2 overflow-x-auto px-4 py-2"
+          style={{ borderBottom: '1px solid var(--border-subtle)' }}
+        >
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-[var(--text-muted)]">
+            <HugeiconsIcon icon={GitBranchIcon} size={13} strokeWidth={1.5} />
+            Versions
+          </span>
+          <div className="flex items-center gap-1.5">
+            {thread.branches.map((branch, i) => {
+              const active = i === thread.active
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setThread((prev) => ({ ...prev, active: i }))}
+                  aria-pressed={active}
+                  aria-label={`Show version ${i + 1}`}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors"
+                  style={{
+                    background: active ? 'var(--accent-soft)' : 'var(--bg-input)',
+                    border: `1px solid ${active ? 'var(--accent-medium)' : 'var(--border-subtle)'}`,
+                    color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  }}
+                >
+                  <HugeiconsIcon
+                    icon={GitBranchIcon}
+                    size={11}
+                    strokeWidth={1.5}
+                    className={active ? 'text-cyan-500' : 'text-[var(--text-muted)]'}
+                  />
+                  v{i + 1}
+                  <span className="text-[10px] text-[var(--text-tertiary)]">
+                    {branch.length} msgs
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-24">
@@ -407,7 +496,12 @@ export default function Chat({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <MessageBubble message={message} sessionId={sessionId} />
+                <MessageBubble
+                  message={message}
+                  sessionId={sessionId}
+                  editable={message.role === 'user' && !isStreaming}
+                  onEditSave={(next) => void editMessage(index, next)}
+                />
                 {message.role === 'assistant' &&
                   !isStreaming &&
                   message.content !== '' &&
@@ -518,6 +612,15 @@ export default function Chat({
           void send(input)
         }}
       >
+        <AudioInput
+          disabled={isStreaming}
+          onTranscript={(text) => setInput((prev) => `${prev}${text}`.trimStart())}
+        />
+        <ChatExport
+          messages={messages}
+          title={messages.find((m) => m.role === 'user')?.content}
+          disabled={isStreaming}
+        />
         <MediaUpload
           frames={videoFrames}
           onFramesChange={setVideoFrames}
