@@ -127,6 +127,30 @@ const PRD_ITEMS: PrdItem[] = [
     notes:
       'Regenerate button re-runs the last user message in place (no duplicate bubble). Covered by e2e/sidebar.spec.ts.',
   },
+  {
+    id: 'FR-15',
+    title: 'Skill catalog (8 domains with instructions & tools)',
+    verification: 'integration',
+    status: 'implemented',
+    notes:
+      'lib/skills/registry.ts defines 8 skill domains with system instructions and 5 Zod-typed tools (diagram_render, weather_lookup, humanize_text, schedule_block, code_analyze) bound to OpenAI function calling via z.toJSONSchema. Active instructions are injected for tool-relevant requests; SKILLS_ENABLED and per-session overrides narrow the catalog. Covered by tests/skill-registry.test.ts + route filtering tests.',
+  },
+  {
+    id: 'FR-16',
+    title: 'Tool calling with graceful fallbacks',
+    verification: 'integration',
+    status: 'implemented',
+    notes:
+      'Skill tools execute through the agent loop (lib/agent.ts) with Zod-validated arguments; unconfigured providers return clearly marked placeholders and invalid/unknown calls return structured fallbacks instead of throwing. Covered by tests/skill-registry.test.ts (executors, fallbacks, agent-loop binding).',
+  },
+  {
+    id: 'FR-17',
+    title: 'Per-session skill configuration',
+    verification: 'e2e',
+    status: 'implemented',
+    notes:
+      'SkillPicker (components/skill-picker.tsx) toggles the 8 skills in the chat header; ChatSession.enabledSkills persists the override (updateSessionSkills/getSessionSkills, applied at session creation via saveChatMessages) and the request narrows injected instructions/tools. Covered by tests/actions.test.ts + tests/skill-registry.test.ts + e2e/skills.spec.ts.',
+  },
 
   // --- Non-functional requirements (PRD.md section 7) ---
   {
@@ -171,7 +195,7 @@ const PRD_ITEMS: PrdItem[] = [
 describe('PRD checklist', () => {
   it('covers every FR and NFR from PRD.md exactly once', () => {
     const expected = [
-      ...Array.from({ length: 14 }, (_, i) => `FR-${i + 1}`),
+      ...Array.from({ length: 17 }, (_, i) => `FR-${i + 1}`),
       ...Array.from({ length: 5 }, (_, i) => `NFR-${i + 1}`),
     ]
     expect(PRD_ITEMS.map((item) => item.id)).toEqual(expected)

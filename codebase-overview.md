@@ -21,6 +21,14 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   composes grounding/vision/memory instructions, reserves prompt tokens before
   FIFO history compression, optionally runs MCP agent steps, and streams the
   final OpenAI-compatible response.
+- **`app/api/skills/route.ts`** — Capability API for the client. `GET`
+  returns the full skill catalog (id, name, domain, description, system
+  instructions, tool names per skill; tool name/description/JSON-schema
+  parameters per tool) plus the effective `activeSkillIds`. An optional
+  `enabledSkills` comma-separated query param mirrors the per-session override
+  sent with `/api/chat`; otherwise `SKILLS_ENABLED` env or the full catalog
+  applies. The chat empty state fetches it to advertise clickable capability
+  chips.
 - **`app/api/upload/route.ts`** — Node-runtime document API. `POST` accepts
   PDF/TXT/MD/CSV multipart uploads, validates ownership and limits, extracts
   text, chunks and embeds it, and stores metadata. `GET` lists session
@@ -49,9 +57,37 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   **`components/streaming-skeleton.tsx`** — User/assistant presentation,
   highlighted Markdown/code rendering with copy buttons, citation badge
   handling, and loading state.
+- **`components/diagram-card.tsx`** + **`lib/svg-data-url.ts`** — When a reply
+  embeds an SVG data URL (the `diagram_render` tool's `imageUrl`), the Markdown
+  `img` override routes it into a diagram card rendered via `<img>` (data URLs
+  can't execute scripts, so no XSS) with **Copy SVG** (raw markup) and
+  **Download** (`diagram.svg`) buttons. While the SVG loads, a spring-animated
+  shimmer skeleton holds the card's height; the image fades in over it.
+  `markdown.tsx` passes a custom `urlTransform` that permits SVG data URLs for
+  image `src` only — react-markdown's default transform strips all `data:`
+  URLs, which would otherwise drop rendered diagrams; links keep default
+  sanitization.
+- **`components/diagram-viewer.tsx`** — Full-screen glassmorphic viewer opened
+  from the card's **View** button: wheel/button/double-click zoom
+  (125%–800%), drag-to-pan clamped so diagram edges stay in the stage, and
+  Escape/backdrop/X close with focus restore to the trigger. Backdrop closes
+  only on a press-and-release that both starts and ends on the backdrop, and
+  events inside a short mount window are ignored — the opening click's
+  trailing touch→mouse events can't instantly close the viewer. `prefers-`
+  `reduced-motion` skips entrance motion.
 - **`components/sidebar.tsx`** — Accessible desktop session list and mobile
   drawer with search, pagination, rename, delete, pin, archive, and theme
   controls.
+- **`components/skill-picker.tsx`** — Per-session skill toggle dropdown in the
+  chat header. It lists all eight registered skills with switches; toggling
+  persists the override to `ChatSession.enabledSkills` (via
+  `updateSessionSkills`), loads it back via `getSessionSkills` on session
+  switch, and the override is sent with each `/api/chat` request as
+  `enabledSkills`. "Use all" clears the override back to defaults.
+- **`app/actions.ts` (session skills)** — `getSessionSkills`/`updateSessionSkills`
+  read and write the session's comma-separated `enabledSkills` override, and
+  `saveChatMessages` accepts an optional `enabledSkills` list applied when the
+  session is first created (so a new chat's toggles survive the first save).
 
 ## Libraries and boundaries
 
@@ -66,6 +102,32 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   search, code/chart computation, image inspection, and mock audio
   transcription/synthesis. External execution is server-side, bounded, and
   returns structured results.
+- **`lib/skills/registry.ts`** — Browser-safe enterprise skill & tool
+  registry (safe to import from client components). It defines eight skill
+  domains (Planning, System Design, Frontend UI/UX, Debugging, Testing,
+  AI/MCP, Docs, General Utilities) with per-skill system instructions, the
+  five Zod-typed tool schemas, and tool metadata whose JSON-schema parameters
+  are derived via `z.toJSONSchema`. `SKILLS_ENABLED` filters active skills;
+  the client catalog (`getSkillCatalog`) powers `/api/skills`.
+- **`lib/skills/tools.ts`** — **Server-only** skill tool executors (imports
+  `node:crypto`; never import from client code). `executeSkillTool` validates
+  every call against its Zod schema and returns structured fallbacks instead
+  of throwing. Providers, when configured: `diagram_render` POSTs the spec to
+  a Kroki-compatible `DIAGRAM_RENDER_URL` (default `https://kroki.io`;
+  `ascii` maps to Kroki's `svgbob`) and returns an SVG data URL;
+  `schedule_block` signs a Google service-account JWT (RS256, no external
+  lib), exchanges it for an access token, and creates the event via the
+  Calendar v3 API. Executors accept a `SkillToolContext`; `resolveGoogleCredentials`
+  prefers the per-user context over `GOOGLE_*` env vars. Unconfigured or
+  failing providers degrade to clearly marked local fallbacks (text preview /
+  locally computed block).
+- **`lib/skills/credentials.ts`** — **Server-only** `getUserSkillContext(userId)`:
+  loads a user's pasted Google service-account key + calendar id from
+  `UserPreference` into a `SkillToolContext`. Returns an empty context when
+  unauthenticated, unset, or the stored key won't parse, so executors fall
+  back to env vars and then to the mock path. The route resolves it per
+  request (`app/api/chat/route.ts`) and the agent loop threads it into skill
+  tool calls (`lib/agent.ts`).
 - **`lib/mcp-client.ts`** — Optional MCP Streamable HTTP client. It validates
   `MCP_SERVERS_JSON`, initializes servers, discovers tools, converts them to
   OpenAI function definitions, validates tool arguments, applies timeouts, and
@@ -127,10 +189,18 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
    as untrusted data; the model is instructed to cite `[Document: ..., section
 N]` labels.
 5. For tool-relevant requests, or whenever `MCP_SERVERS_JSON` configures
-   servers, the route discovers function tools. `lib/agent.ts` makes bounded
-   planning steps, executes built-in calls through `lib/agent-tools.ts` and MCP
+   servers, the route discovers function tools. Active skill instructions from
+   `lib/skills/registry.ts` are injected into the system prompt and their
+   Zod-bound tools are exposed to the model. A per-session `enabledSkills`
+   override (from the request body) narrows the catalog, so the skill picker
+   controls exactly which instructions and tools a session sees. `lib/agent.ts`
+   makes bounded planning steps, executes built-in calls through
+   `lib/agent-tools.ts`, skill calls through `lib/skills/registry.ts`, and MCP
    calls through `lib/mcp-client.ts`, retains tool results, and continues with
    the final streaming request. Ordinary chat keeps the single streaming call.
+   On load (and whenever the override changes), the chat empty state fetches
+   `/api/skills` and renders clickable capability chips for the effective
+   active skills, each filling the input with a sample prompt.
 6. After successful user interactions, `lib/memory.ts` extracts and upserts
    bounded memory records for future sessions. Memory extraction is
    deterministic and does not add a second LLM call.
@@ -150,6 +220,22 @@ N]` labels.
   unavailable servers are skipped during discovery.
 - Web search and audio operations default to mock adapters when no provider is
   configured. The interfaces are replaceable without changing the agent loop.
+  Skill tools follow the same pattern: `weather_lookup` calls an optional
+  `WEATHER_API_URL`/`WEATHER_API_KEY` provider, `diagram_render` calls a
+  Kroki-compatible `DIAGRAM_RENDER_URL`, and `schedule_block` writes to Google
+  Calendar via a service account — each degrades to a clearly marked local
+  fallback (placeholder, text preview, or locally computed block) when
+  unconfigured or the provider errors.
+- Calendar credentials are **per-user**: a service-account key JSON + calendar
+  id pasted in Settings is stored on `UserPreference` and resolved per request
+  into a `SkillToolContext` (`lib/skills/credentials.ts`), taking precedence
+  over the server-wide `GOOGLE_*` env vars. The key is validated (JSON shape)
+  on save and via `testGoogleCalendarConnection` (token exchange + calendar
+  access check); unauthenticated requests fall through to env → mock.
+- The registry stays browser-safe (client components import `SKILLS` from it);
+  executor code that uses node builtins (`node:crypto`) or calls providers
+  lives in `lib/skills/tools.ts`, which must never be imported from client
+  code. The production build treats the two modules as separate graphs.
 - Code execution is intentionally limited to a safe arithmetic/JavaScript-like
   expression subset; arbitrary Python or JavaScript evaluation is never run in
   the server process. Chart data is returned as structured points for a client
@@ -177,7 +263,9 @@ N]` labels.
 - `npm run typecheck` runs strict TypeScript checking.
 - `npm test` runs Vitest suites for agents/skills, API contracts, context
   compression, documents/RAG, models/structured output, MCP execution, memory,
-  and video-frame validation.
+  and video-frame validation. `tests/live-providers.test.ts` exercises the
+  real Kroki + Google Calendar providers but is skipped unless
+  `RUN_LIVE_PROVIDER_TESTS=true` (manual runs only).
 - `npm run build` verifies the production Next.js bundle and route modules.
 - `npm run test:e2e` runs the existing Playwright chat/sidebar/accessibility/
   visual flows against a production build with mocked chat streaming.

@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../app/api/chat/route'
 
+// The route resolves the current user for per-user skill credentials;
+// next-auth can't run in vitest, so fall through to anonymous access.
+vi.mock('@/lib/auth-context', () => ({
+  getCurrentUserId: vi.fn().mockResolvedValue(null),
+}))
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()

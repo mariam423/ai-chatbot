@@ -1,9 +1,11 @@
 import { execSync } from 'node:child_process'
+import { generateKeyPairSync } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage } from '../lib/types'
+import { getCurrentUserId } from '../lib/auth-context'
 
 // Mock auth context — next-auth can't run in vitest (no next/server).
 // Server actions fall through to anonymous access (userId=null) in tests.
@@ -107,10 +109,18 @@ describe('conversation persistence server actions', () => {
     const thread = threadFor(sessionId)
 
     await actions.saveChatMessages({ sessionId, messages: thread })
-    expect(await actions.getChatSession(sessionId)).toEqual({ ok: true, messages: thread, systemPrompt: null })
+    expect(await actions.getChatSession(sessionId)).toEqual({
+      ok: true,
+      messages: thread,
+      systemPrompt: null,
+    })
 
     expect(await actions.clearChatSession(sessionId)).toEqual({ ok: true })
-    expect(await actions.getChatSession(sessionId)).toEqual({ ok: true, messages: [], systemPrompt: null })
+    expect(await actions.getChatSession(sessionId)).toEqual({
+      ok: true,
+      messages: [],
+      systemPrompt: null,
+    })
   })
 
   it('clearChatSession on an unknown session is a no-op success', async () => {
@@ -280,5 +290,270 @@ describe('conversation persistence server actions', () => {
         await actions.renameChatSession({ sessionId: 'no-such-session', title: 'Anything' }),
       ).toEqual({ ok: true })
     })
+  })
+
+  describe('session skills', () => {
+    beforeEach(async () => {
+      const { prisma } = await import('../lib/db')
+      await prisma.chatSession.deleteMany()
+    })
+
+    it('returns null skills for an unknown session', async () => {
+      expect(await actions.getSessionSkills('no-such-session')).toEqual({
+        ok: true,
+        enabledSkills: null,
+      })
+    })
+
+    it('persists an explicit skill subset with the thread', async () => {
+      const thread = threadFor('skills-a')
+      await actions.saveChatMessages({
+        sessionId: 'skills-a',
+        messages: thread,
+        enabledSkills: ['planning', 'docs'],
+      })
+      expect(await actions.getSessionSkills('skills-a')).toEqual({
+        ok: true,
+        enabledSkills: ['planning', 'docs'],
+      })
+    })
+
+    it('stores an explicit empty list (all skills disabled)', async () => {
+      await actions.saveChatMessages({
+        sessionId: 'skills-b',
+        messages: threadFor('skills-b'),
+        enabledSkills: [],
+      })
+      expect(await actions.getSessionSkills('skills-b')).toEqual({ ok: true, enabledSkills: [] })
+    })
+
+    it('updates an existing session via updateSessionSkills', async () => {
+      await actions.saveChatMessages({
+        sessionId: 'skills-c',
+        messages: threadFor('skills-c'),
+        enabledSkills: ['testing'],
+      })
+      expect(
+        await actions.updateSessionSkills({ sessionId: 'skills-c', enabledSkills: null }),
+      ).toEqual({
+        ok: true,
+      })
+      expect(await actions.getSessionSkills('skills-c')).toEqual({ ok: true, enabledSkills: null })
+      expect(
+        await actions.updateSessionSkills({ sessionId: 'skills-c', enabledSkills: ['docs'] }),
+      ).toEqual({
+        ok: true,
+      })
+      expect(await actions.getSessionSkills('skills-c')).toEqual({
+        ok: true,
+        enabledSkills: ['docs'],
+      })
+    })
+
+    it('rejects unknown skill ids', async () => {
+      expect(
+        await actions.updateSessionSkills({ sessionId: 'skills-d', enabledSkills: ['ghost'] }),
+      ).toEqual({ ok: false, error: 'Invalid skill ids.' })
+      expect(
+        await actions.saveChatMessages({
+          sessionId: 'skills-d',
+          messages: threadFor('skills-d'),
+          enabledSkills: ['ghost'],
+        }),
+      ).toEqual({ ok: false, error: 'Invalid skill ids.' })
+    })
+
+    it('rejects an invalid session id', async () => {
+      expect(await actions.getSessionSkills('')).toEqual({
+        ok: false,
+        error: 'Invalid session id.',
+      })
+      expect(
+        await actions.updateSessionSkills({ sessionId: '', enabledSkills: ['planning'] }),
+      ).toEqual({
+        ok: false,
+        error: 'Invalid session id.',
+      })
+    })
+
+    it('leaves skills untouched when re-saving a thread without an override', async () => {
+      const thread = threadFor('skills-e')
+      await actions.saveChatMessages({
+        sessionId: 'skills-e',
+        messages: thread,
+        enabledSkills: ['planning'],
+      })
+      await actions.saveChatMessages({ sessionId: 'skills-e', messages: thread })
+      expect(await actions.getSessionSkills('skills-e')).toEqual({
+        ok: true,
+        enabledSkills: ['planning'],
+      })
+    })
+  })
+})
+
+describe('user preferences (calendar credentials)', () => {
+  let prefsActions: typeof import('../app/actions')
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' })
+  const VALID_KEY = JSON.stringify({
+    client_email: 'svc@example.iam.gserviceaccount.com',
+    private_key: pem,
+  })
+
+  beforeAll(async () => {
+    prefsActions = await import('../app/actions')
+    // user_preferences has an FK to users — create the test user once.
+    const { prisma } = await import('../lib/db')
+    await prisma.user.upsert({
+      where: { id: 'user-1' },
+      create: { id: 'user-1', email: 'user-1@example.com' },
+      update: {},
+    })
+  })
+
+  afterEach(async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    vi.unstubAllGlobals()
+    const { prisma } = await import('../lib/db')
+    await prisma.userPreference.deleteMany()
+  })
+
+  it('requires authentication for preferences', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    expect(await prefsActions.updateUserPreferences({ displayName: 'Anon' })).toEqual({
+      ok: false,
+      error: 'Not authenticated.',
+    })
+  })
+
+  it('round-trips profile, presets, and calendar credentials', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    expect(
+      await prefsActions.updateUserPreferences({
+        displayName: 'Ada',
+        apiKey: 'sk-or-123',
+        systemPromptPresets: '[{"id":"p1","name":"Expert","prompt":"Be expert"}]',
+        googleCalendarId: 'primary',
+        googleServiceAccountKey: VALID_KEY,
+      }),
+    ).toEqual({ ok: true })
+
+    const loaded = await prefsActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    expect(loaded).toMatchObject({
+      ok: true,
+      data: {
+        displayName: 'Ada',
+        apiKey: 'sk-or-123',
+        googleCalendarId: 'primary',
+        googleServiceAccountKey: VALID_KEY,
+      },
+    })
+  })
+
+  it('rejects a malformed service-account key before persisting anything', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    const result = await prefsActions.updateUserPreferences({
+      displayName: 'Ada',
+      googleServiceAccountKey: '{ not json',
+    })
+    expect(result).toEqual({ ok: false, error: 'Invalid Google service-account key JSON.' })
+    const loaded = await prefsActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    const data = (loaded as { data: { displayName: string; googleServiceAccountKey: string } }).data
+    expect(data.displayName).toBe('')
+    expect(data.googleServiceAccountKey).toBe('')
+  })
+
+  it('clears saved calendar credentials with an empty key', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    await prefsActions.updateUserPreferences({
+      googleCalendarId: 'primary',
+      googleServiceAccountKey: VALID_KEY,
+    })
+    expect(await prefsActions.updateUserPreferences({ googleServiceAccountKey: '' })).toEqual({
+      ok: true,
+    })
+    const loaded = await prefsActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    const data = (loaded as { data: { googleCalendarId: string; googleServiceAccountKey: string } })
+      .data
+    expect(data.googleServiceAccountKey).toBe('')
+    expect(data.googleCalendarId).toBe('primary')
+  })
+
+  it('connection test requires saved credentials', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    expect(await prefsActions.testGoogleCalendarConnection()).toEqual({
+      ok: false,
+      error: 'No Google Calendar credentials saved yet.',
+    })
+  })
+
+  it('connection test reports an invalid stored key', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    const { prisma } = await import('../lib/db')
+    // Bypass the save-time validation by writing the invalid key directly.
+    await prisma.userPreference.upsert({
+      where: { userId: 'user-1' },
+      create: {
+        userId: 'user-1',
+        googleCalendarId: 'primary',
+        googleServiceAccountKey: '{ not json',
+      },
+      update: {},
+    })
+    expect(await prefsActions.testGoogleCalendarConnection()).toEqual({
+      ok: false,
+      error: 'Stored Google service-account key is invalid.',
+    })
+  })
+
+  it('connection test succeeds against a reachable calendar', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    await prefsActions.updateUserPreferences({
+      googleCalendarId: 'primary',
+      googleServiceAccountKey: VALID_KEY,
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'tok-conn' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'primary', summary: 'Sandbox' }), { status: 200 }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await prefsActions.testGoogleCalendarConnection()
+    expect(result).toMatchObject({
+      ok: true,
+      calendarId: 'primary',
+      email: 'svc@example.iam.gserviceaccount.com',
+    })
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://oauth2.googleapis.com/token')
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      'https://www.googleapis.com/calendar/v3/calendars/primary',
+    )
+  })
+
+  it('connection test explains a calendar access failure', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    await prefsActions.updateUserPreferences({
+      googleCalendarId: 'primary',
+      googleServiceAccountKey: VALID_KEY,
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'tok-conn' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response('Forbidden', { status: 403 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await prefsActions.testGoogleCalendarConnection()
+    expect(result.ok).toBe(false)
+    expect((result as { error: string }).error).toContain('Calendar access check failed (403)')
   })
 })

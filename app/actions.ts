@@ -4,6 +4,8 @@ import { z } from 'zod'
 import { Prisma } from '../generated/client'
 import { prisma } from '@/lib/db'
 import { getCurrentUserId } from '@/lib/auth-context'
+import { isValidSkillId } from '@/lib/skills/registry'
+import { exchangeGoogleAccessToken, parseGoogleServiceAccountKey } from '@/lib/skills/tools'
 import { ChatMessageSchema, type ChatMessage, type ChatSessionSummary } from '@/lib/types'
 
 /**
@@ -19,6 +21,8 @@ const SessionIdSchema = z.string().min(1).max(100)
 const SaveMessagesInputSchema = z.object({
   sessionId: z.string().min(1).max(100),
   messages: z.array(ChatMessageSchema).min(1),
+  // Optional per-session skill override, applied when the session is created.
+  enabledSkills: z.array(z.string().trim().min(1).max(64)).max(8).optional(),
 })
 
 const RenameSessionInputSchema = z.object({
@@ -44,7 +48,9 @@ export async function createChatSession(): Promise<
 /** Load a session's messages in chronological order (empty when unknown). */
 export async function getChatSession(
   sessionId: string,
-): Promise<{ ok: true; messages: ChatMessage[]; systemPrompt: string | null } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; messages: ChatMessage[]; systemPrompt: string | null } | { ok: false; error: string }
+> {
   if (!SessionIdSchema.safeParse(sessionId).success) {
     return { ok: false, error: 'Invalid session id.' }
   }
@@ -77,18 +83,27 @@ export async function getChatSession(
 export async function saveChatMessages(input: {
   sessionId: string
   messages: ChatMessage[]
+  /** Per-session skill override, applied when the session is created. */
+  enabledSkills?: string[]
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = SaveMessagesInputSchema.safeParse(input)
   if (!parsed.success) {
     return { ok: false, error: 'Invalid session id or messages payload.' }
   }
-  const { sessionId, messages } = parsed.data
+  const { sessionId, messages, enabledSkills } = parsed.data
+  if (enabledSkills !== undefined && enabledSkills.some((id) => !isValidSkillId(id))) {
+    return { ok: false, error: 'Invalid skill ids.' }
+  }
   const userId = await getCurrentUserId()
   try {
     // Upsert with ownership: create attaches userId, update is a no-op.
     await prisma.chatSession.upsert({
       where: { id: sessionId },
-      create: { id: sessionId, userId: userId ?? undefined },
+      create: {
+        id: sessionId,
+        userId: userId ?? undefined,
+        ...(enabledSkills !== undefined ? { enabledSkills: enabledSkills.join(',') } : {}),
+      },
       update: {},
     })
     await prisma.$transaction(
@@ -286,6 +301,60 @@ export async function toggleArchiveSession(
   }
 }
 
+// ─── Session Skills ───
+
+function parseEnabledSkills(raw: string | null): string[] | null {
+  if (raw === null) return null
+  if (raw === '') return []
+  return raw.split(',').filter(Boolean)
+}
+
+/** Load a session's skill override (null = defaults). Scoped to the current user. */
+export async function getSessionSkills(
+  sessionId: string,
+): Promise<{ ok: true; enabledSkills: string[] | null } | { ok: false; error: string }> {
+  if (!SessionIdSchema.safeParse(sessionId).success) {
+    return { ok: false, error: 'Invalid session id.' }
+  }
+  const userId = await getCurrentUserId()
+  try {
+    const session = await prisma.chatSession.findFirst({
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
+    })
+    return { ok: true, enabledSkills: parseEnabledSkills(session?.enabledSkills ?? null) }
+  } catch {
+    return { ok: false, error: 'Could not load session skills.' }
+  }
+}
+
+/**
+ * Update which skills are active for a session. Pass null to clear the
+ * override and fall back to defaults. Scoped to the current user.
+ */
+export async function updateSessionSkills(input: {
+  sessionId: string
+  enabledSkills: string[] | null
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!SessionIdSchema.safeParse(input.sessionId).success) {
+    return { ok: false, error: 'Invalid session id.' }
+  }
+  if (input.enabledSkills !== null && input.enabledSkills.some((id) => !isValidSkillId(id))) {
+    return { ok: false, error: 'Invalid skill ids.' }
+  }
+  const userId = await getCurrentUserId()
+  try {
+    await prisma.chatSession.updateMany({
+      where: { id: input.sessionId, ...(userId ? { userId } : {}) },
+      data: {
+        enabledSkills: input.enabledSkills === null ? null : input.enabledSkills.join(','),
+      },
+    })
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not update skills.' }
+  }
+}
+
 // ─── System Prompt ───
 
 /** Update the system prompt for a session. Scoped to the current user. */
@@ -315,17 +384,41 @@ const UserPreferencesSchema = z.object({
   avatarUrl: z.string().max(500).optional().or(z.literal('')),
   apiKey: z.string().max(200).optional().or(z.literal('')),
   systemPromptPresets: z.string().max(10000).optional(),
+  // Google Calendar service-account integration (schedule_block). The key is a
+  // pasted service-account JSON; empty string clears it.
+  googleCalendarId: z.string().trim().max(200).optional().or(z.literal('')),
+  googleServiceAccountKey: z.string().max(8000).optional().or(z.literal('')),
 })
+
+const CALENDAR_LOOKUP_URL = 'https://www.googleapis.com/calendar/v3/calendars'
 
 /** Load user preferences (or defaults when none exist). */
 export async function getUserPreferences(): Promise<
-  { ok: true; data: { displayName: string; avatarUrl: string; apiKey: string; systemPromptPresets: string } } | { ok: false; error: string }
+  | {
+      ok: true
+      data: {
+        displayName: string
+        avatarUrl: string
+        apiKey: string
+        systemPromptPresets: string
+        googleCalendarId: string
+        googleServiceAccountKey: string
+      }
+    }
+  | { ok: false; error: string }
 > {
   const userId = await getCurrentUserId()
   if (!userId) {
     return {
       ok: true,
-      data: { displayName: '', avatarUrl: '', apiKey: '', systemPromptPresets: '[]' },
+      data: {
+        displayName: '',
+        avatarUrl: '',
+        apiKey: '',
+        systemPromptPresets: '[]',
+        googleCalendarId: '',
+        googleServiceAccountKey: '',
+      },
     }
   }
   try {
@@ -337,6 +430,8 @@ export async function getUserPreferences(): Promise<
         avatarUrl: pref?.avatarUrl ?? '',
         apiKey: pref?.apiKey ?? '',
         systemPromptPresets: pref?.systemPromptPresets ?? '[]',
+        googleCalendarId: pref?.googleCalendarId ?? '',
+        googleServiceAccountKey: pref?.googleServiceAccountKey ?? '',
       },
     }
   } catch {
@@ -350,14 +445,22 @@ export async function updateUserPreferences(input: {
   avatarUrl?: string
   apiKey?: string
   systemPromptPresets?: string
+  googleCalendarId?: string
+  googleServiceAccountKey?: string
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = UserPreferencesSchema.safeParse(input)
   if (!parsed.success) {
     return { ok: false, error: 'Invalid preferences.' }
   }
+  const data = parsed.data
+  // Validate the pasted service-account JSON before persisting anything.
+  if (data.googleServiceAccountKey) {
+    if (!parseGoogleServiceAccountKey(data.googleServiceAccountKey)) {
+      return { ok: false, error: 'Invalid Google service-account key JSON.' }
+    }
+  }
   const userId = await getCurrentUserId()
   if (!userId) return { ok: false, error: 'Not authenticated.' }
-  const data = parsed.data
   try {
     await prisma.userPreference.upsert({
       where: { userId },
@@ -367,16 +470,83 @@ export async function updateUserPreferences(input: {
         avatarUrl: data.avatarUrl ?? undefined,
         apiKey: data.apiKey ?? undefined,
         systemPromptPresets: data.systemPromptPresets ?? '[]',
+        googleCalendarId: data.googleCalendarId ?? undefined,
+        googleServiceAccountKey: data.googleServiceAccountKey ?? undefined,
       },
       update: {
         ...(data.displayName !== undefined && { displayName: data.displayName || null }),
         ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl || null }),
         ...(data.apiKey !== undefined && { apiKey: data.apiKey || null }),
-        ...(data.systemPromptPresets !== undefined && { systemPromptPresets: data.systemPromptPresets }),
+        ...(data.systemPromptPresets !== undefined && {
+          systemPromptPresets: data.systemPromptPresets,
+        }),
+        ...(data.googleCalendarId !== undefined && {
+          googleCalendarId: data.googleCalendarId || null,
+        }),
+        ...(data.googleServiceAccountKey !== undefined && {
+          googleServiceAccountKey: data.googleServiceAccountKey || null,
+        }),
       },
     })
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not save preferences.' }
+  }
+}
+
+/**
+ * Verify the current user's stored Google Calendar credentials by exchanging
+ * the service-account JWT for an access token and fetching the calendar.
+ * Returns the connected calendar id + service account email on success.
+ */
+export async function testGoogleCalendarConnection(): Promise<
+  { ok: true; calendarId: string; email: string; message: string } | { ok: false; error: string }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'Not authenticated.' }
+  let pref
+  try {
+    pref = await prisma.userPreference.findUnique({ where: { userId } })
+  } catch {
+    return { ok: false, error: 'Could not load preferences.' }
+  }
+  const key = pref?.googleServiceAccountKey
+  const calendarId = pref?.googleCalendarId
+  if (!key || !calendarId) {
+    return { ok: false, error: 'No Google Calendar credentials saved yet.' }
+  }
+  const parsed = parseGoogleServiceAccountKey(key)
+  if (!parsed) {
+    return { ok: false, error: 'Stored Google service-account key is invalid.' }
+  }
+  try {
+    const accessToken = await exchangeGoogleAccessToken(parsed.email, parsed.privateKey)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8_000)
+    try {
+      const response = await fetch(`${CALENDAR_LOOKUP_URL}/${encodeURIComponent(calendarId)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: `Calendar access check failed (${response.status}). Make sure the service account is shared with the calendar (edit → Share with specific people).`,
+        }
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+    return {
+      ok: true,
+      calendarId,
+      email: parsed.email,
+      message: `Connected to calendar ${calendarId} as ${parsed.email}.`,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Could not reach Google Calendar.',
+    }
   }
 }

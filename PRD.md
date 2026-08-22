@@ -27,13 +27,17 @@ no-signup chat tool. (Assumption — see Open questions.)
 - Streaming assistant responses via a server-side LLM API proxy.
 - Error and edge-case handling (empty input, failures, interrupted streams).
 - Responsive layout with Tailwind CSS; Framer Motion entrance/indicator animations honoring `prefers-reduced-motion`.
+- An enterprise skill catalog: eight skill domains (Planning, System Design,
+  Frontend UI/UX, Debugging, Testing, AI/MCP, Docs, General Utilities) with
+  system instructions and Zod-bound functional tools, activated per session
+  from the chat header (FR-15..17).
 
 ### Out of scope (initial version)
 
 - User accounts, authentication, and per-user history in a database
   (anonymous per-session history IS in scope — see FR-11).
 - Multi-conversation management beyond list/switch/rename/delete (search, archive).
-- File/image attachments and tool calling.
+- Multi-modal attachments beyond the current request scope.
 
 ## 5. Success metrics
 
@@ -125,6 +129,26 @@ SHOULD let the user re-run the last user message, replacing the previous assista
 
 - AC: Given a completed assistant reply, when Regenerate is triggered, then a new reply streams in place of the old one without duplicating the user message.
 
+**FR-15 — Skill catalog**
+SHOULD load an enterprise skill catalog covering eight domains (Planning, System Design, Frontend UI/UX, Debugging, Testing, AI/MCP, Docs, General Utilities), each contributing system instructions and optional registered tools. Active skills' instructions are injected into the system prompt for tool-relevant requests, and the catalog can be narrowed via `SKILLS_ENABLED` or a per-session override.
+
+- AC: Given an active skill, when a tool-relevant request is sent, then the system prompt includes that skill's guidance and its registered tools are exposed to the model.
+- AC: Given `SKILLS_ENABLED` or a per-session override, when set, then only the listed skills load.
+
+**FR-16 — Tool calling with graceful fallbacks**
+MAY call functional tools — diagram rendering, weather lookup, text humanization, schedule blocking, and code analysis — through OpenAI-compatible function calling bound to Zod-validated schemas, and MUST return a graceful, clearly marked fallback when a provider is unavailable or arguments are invalid.
+
+- AC: Given a tool call, when executed, then the arguments are validated against the tool's Zod schema before execution.
+- AC: Given an unconfigured provider, when a tool runs, then a clearly marked placeholder result is returned instead of an error.
+- AC: Given invalid arguments or an unknown tool, when called, then a structured fallback result is returned and the conversation continues.
+
+**FR-17 — Per-session skill configuration**
+SHOULD let the user toggle which skills are active for the current session from the chat header, persist the override with the session, and narrow the injected instructions and tools to the enabled set.
+
+- AC: Given a session, when the user toggles a skill, then the change is persisted and applied to subsequent requests in that session.
+- AC: Given a session with a persisted override, when reopened or reloaded, then the toggle state is restored.
+- AC: Given all skills disabled, when a skill-related request is sent, then no skill instructions or tools are injected.
+
 ## 7. Non-functional requirements
 
 **NFR-1 — Performance**
@@ -159,6 +183,7 @@ SHOULD keep chat state and API logic separate from presentational components so 
 - Unicode, emoji, and code blocks in user or assistant text (FR-1 rendering).
 - Markup in user input rendered as plain text (NFR-3).
 - Reload during an active stream: thread restores without a hanging indicator (FR-9).
+- Tool calls when a provider is unconfigured return clearly marked placeholder results instead of errors (FR-16).
 
 ## 9. Open questions & assumptions
 
