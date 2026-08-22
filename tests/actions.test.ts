@@ -44,6 +44,21 @@ function threadFor(sessionId: string): ChatMessage[] {
   ]
 }
 
+/** A single-branch persistence payload (the common case). */
+function branchesFor(sessionId: string): ChatMessage[][] {
+  return [threadFor(sessionId)]
+}
+
+/** The shape getChatSession returns for a single-branch session. */
+function singleBranchExpected(sessionId: string) {
+  return {
+    ok: true,
+    branches: branchesFor(sessionId),
+    active: 0,
+    systemPrompt: null,
+  } as const
+}
+
 describe('conversation persistence server actions', () => {
   beforeAll(async () => {
     actions = await import('../app/actions')
@@ -51,7 +66,7 @@ describe('conversation persistence server actions', () => {
 
   it('returns an empty thread for an unknown session', async () => {
     const result = await actions.getChatSession('no-such-session')
-    expect(result).toEqual({ ok: true, messages: [], systemPrompt: null })
+    expect(result).toEqual({ ok: true, branches: [], active: 0, systemPrompt: null })
   })
 
   it('rejects an invalid session id', async () => {
@@ -60,31 +75,117 @@ describe('conversation persistence server actions', () => {
 
   it('persists a thread and loads it in order', async () => {
     const thread = threadFor('sess-a')
-    const saved = await actions.saveChatMessages({ sessionId: 'sess-a', messages: thread })
+    const saved = await actions.saveChatMessages({ sessionId: 'sess-a', branches: [thread] })
     expect(saved).toEqual({ ok: true })
 
     const loaded = await actions.getChatSession('sess-a')
-    expect(loaded).toEqual({ ok: true, messages: thread, systemPrompt: null })
+    expect(loaded).toEqual({
+      ok: true,
+      branches: [thread],
+      active: 0,
+      systemPrompt: null,
+    })
+  })
+
+  it('persists multiple branches and the active branch index', async () => {
+    const original = threadFor('sess-branch')
+    // A fork diverges from the first two messages with a new user prompt.
+    const fork: ChatMessage[] = [
+      ...original.slice(0, 2),
+      { id: 'forkb-1', role: 'user', content: 'Hello (edited)' },
+      { id: 'forkb-2', role: 'assistant', content: 'Fork reply' },
+    ]
+    const saved = await actions.saveChatMessages({
+      sessionId: 'sess-branch',
+      branches: [original, fork],
+      active: 1,
+    })
+    expect(saved).toEqual({ ok: true })
+
+    const loaded = await actions.getChatSession('sess-branch')
+    expect(loaded).toEqual({
+      ok: true,
+      branches: [original, fork],
+      active: 1,
+      systemPrompt: null,
+    })
+  })
+
+  it('restores an empty (just-forked) branch whose index is active', async () => {
+    // A fork creates the branch before any message is sent on it.
+    const original = threadFor('sess-empty-fork')
+    const saved = await actions.saveChatMessages({
+      sessionId: 'sess-empty-fork',
+      branches: [original, []],
+      active: 1,
+    })
+    expect(saved).toEqual({ ok: true })
+
+    const loaded = await actions.getChatSession('sess-empty-fork')
+    expect(loaded).toEqual({
+      ok: true,
+      branches: [original, []],
+      active: 1,
+      systemPrompt: null,
+    })
+  })
+
+  it('updates the active branch via setActiveBranch', async () => {
+    const original = threadFor('sess-switch')
+    const fork: ChatMessage[] = [
+      ...original,
+      { id: 'switch-b', role: 'assistant', content: 'extra' },
+    ]
+    await actions.saveChatMessages({
+      sessionId: 'sess-switch',
+      branches: [original, fork],
+      active: 0,
+    })
+    expect(
+      await actions.setActiveBranch({ sessionId: 'sess-switch', active: 1 }),
+    ).toEqual({ ok: true })
+
+    const loaded = await actions.getChatSession('sess-switch')
+    expect(loaded).toEqual({
+      ok: true,
+      branches: [original, fork],
+      active: 1,
+      systemPrompt: null,
+    })
+  })
+
+  it('rejects an invalid setActiveBranch payload', async () => {
+    expect(await actions.setActiveBranch({ sessionId: '', active: 0 })).toEqual({
+      ok: false,
+      error: 'Invalid session id or branch index.',
+    })
+    expect(await actions.setActiveBranch({ sessionId: 'sess-x', active: 99 })).toEqual({
+      ok: false,
+      error: 'Invalid session id or branch index.',
+    })
   })
 
   it('is idempotent: re-saving the same thread does not duplicate messages', async () => {
     const thread = threadFor('sess-b')
-    await actions.saveChatMessages({ sessionId: 'sess-b', messages: thread })
-    await actions.saveChatMessages({ sessionId: 'sess-b', messages: thread })
+    await actions.saveChatMessages({ sessionId: 'sess-b', branches: [thread] })
+    await actions.saveChatMessages({ sessionId: 'sess-b', branches: [thread] })
 
     const loaded = await actions.getChatSession('sess-b')
-    expect(loaded).toEqual({ ok: true, messages: thread, systemPrompt: null })
+    expect(loaded).toEqual(singleBranchExpected('sess-b'))
   })
 
   it('updates a message in place when content changes', async () => {
     const thread = threadFor('sess-c')
-    await actions.saveChatMessages({ sessionId: 'sess-c', messages: thread })
-    const edited: ChatMessage[] = [...thread.slice(0, 2), { ...thread[2]!, content: 'Are you ok?' }]
-    await actions.saveChatMessages({ sessionId: 'sess-c', messages: edited })
+    await actions.saveChatMessages({ sessionId: 'sess-c', branches: [thread] })
+    const edited: ChatMessage[] = [
+      ...thread.slice(0, 2),
+      { ...thread[2]!, content: 'Are you ok?' },
+    ]
+    await actions.saveChatMessages({ sessionId: 'sess-c', branches: [edited] })
 
     const loaded = await actions.getChatSession('sess-c')
-    expect(loaded).toEqual({ ok: true, messages: edited, systemPrompt: null })
-    expect((loaded as { messages: ChatMessage[] }).messages).toHaveLength(3)
+    expect(loaded).toEqual({ ok: true, branches: [edited], active: 0, systemPrompt: null })
+    expect((loaded as { branches: ChatMessage[][] }).branches[0]).toHaveLength(3)
   })
 
   it('rejects messages with an invalid role', async () => {
@@ -92,14 +193,22 @@ describe('conversation persistence server actions', () => {
     // the runtime zod guard against a payload that slips past the types.
     const bad = await actions.saveChatMessages({
       sessionId: 'sess-d',
-      messages: [{ id: 'x', role: 'system', content: 'nope' }] as unknown as ChatMessage[],
+      branches: [[{ id: 'x', role: 'system', content: 'nope' } as unknown as ChatMessage]],
     })
-    expect(bad).toEqual({ ok: false, error: 'Invalid session id or messages payload.' })
+    expect(bad).toEqual({ ok: false, error: 'Invalid session id, branches, or messages payload.' })
   })
 
-  it('rejects an empty messages array', async () => {
-    const bad = await actions.saveChatMessages({ sessionId: 'sess-e', messages: [] })
-    expect(bad).toEqual({ ok: false, error: 'Invalid session id or messages payload.' })
+  it('rejects an empty branches array and an empty branch', async () => {
+    const emptyTop = await actions.saveChatMessages({ sessionId: 'sess-e', branches: [] })
+    expect(emptyTop).toEqual({
+      ok: false,
+      error: 'Invalid session id, branches, or messages payload.',
+    })
+    const emptyBranch = await actions.saveChatMessages({ sessionId: 'sess-e', branches: [[]] })
+    expect(emptyBranch).toEqual({
+      ok: false,
+      error: 'Invalid session id, branches, or messages payload.',
+    })
   })
 
   it('creates a session via createChatSession and clears it with clearChatSession', async () => {
@@ -108,17 +217,15 @@ describe('conversation persistence server actions', () => {
     const sessionId = (created as { sessionId: string }).sessionId
     const thread = threadFor(sessionId)
 
-    await actions.saveChatMessages({ sessionId, messages: thread })
-    expect(await actions.getChatSession(sessionId)).toEqual({
-      ok: true,
-      messages: thread,
-      systemPrompt: null,
-    })
+    await actions.saveChatMessages({ sessionId, branches: [thread] })
+    const loaded = await actions.getChatSession(sessionId)
+    expect(loaded).toEqual({ ok: true, branches: [thread], active: 0, systemPrompt: null })
 
     expect(await actions.clearChatSession(sessionId)).toEqual({ ok: true })
     expect(await actions.getChatSession(sessionId)).toEqual({
       ok: true,
-      messages: [],
+      branches: [],
+      active: 0,
       systemPrompt: null,
     })
   })
@@ -144,7 +251,7 @@ describe('conversation persistence server actions', () => {
 
     it('paginates with skip/take and reports hasMore', async () => {
       for (const id of ['page-1', 'page-2', 'page-3', 'page-4', 'page-5']) {
-        await actions.saveChatMessages({ sessionId: id, messages: threadFor(id) })
+        await actions.saveChatMessages({ sessionId: id, branches: branchesFor(id) })
         await new Promise((resolve) => setTimeout(resolve, 5))
       }
 
@@ -170,12 +277,12 @@ describe('conversation persistence server actions', () => {
     it('searches by custom title (case-insensitive)', async () => {
       await actions.saveChatMessages({
         sessionId: 'sess-search-1',
-        messages: threadFor('sess-search-1'),
+        branches: branchesFor('sess-search-1'),
       })
       await actions.renameChatSession({ sessionId: 'sess-search-1', title: 'My Trip to Paris' })
       await actions.saveChatMessages({
         sessionId: 'sess-search-2',
-        messages: threadFor('sess-search-2'),
+        branches: branchesFor('sess-search-2'),
       })
 
       const result = await actions.listChatSessions({ search: 'trip to paris' })
@@ -188,8 +295,11 @@ describe('conversation persistence server actions', () => {
       // Distinct content so only this session matches (threadFor is shared).
       const unique = threadFor('sess-content')
       unique[2] = { ...unique[2]!, content: 'Search this exact phrase' }
-      await actions.saveChatMessages({ sessionId: 'sess-content', messages: unique })
-      await actions.saveChatMessages({ sessionId: 'sess-other', messages: threadFor('sess-other') })
+      await actions.saveChatMessages({ sessionId: 'sess-content', branches: [unique] })
+      await actions.saveChatMessages({
+        sessionId: 'sess-other',
+        branches: branchesFor('sess-other'),
+      })
 
       const result = await actions.listChatSessions({ search: 'search this exact phrase' })
       expect(result.ok).toBe(true)
@@ -198,7 +308,10 @@ describe('conversation persistence server actions', () => {
     })
 
     it('returns nothing for a search with no matches', async () => {
-      await actions.saveChatMessages({ sessionId: 'sess-none', messages: threadFor('sess-none') })
+      await actions.saveChatMessages({
+        sessionId: 'sess-none',
+        branches: branchesFor('sess-none'),
+      })
 
       const result = await actions.listChatSessions({ search: 'zzz-no-such-session' })
       expect(result).toEqual({ ok: true, sessions: [], hasMore: false })
@@ -217,10 +330,10 @@ describe('conversation persistence server actions', () => {
 
     it('lists sessions newest-first with a title from the first message', async () => {
       const older = threadFor('older')
-      await actions.saveChatMessages({ sessionId: 'older', messages: older })
+      await actions.saveChatMessages({ sessionId: 'older', branches: [older] })
       await new Promise((resolve) => setTimeout(resolve, 10))
       const newer = threadFor('newer')
-      await actions.saveChatMessages({ sessionId: 'newer', messages: newer })
+      await actions.saveChatMessages({ sessionId: 'newer', branches: [newer] })
 
       const result = await actions.listChatSessions()
       expect(result.ok).toBe(true)
@@ -252,7 +365,7 @@ describe('conversation persistence server actions', () => {
 
     it('persists a renamed title and lists it', async () => {
       const thread = threadFor('sess-rename')
-      await actions.saveChatMessages({ sessionId: 'sess-rename', messages: thread })
+      await actions.saveChatMessages({ sessionId: 'sess-rename', branches: [thread] })
 
       expect(
         await actions.renameChatSession({ sessionId: 'sess-rename', title: 'My trip plan' }),
@@ -267,7 +380,7 @@ describe('conversation persistence server actions', () => {
 
     it('falls back to the first-message title when the session has no custom title', async () => {
       const thread = threadFor('sess-no-title')
-      await actions.saveChatMessages({ sessionId: 'sess-no-title', messages: thread })
+      await actions.saveChatMessages({ sessionId: 'sess-no-title', branches: [thread] })
 
       const result = await actions.listChatSessions()
       const sessions = (result as { sessions: Array<{ id: string; title: string }> }).sessions
@@ -309,7 +422,7 @@ describe('conversation persistence server actions', () => {
       const thread = threadFor('skills-a')
       await actions.saveChatMessages({
         sessionId: 'skills-a',
-        messages: thread,
+        branches: [thread],
         enabledSkills: ['planning', 'docs'],
       })
       expect(await actions.getSessionSkills('skills-a')).toEqual({
@@ -321,7 +434,7 @@ describe('conversation persistence server actions', () => {
     it('stores an explicit empty list (all skills disabled)', async () => {
       await actions.saveChatMessages({
         sessionId: 'skills-b',
-        messages: threadFor('skills-b'),
+        branches: branchesFor('skills-b'),
         enabledSkills: [],
       })
       expect(await actions.getSessionSkills('skills-b')).toEqual({ ok: true, enabledSkills: [] })
@@ -330,7 +443,7 @@ describe('conversation persistence server actions', () => {
     it('updates an existing session via updateSessionSkills', async () => {
       await actions.saveChatMessages({
         sessionId: 'skills-c',
-        messages: threadFor('skills-c'),
+        branches: branchesFor('skills-c'),
         enabledSkills: ['testing'],
       })
       expect(
@@ -357,7 +470,7 @@ describe('conversation persistence server actions', () => {
       expect(
         await actions.saveChatMessages({
           sessionId: 'skills-d',
-          messages: threadFor('skills-d'),
+          branches: branchesFor('skills-d'),
           enabledSkills: ['ghost'],
         }),
       ).toEqual({ ok: false, error: 'Invalid skill ids.' })
@@ -380,10 +493,10 @@ describe('conversation persistence server actions', () => {
       const thread = threadFor('skills-e')
       await actions.saveChatMessages({
         sessionId: 'skills-e',
-        messages: thread,
+        branches: [thread],
         enabledSkills: ['planning'],
       })
-      await actions.saveChatMessages({ sessionId: 'skills-e', messages: thread })
+      await actions.saveChatMessages({ sessionId: 'skills-e', branches: [thread] })
       expect(await actions.getSessionSkills('skills-e')).toEqual({
         ok: true,
         enabledSkills: ['planning'],

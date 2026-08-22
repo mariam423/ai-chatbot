@@ -18,12 +18,26 @@ import { ChatMessageSchema, type ChatMessage, type ChatSessionSummary } from '@/
 
 const SessionIdSchema = z.string().min(1).max(100)
 
-const SaveMessagesInputSchema = z.object({
-  sessionId: z.string().min(1).max(100),
-  messages: z.array(ChatMessageSchema).min(1),
-  // Optional per-session skill override, applied when the session is created.
-  enabledSkills: z.array(z.string().trim().min(1).max(64)).max(8).optional(),
-})
+const SaveMessagesInputSchema = z
+  .object({
+    sessionId: z.string().min(1).max(100),
+    // Every branch of the conversation, so forked threads persist. A branch may
+    // be empty (a fork created before any message is sent on it), but at least
+    // one non-empty branch must exist.
+    branches: z.array(z.array(ChatMessageSchema)).min(1),
+    // Index of the currently active branch (defaults to 0).
+    active: z.number().int().min(0).max(64).optional(),
+    // Optional per-session skill override, applied when the session is created.
+    enabledSkills: z.array(z.string().trim().min(1).max(64)).max(8).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.branches.some((branch) => branch.length > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one branch must be non-empty.',
+      })
+    }
+  })
 
 const RenameSessionInputSchema = z.object({
   sessionId: z.string().min(1).max(100),
@@ -45,11 +59,15 @@ export async function createChatSession(): Promise<
   }
 }
 
-/** Load a session's messages in chronological order (empty when unknown). */
-export async function getChatSession(
-  sessionId: string,
-): Promise<
-  { ok: true; messages: ChatMessage[]; systemPrompt: string | null } | { ok: false; error: string }
+/** Load a session's branches and the active branch index (empty when unknown). */
+export async function getChatSession(sessionId: string): Promise<
+  | {
+      ok: true
+      branches: ChatMessage[][]
+      active: number
+      systemPrompt: string | null
+    }
+  | { ok: false; error: string }
 > {
   if (!SessionIdSchema.safeParse(sessionId).success) {
     return { ok: false, error: 'Invalid session id.' }
@@ -64,63 +82,109 @@ export async function getChatSession(
       },
       include: { messages: { orderBy: { position: 'asc' } } },
     })
-    const messages: ChatMessage[] = (session?.messages ?? []).map(({ id, role, content }) => ({
-      id,
-      role,
-      content,
-    })) as ChatMessage[]
-    return { ok: true, messages, systemPrompt: session?.systemPrompt ?? null }
+    const rows = session?.messages ?? []
+    const active = session?.activeBranch ?? 0
+    // A session with no messages (unknown or cleared) has no branches at all.
+    if (rows.length === 0) {
+      return {
+        ok: true,
+        branches: [],
+        active: 0,
+        systemPrompt: session?.systemPrompt ?? null,
+      }
+    }
+    // Group messages by their branch index; `position` orders within a branch.
+    const byBranch = new Map<number, ChatMessage[]>()
+    let maxBranch = active
+    for (const message of rows) {
+      const parsed = Number.parseInt(message.branchId ?? '0', 10)
+      const branchIndex = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed
+      if (branchIndex > maxBranch) maxBranch = branchIndex
+      if (!byBranch.has(branchIndex)) byBranch.set(branchIndex, [])
+      byBranch.get(branchIndex)!.push({
+        id: message.id,
+        role: message.role as ChatMessage['role'],
+        content: message.content,
+      })
+    }
+    // Rebuild the full array (including empty branches) so the active index
+    // stays valid; a branch with no messages yet is restored as empty.
+    const branches: ChatMessage[][] = Array.from({ length: maxBranch + 1 }, () => [])
+    for (const [index, messages] of byBranch) branches[index] = messages
+    return { ok: true, branches, active, systemPrompt: session?.systemPrompt ?? null }
   } catch {
     return { ok: false, error: 'Could not load session.' }
   }
 }
 
 /**
- * Persist a full thread for a session (replace semantics via per-message
- * upsert on client-generated ids — re-saving the same thread is idempotent,
- * and the session is created on first save if it does not exist).
+ * Persist an entire branched thread for a session (replace semantics via
+ * per-message upsert on client-generated ids — re-saving is idempotent, and
+ * the session is created on first save if it does not exist). Every branch is
+ * stored so forked conversations survive a session switch; `active` records
+ * which branch was last shown.
  */
 export async function saveChatMessages(input: {
   sessionId: string
-  messages: ChatMessage[]
+  branches: ChatMessage[][]
+  /** Index of the active branch (defaults to 0). */
+  active?: number
   /** Per-session skill override, applied when the session is created. */
   enabledSkills?: string[]
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = SaveMessagesInputSchema.safeParse(input)
   if (!parsed.success) {
-    return { ok: false, error: 'Invalid session id or messages payload.' }
+    return { ok: false, error: 'Invalid session id, branches, or messages payload.' }
   }
-  const { sessionId, messages, enabledSkills } = parsed.data
+  const { sessionId, branches, active, enabledSkills } = parsed.data
   if (enabledSkills !== undefined && enabledSkills.some((id) => !isValidSkillId(id))) {
     return { ok: false, error: 'Invalid skill ids.' }
   }
   const userId = await getCurrentUserId()
   try {
-    // Upsert with ownership: create attaches userId, update is a no-op.
+    // Upsert with ownership: create attaches userId, update records the active
+    // branch (when provided) without clobbering other session metadata.
     await prisma.chatSession.upsert({
       where: { id: sessionId },
       create: {
         id: sessionId,
         userId: userId ?? undefined,
+        activeBranch: active ?? 0,
         ...(enabledSkills !== undefined ? { enabledSkills: enabledSkills.join(',') } : {}),
       },
-      update: {},
+      update: {
+        ...(active !== undefined ? { activeBranch: active } : {}),
+      },
     })
-    await prisma.$transaction(
-      messages.map((message, position) =>
+    const rows = branches.flatMap((branch, branchIndex) =>
+      branch.map((message, position) =>
         prisma.chatMessage.upsert({
-          where: { id: message.id },
+          // Identity is (sessionId, branchId, id) so a shared-prefix message
+          // gets its own row per branch instead of clobbering the previous one.
+          where: {
+            sessionId_branchId_id: {
+              sessionId,
+              branchId: String(branchIndex),
+              id: message.id,
+            },
+          },
           create: {
-            id: message.id,
             sessionId,
             role: message.role,
             content: message.content,
             position,
+            branchId: String(branchIndex),
+            id: message.id,
           },
-          update: { role: message.role, content: message.content, position },
+          update: {
+            role: message.role,
+            content: message.content,
+            position,
+          },
         }),
       ),
     )
+    await prisma.$transaction(rows)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not save messages.' }
@@ -352,6 +416,38 @@ export async function updateSessionSkills(input: {
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not update skills.' }
+  }
+}
+
+// ─── Conversation branches ───
+
+const SetActiveBranchSchema = z.object({
+  sessionId: z.string().min(1).max(100),
+  active: z.number().int().min(0).max(64),
+})
+
+/** Persist which branch is currently active (restored on session reload). */
+export async function setActiveBranch(input: {
+  sessionId: string
+  active: number
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = SetActiveBranchSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: 'Invalid session id or branch index.' }
+  }
+  const { sessionId, active } = parsed.data
+  const userId = await getCurrentUserId()
+  try {
+    await prisma.chatSession.updateMany({
+      where: {
+        id: sessionId,
+        ...(userId ? { userId } : {}),
+      },
+      data: { activeBranch: active },
+    })
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not update active branch.' }
   }
 }
 

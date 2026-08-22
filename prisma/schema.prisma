@@ -70,6 +70,8 @@ model ChatSession {
   enabledSkills String?
   pinned        Boolean       @default(false)
   archived      Boolean       @default(false)
+  // Index of the previously active branch, restored on session reload.
+  activeBranch  Int           @default(0)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   messages      ChatMessage[]
@@ -87,15 +89,23 @@ model ChatSession {
 /// has no enums; it is validated against user/assistant in the server action
 /// layer (zod).
 model ChatMessage {
-  id        String      @id
   sessionId String
   session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   role      String
   content   String
   position  Int
+  // The branch this message belongs to ("0", "1", …) — branch order is the
+  // index, and `position` orders within a branch. Together they persist the
+  // conversation's forked branches across session switches.
+  branchId  String      @default("0")
+  id        String
   createdAt DateTime    @default(now())
 
-  @@index([sessionId, position])
+  // A message may appear in several branches (the shared prefix of a fork), so
+  // the row identity is (sessionId, branchId, id) — one row per branch.
+  // `id` remains the client-generated message id/React key within a branch.
+  @@id([sessionId, branchId, id])
+  @@index([sessionId, branchId, position])
   @@map("chat_messages")
 }
 
