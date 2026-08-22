@@ -14,9 +14,16 @@ import {
 import { motion, useReducedMotion } from 'framer-motion'
 import { useSession, signOut } from 'next-auth/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { clearChatSession, listChatSessions, renameChatSession, togglePinSession, toggleArchiveSession } from '@/app/actions'
+import {
+  clearChatSession,
+  listChatSessions,
+  renameChatSession,
+  togglePinSession,
+  toggleArchiveSession,
+} from '@/app/actions'
 import { withThemeTransition } from '@/lib/theme-transition'
 import { clearSessionId, clearThread, getSessionId, setSessionId } from '@/lib/storage'
+import { DEFAULT_MODEL_KEY, MODEL_OPTIONS, ModelKeySchema, type ModelKey } from '@/lib/models'
 import type { ChatSessionSummary } from '@/lib/types'
 import Chat from './chat'
 import Sidebar from './sidebar'
@@ -33,6 +40,7 @@ export default function ChatApp() {
   const [hasMore, setHasMore] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<ModelKey>(DEFAULT_MODEL_KEY)
   const reducedMotion = useReducedMotion()
   const loadingMoreRef = useRef(false)
 
@@ -75,6 +83,12 @@ export default function ChatApp() {
   useEffect(() => {
     setSessionIdState(getSessionId())
     setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+    try {
+      const storedModel = ModelKeySchema.safeParse(localStorage.getItem('chat.model'))
+      if (storedModel.success) setSelectedModel(storedModel.data)
+    } catch {
+      // Best-effort.
+    }
     void refreshSessions()
     setReady(true)
   }, [])
@@ -110,6 +124,17 @@ export default function ChatApp() {
     await toggleArchiveSession(id)
     if (id === sessionId) handleSessionChange(null)
     await refreshSessions()
+  }
+
+  function selectModel(value: string) {
+    const parsed = ModelKeySchema.safeParse(value)
+    if (!parsed.success) return
+    setSelectedModel(parsed.data)
+    try {
+      localStorage.setItem('chat.model', parsed.data)
+    } catch {
+      // Best-effort.
+    }
   }
 
   function toggleTheme() {
@@ -174,7 +199,7 @@ export default function ChatApp() {
         onTogglePin={handleTogglePin}
         onToggleArchive={handleToggleArchive}
         onToggleArchivedView={() => setShowArchived((prev) => !prev)}
-        onOpenSettings={() => window.location.href = '/settings'}
+        onOpenSettings={() => (window.location.href = '/settings')}
         onClose={() => setMenuOpen(false)}
       />
 
@@ -184,10 +209,19 @@ export default function ChatApp() {
         sessions={sessions}
         activeSessionId={sessionId}
         theme={theme}
-        onSelectSession={(id) => { handleSessionChange(id); setCommandPaletteOpen(false) }}
-        onNewChat={() => { handleSessionChange(null); setCommandPaletteOpen(false) }}
+        onSelectSession={(id) => {
+          handleSessionChange(id)
+          setCommandPaletteOpen(false)
+        }}
+        onNewChat={() => {
+          handleSessionChange(null)
+          setCommandPaletteOpen(false)
+        }}
         onToggleTheme={toggleTheme}
-        onOpenSettings={() => { window.location.href = '/settings'; setCommandPaletteOpen(false) }}
+        onOpenSettings={() => {
+          window.location.href = '/settings'
+          setCommandPaletteOpen(false)
+        }}
       />
 
       <main id="main" className="flex min-w-0 flex-1 flex-col vt-chat-shell">
@@ -214,10 +248,13 @@ export default function ChatApp() {
               <HugeiconsIcon icon={MenuIcon} size={20} strokeWidth={1.5} />
             </motion.button>
             <div className="flex items-center gap-2">
-              <div
-                className="flex size-7 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/20 vt-brand-icon"
-              >
-                <HugeiconsIcon icon={MenuIcon} size={13} strokeWidth={2} className="text-cyan-400" />
+              <div className="flex size-7 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/20 vt-brand-icon">
+                <HugeiconsIcon
+                  icon={MenuIcon}
+                  size={13}
+                  strokeWidth={2}
+                  className="text-cyan-400"
+                />
               </div>
               <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
                 Chatbot
@@ -225,6 +262,24 @@ export default function ChatApp() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <label
+              className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
+            >
+              <span className="sr-only">AI model</span>
+              <select
+                value={selectedModel}
+                onChange={(event) => selectModel(event.target.value)}
+                aria-label="Select AI model"
+                className="max-w-36 cursor-pointer truncate bg-transparent outline-none sm:max-w-48"
+              >
+                {MODEL_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             {/* Command palette trigger */}
             <motion.button
               type="button"
@@ -237,7 +292,13 @@ export default function ChatApp() {
             >
               <HugeiconsIcon icon={Search01Icon} size={13} strokeWidth={1.5} />
               <span>Search...</span>
-              <kbd className="rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+              <kbd
+                className="rounded px-1 py-0.5 text-[10px]"
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
                 ⌘K
               </kbd>
             </motion.button>
@@ -331,6 +392,7 @@ export default function ChatApp() {
         {ready && (
           <Chat
             sessionId={sessionId}
+            modelKey={selectedModel}
             onSessionChange={handleSessionChange}
             onConversationChanged={refreshSessions}
           />

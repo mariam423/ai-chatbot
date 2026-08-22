@@ -21,6 +21,7 @@ model User {
   sessions      Session[]
   preference    UserPreference?
   passwordResetTokens PasswordResetToken[]
+  memoryRecords      MemoryRecord[]
 
   @@map("users")
 }
@@ -69,6 +70,7 @@ model ChatSession {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   messages     ChatMessage[]
+  documents    Document[]
 
   @@index([userId])
   @@map("chat_sessions")
@@ -94,6 +96,36 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+/// An uploaded document whose extracted text is available to the session's RAG pipeline.
+model Document {
+  id          String          @id @default(cuid())
+  sessionId   String
+  session     ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  name        String
+  mimeType    String
+  size        Int
+  textLength  Int
+  createdAt   DateTime        @default(now())
+  chunks      DocumentChunk[]
+
+  @@index([sessionId, createdAt])
+  @@map("documents")
+}
+
+/// A bounded text chunk and its vector embedding, serialized for SQLite.
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  content    String
+  embedding  String
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+  @@map("document_chunks")
+}
+
 /// Per-user preferences: display name, avatar URL, personal API key,
 /// and custom system prompt presets stored as JSON.
 model UserPreference {
@@ -106,6 +138,24 @@ model UserPreference {
   user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
+}
+
+/// Long-term user memory, scoped by category and optional source session.
+model MemoryRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    String
+  key         String
+  value       String
+  sessionId   String?
+  confidence  Float    @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, category, key])
+  @@index([userId, category, updatedAt])
+  @@map("memory_records")
 }
 
 /// Single-use password reset token. `tokenHash` is SHA-256 of the raw token

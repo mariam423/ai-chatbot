@@ -7,6 +7,7 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
+import CitationDrawer from './citation-drawer'
 
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false)
@@ -86,13 +87,22 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
 
 interface MarkdownProps {
   content: string
+  sessionId?: string | null
+}
+
+function linkifyCitations(content: string): string {
+  return content.replace(
+    /\[Document:\s*([^,\]]+),\s*section\s*(\d+)\]/g,
+    (_match, documentName: string, section: string) =>
+      `[Document: ${documentName}, section ${section}](citation:${encodeURIComponent(documentName.trim())}:${section})`,
+  )
 }
 
 /**
  * Renders assistant markdown. No `rehype-raw`, so raw HTML in the LLM reply
  * is escaped and displayed literally - the NFR-3 security property holds.
  */
-export default function Markdown({ content }: MarkdownProps) {
+export default function Markdown({ content, sessionId = null }: MarkdownProps) {
   return (
     <div className="markdown">
       <ReactMarkdown
@@ -100,6 +110,29 @@ export default function Markdown({ content }: MarkdownProps) {
         rehypePlugins={[rehypeHighlight]}
         components={{
           pre: ({ children }) => <>{children}</>,
+          a({ href, children, ...props }) {
+            if (href?.startsWith('citation:')) {
+              const separator = href.lastIndexOf(':')
+              const encodedName = href.slice('citation:'.length, separator)
+              const section = href.slice(separator + 1)
+              try {
+                return (
+                  <CitationDrawer
+                    sessionId={sessionId}
+                    documentName={decodeURIComponent(encodedName)}
+                    section={section}
+                  />
+                )
+              } catch {
+                return <span>{children}</span>
+              }
+            }
+            return (
+              <a href={href} {...props}>
+                {children}
+              </a>
+            )
+          },
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className ?? '')
             const text = String(children ?? '')
@@ -114,7 +147,7 @@ export default function Markdown({ content }: MarkdownProps) {
           },
         }}
       >
-        {content}
+        {linkifyCitations(content)}
       </ReactMarkdown>
     </div>
   )

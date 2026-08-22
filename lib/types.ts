@@ -24,6 +24,46 @@ export const ChatWireMessageSchema = z.object({
 
 export type ChatWireMessage = z.infer<typeof ChatWireMessageSchema>
 
+/** Metadata returned after a document has been processed on the server. */
+export const UploadedDocumentSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  mimeType: z.string(),
+  size: z.number().int().nonnegative(),
+  textLength: z.number().int().nonnegative(),
+})
+
+export type UploadedDocument = z.infer<typeof UploadedDocumentSchema>
+
+/** A browser-extracted video frame sent only with the current vision request. */
+export const VideoFrameSchema = z.object({
+  id: z.string().min(1).max(200),
+  timestamp: z.number().finite().nonnegative().max(86_400),
+  dataUrl: z
+    .string()
+    .regex(/^data:image\/(?:jpeg|jpg|png);base64,/, 'Frame must be a base64 image data URL.')
+    .max(1_200_000),
+})
+
+export type VideoFrame = z.infer<typeof VideoFrameSchema>
+
+/** Optional still-image attachment sent only with the current vision request. */
+export const ImageDataUrlSchema = z
+  .string()
+  .regex(/^data:image\/(?:jpeg|jpg|png);base64,/, 'Image must be a base64 JPEG or PNG data URL.')
+  .max(1_200_000)
+
+/** Optional audio attachment sent only with the current request. */
+export const AudioDataUrlSchema = z
+  .string()
+  .regex(
+    /^data:audio\/(?:mpeg|mp3|wav|x-wav);base64,/,
+    'Audio must be a base64 MP3 or WAV data URL.',
+  )
+  .max(2_000_000)
+
+export type ImageDataUrl = z.infer<typeof ImageDataUrlSchema>
+export type AudioDataUrl = z.infer<typeof AudioDataUrlSchema>
 
 /**
  * One SSE event from an OpenAI-compatible chat completions stream: a JSON

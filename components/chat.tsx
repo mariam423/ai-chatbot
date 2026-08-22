@@ -4,16 +4,37 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { AiSparklesIcon, RefreshIcon, SendIcon, TrashIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { clearChatSession, getChatSession, getUserPreferences, saveChatMessages, updateSessionSystemPrompt } from '@/app/actions'
+import {
+  clearChatSession,
+  createChatSession,
+  getChatSession,
+  getUserPreferences,
+  saveChatMessages,
+  updateSessionSystemPrompt,
+} from '@/app/actions'
 import { readSSEStream } from '@/lib/sse'
 import { clearThread, loadThread, saveThread } from '@/lib/storage'
-import { BUILTIN_PRESETS, type ChatMessage, type ChatWireMessage, type SystemPromptPreset } from '@/lib/types'
+import { detectStructuredOutputKind, renderStructuredResponse } from '@/lib/structured-output'
+import type { VideoFrame } from '@/lib/video'
+import type { ModelKey } from '@/lib/models'
+import {
+  BUILTIN_PRESETS,
+  type ChatMessage,
+  type ChatWireMessage,
+  type SystemPromptPreset,
+  UploadedDocumentSchema,
+  type UploadedDocument,
+} from '@/lib/types'
+
 import { MAX_INPUT_LENGTH, isValidMessageInput } from '@/lib/validation'
 import MessageBubble from './message-bubble'
 import StreamingSkeleton from './streaming-skeleton'
+import FileUpload from './file-upload'
+import MediaUpload from './media-upload'
 
 interface ChatProps {
   sessionId: string | null
+  modelKey: ModelKey
   onSessionChange: (id: string | null) => void
   onConversationChanged: () => void
 }
@@ -24,7 +45,12 @@ function newId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-export default function Chat({ sessionId, onSessionChange, onConversationChanged }: ChatProps) {
+export default function Chat({
+  sessionId,
+  modelKey,
+  onSessionChange,
+  onConversationChanged,
+}: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [restored, setRestored] = useState(false)
   const [input, setInput] = useState('')
@@ -32,6 +58,10 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   const [error, setError] = useState<string | null>(null)
   const [retryMessage, setRetryMessage] = useState<string | null>(null)
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null)
+  const [documents, setDocuments] = useState<UploadedDocument[]>([])
+  const [videoFrames, setVideoFrames] = useState<VideoFrame[]>([])
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+  const [audioDataUrl, setAudioDataUrl] = useState<string | null>(null)
   const [customPresets, setCustomPresets] = useState<SystemPromptPreset[]>([])
   const [presetMenuOpen, setPresetMenuOpen] = useState(false)
   const presetMenuRef = useRef<HTMLDivElement>(null)
@@ -40,6 +70,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   const scrollRef = useRef<HTMLDivElement>(null)
   const reducedMotion = useReducedMotion()
   const threadGenRef = useRef(0)
+  const documentsRevisionRef = useRef(0)
 
   const scrollToBottom = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -71,6 +102,37 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   useEffect(() => {
     scrollToBottom()
   }, [messages, isStreaming])
+
+  useEffect(() => {
+    if (!sessionId) {
+      documentsRevisionRef.current += 1
+      return
+    }
+    let cancelled = false
+    const revision = documentsRevisionRef.current
+    void fetch(`/api/upload?sessionId=${encodeURIComponent(sessionId)}`)
+      .then(async (response) => {
+        if (!response.ok) return null
+        const payload: unknown = await response.json()
+        if (typeof payload !== 'object' || payload === null || !('documents' in payload))
+          return null
+        const documents = payload.documents
+        if (!Array.isArray(documents)) return null
+        return documents.flatMap((document) => {
+          const parsed = UploadedDocumentSchema.safeParse(document)
+          return parsed.success ? [parsed.data] : []
+        })
+      })
+      .then((loaded) => {
+        if (!cancelled && loaded && revision === documentsRevisionRef.current) setDocuments(loaded)
+      })
+      .catch(() => {
+        /* The chat remains usable if document metadata cannot be loaded. */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
 
   useEffect(() => {
     if (!restored || isStreaming) return
@@ -108,7 +170,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
   const allPresets = [...BUILTIN_PRESETS, ...customPresets]
 
   const activePresetName = systemPrompt
-    ? allPresets.find((p) => p.prompt === systemPrompt)?.name ?? 'Custom'
+    ? (allPresets.find((p) => p.prompt === systemPrompt)?.name ?? 'Custom')
     : 'Default'
 
   const selectPreset = useCallback(
@@ -147,8 +209,21 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
 
     const assistantId = newId()
     let reply = ''
+    let pendingReply = ''
     let settled = false
+    const structuredOutput = detectStructuredOutputKind(content, documents.length > 0)
     setMessages([...history, { id: assistantId, role: 'assistant', content: '' }])
+
+    const flushReply = () => {
+      if (pendingReply === '') return
+      const chunk = pendingReply
+      pendingReply = ''
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant' || last.id !== assistantId) return prev
+        return [...prev.slice(0, -1), { ...last, content: last.content + chunk }]
+      })
+    }
 
     try {
       const response = await fetch('/api/chat', {
@@ -157,6 +232,12 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
         body: JSON.stringify({
           messages: history.map<ChatWireMessage>(({ role, content: c }) => ({ role, content: c })),
           ...(systemPrompt ? { systemPrompt } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          model: modelKey,
+          ...(structuredOutput ? { structuredOutput } : {}),
+          ...(videoFrames.length > 0 ? { videoFrames } : {}),
+          ...(imageDataUrl ? { imageDataUrl } : {}),
+          ...(audioDataUrl ? { audioDataUrl } : {}),
         }),
         signal: controller.signal,
       })
@@ -178,13 +259,22 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
         signal: controller.signal,
         onDelta: (delta) => {
           reply += delta
-          setMessages((prev) => {
-            const last = prev[prev.length - 1]
-            if (!last || last.role !== 'assistant' || last.id !== assistantId) return prev
-            return [...prev.slice(0, -1), { ...last, content: last.content + delta }]
-          })
+          if (structuredOutput) return
+          pendingReply += delta
+          // Coalesce provider token deltas into word-sized updates while still
+          // flushing long code/URL runs promptly.
+          if (/\s/.test(delta) || pendingReply.length >= 48) flushReply()
         },
       })
+      flushReply()
+      if (structuredOutput && reply !== '') {
+        const rendered = structuredOutput === 'chart' ? reply : renderStructuredResponse(reply)
+        setMessages((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant' || last.id !== assistantId) return prev
+          return [...prev.slice(0, -1), { ...last, content: rendered }]
+        })
+      }
       settled = true
       if (!aborted) setError(null)
     } catch (err) {
@@ -203,9 +293,13 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
       abortRef.current = null
     }
 
+    const settledReply =
+      structuredOutput && reply !== '' && structuredOutput !== 'chart'
+        ? renderStructuredResponse(reply)
+        : reply
     const settledThread: ChatMessage[] =
-      settled && reply !== ''
-        ? [...history, { id: assistantId, role: 'assistant', content: reply }]
+      settled && settledReply !== ''
+        ? [...history, { id: assistantId, role: 'assistant', content: settledReply }]
         : history
     saveThread(settledThread)
     void persistToDb(settledThread)
@@ -247,6 +341,23 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
     setError(null)
     setRetryMessage(null)
     setInput('')
+    documentsRevisionRef.current += 1
+    setDocuments([])
+    setVideoFrames([])
+    setImageDataUrl(null)
+    setAudioDataUrl(null)
+  }
+
+  async function createSessionForDocument(): Promise<string | null> {
+    const result = await createChatSession()
+    if (!result.ok) return null
+    onSessionChange(result.sessionId)
+    return result.sessionId
+  }
+
+  function handleDocumentsChange(next: UploadedDocument[]) {
+    documentsRevisionRef.current += 1
+    setDocuments(next)
   }
 
   const canSend = !isStreaming && isValidMessageInput(input)
@@ -286,7 +397,7 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <MessageBubble message={message} />
+                <MessageBubble message={message} sessionId={sessionId} />
                 {message.role === 'assistant' &&
                   !isStreaming &&
                   message.content !== '' &&
@@ -397,180 +508,219 @@ export default function Chat({ sessionId, onSessionChange, onConversationChanged
           void send(input)
         }}
       >
-        {/* System prompt preset selector */}
-        <div className="relative shrink-0" ref={presetMenuRef}>
-          <motion.button
-            type="button"
-            onClick={() => setPresetMenuOpen((prev) => !prev)}
-            aria-label="Select system prompt"
-            aria-expanded={presetMenuOpen}
-            aria-haspopup="listbox"
-            whileHover={reducedMotion ? undefined : { scale: 1.05 }}
-            whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-            className="flex items-center gap-1.5 rounded-xl px-2 py-2 text-xs font-medium transition-colors"
-            style={{
-              color: systemPrompt ? 'var(--text-secondary)' : 'var(--text-muted)',
-              background: presetMenuOpen ? 'var(--bg-input)' : 'transparent',
-              border: presetMenuOpen ? '1px solid var(--border-subtle)' : '1px solid transparent',
-            }}
-          >
-            <HugeiconsIcon icon={AiSparklesIcon} size={16} strokeWidth={1.5} className={systemPrompt ? 'text-cyan-500' : ''} />
-            <span className="hidden max-w-[100px] truncate sm:inline">{activePresetName}</span>
-          </motion.button>
+        <MediaUpload
+          frames={videoFrames}
+          onFramesChange={setVideoFrames}
+          imageDataUrl={imageDataUrl}
+          onImageChange={setImageDataUrl}
+          audioDataUrl={audioDataUrl}
+          onAudioChange={setAudioDataUrl}
+          disabled={isStreaming}
+        />
+        <FileUpload
+          sessionId={sessionId}
+          onSessionRequired={createSessionForDocument}
+          documents={sessionId ? documents : []}
+          onDocumentsChange={handleDocumentsChange}
+          disabled={isStreaming}
+        >
+          {/* System prompt preset selector */}
+          <div className="relative shrink-0" ref={presetMenuRef}>
+            <motion.button
+              type="button"
+              onClick={() => setPresetMenuOpen((prev) => !prev)}
+              aria-label="Select system prompt"
+              aria-expanded={presetMenuOpen}
+              aria-haspopup="listbox"
+              whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+              whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+              className="flex items-center gap-1.5 rounded-xl px-2 py-2 text-xs font-medium transition-colors"
+              style={{
+                color: systemPrompt ? 'var(--text-secondary)' : 'var(--text-muted)',
+                background: presetMenuOpen ? 'var(--bg-input)' : 'transparent',
+                border: presetMenuOpen ? '1px solid var(--border-subtle)' : '1px solid transparent',
+              }}
+            >
+              <HugeiconsIcon
+                icon={AiSparklesIcon}
+                size={16}
+                strokeWidth={1.5}
+                className={systemPrompt ? 'text-cyan-500' : ''}
+              />
+              <span className="hidden max-w-[100px] truncate sm:inline">{activePresetName}</span>
+            </motion.button>
 
-          <AnimatePresence>
-            {presetMenuOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 4, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 4, scale: 0.97 }}
-                transition={{ duration: 0.12 }}
-                role="listbox"
-                aria-label="System prompt presets"
-                className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-xl py-1"
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
-                }}
-              >
-                <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
-                  Presets
-                </p>
-                {/* Default option */}
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={!systemPrompt}
-                  onClick={() => void selectPreset(null)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+            <AnimatePresence>
+              {presetMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 4, scale: 0.97 }}
+                  transition={{ duration: 0.12 }}
+                  role="listbox"
+                  aria-label="System prompt presets"
+                  className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-xl py-1"
                   style={{
-                    background: !systemPrompt ? 'var(--accent-soft)' : 'transparent',
-                    color: !systemPrompt ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
                   }}
                 >
-                  <span className="size-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
-                  <span className="truncate font-medium">Default</span>
-                  {!systemPrompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
-                </button>
-                {/* Built-in presets */}
-                {BUILTIN_PRESETS.filter((p) => p.id !== 'default').map((preset) => (
+                  <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
+                    Presets
+                  </p>
+                  {/* Default option */}
                   <button
-                    key={preset.id}
                     type="button"
                     role="option"
-                    aria-selected={systemPrompt === preset.prompt}
-                    onClick={() => void selectPreset(preset)}
+                    aria-selected={!systemPrompt}
+                    onClick={() => void selectPreset(null)}
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
                     style={{
-                      background: systemPrompt === preset.prompt ? 'var(--accent-soft)' : 'transparent',
-                      color: systemPrompt === preset.prompt ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      background: !systemPrompt ? 'var(--accent-soft)' : 'transparent',
+                      color: !systemPrompt ? 'var(--text-primary)' : 'var(--text-secondary)',
                     }}
                   >
-                    <span className="size-1.5 shrink-0 rounded-full bg-cyan-500" />
-                    <span className="truncate font-medium">{preset.name}</span>
-                    {systemPrompt === preset.prompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
+                    <span className="size-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
+                    <span className="truncate font-medium">Default</span>
+                    {!systemPrompt && (
+                      <span className="ml-auto text-[10px] text-cyan-500">Active</span>
+                    )}
                   </button>
-                ))}
-                {/* Custom presets */}
-                {customPresets.length > 0 && (
-                  <>
-                    <div className="mx-3 my-1 border-t" style={{ borderColor: 'var(--border-subtle)' }} />
-                    <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
-                      Custom
-                    </p>
-                    {customPresets.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        role="option"
-                        aria-selected={systemPrompt === preset.prompt}
-                        onClick={() => void selectPreset(preset)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
-                        style={{
-                          background: systemPrompt === preset.prompt ? 'var(--accent-soft)' : 'transparent',
-                          color: systemPrompt === preset.prompt ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        }}
-                      >
-                        <span className="size-1.5 shrink-0 rounded-full bg-cyan-400" />
-                        <span className="truncate font-medium">{preset.name}</span>
-                        {systemPrompt === preset.prompt && <span className="ml-auto text-[10px] text-cyan-500">Active</span>}
-                      </button>
-                    ))}
-                  </>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                  {/* Built-in presets */}
+                  {BUILTIN_PRESETS.filter((p) => p.id !== 'default').map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      role="option"
+                      aria-selected={systemPrompt === preset.prompt}
+                      onClick={() => void selectPreset(preset)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+                      style={{
+                        background:
+                          systemPrompt === preset.prompt ? 'var(--accent-soft)' : 'transparent',
+                        color:
+                          systemPrompt === preset.prompt
+                            ? 'var(--text-primary)'
+                            : 'var(--text-secondary)',
+                      }}
+                    >
+                      <span className="size-1.5 shrink-0 rounded-full bg-cyan-500" />
+                      <span className="truncate font-medium">{preset.name}</span>
+                      {systemPrompt === preset.prompt && (
+                        <span className="ml-auto text-[10px] text-cyan-500">Active</span>
+                      )}
+                    </button>
+                  ))}
+                  {/* Custom presets */}
+                  {customPresets.length > 0 && (
+                    <>
+                      <div
+                        className="mx-3 my-1 border-t"
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                      />
+                      <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
+                        Custom
+                      </p>
+                      {customPresets.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          role="option"
+                          aria-selected={systemPrompt === preset.prompt}
+                          onClick={() => void selectPreset(preset)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+                          style={{
+                            background:
+                              systemPrompt === preset.prompt ? 'var(--accent-soft)' : 'transparent',
+                            color:
+                              systemPrompt === preset.prompt
+                                ? 'var(--text-primary)'
+                                : 'var(--text-secondary)',
+                          }}
+                        >
+                          <span className="size-1.5 shrink-0 rounded-full bg-cyan-400" />
+                          <span className="truncate font-medium">{preset.name}</span>
+                          {systemPrompt === preset.prompt && (
+                            <span className="ml-auto text-[10px] text-cyan-500">Active</span>
+                          )}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
-        <motion.button
-          type="button"
-          onClick={clearConversation}
-          disabled={isStreaming || messages.length === 0}
-          aria-label="Clear"
-          whileHover={reducedMotion ? undefined : { scale: 1.05 }}
-          whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-          className="shrink-0 rounded-xl p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-30"
-        >
-          <HugeiconsIcon icon={TrashIcon} size={18} strokeWidth={1.5} />
-        </motion.button>
-        <label htmlFor="chat-input" className="sr-only">
-          Message
-        </label>
-        <textarea
-          id="chat-input"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              void send(input)
-            }
-          }}
-          rows={1}
-          maxLength={MAX_INPUT_LENGTH}
-          placeholder="Type a message..."
-          className="focus-glow max-h-40 min-h-10 flex-1 resize-none rounded-xl px-3.5 py-2.5 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-          style={{
-            background: 'var(--bg-input)',
-            border: '1px solid var(--border-medium)',
-          }}
-        />
-        {isStreaming ? (
           <motion.button
             type="button"
-            onClick={stop}
-            whileHover={reducedMotion ? undefined : { scale: 1.02 }}
-            whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-            className="rounded-xl px-3.5 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)]"
+            onClick={clearConversation}
+            disabled={isStreaming || messages.length === 0}
+            aria-label="Clear"
+            whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+            whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+            className="shrink-0 rounded-xl p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <HugeiconsIcon icon={TrashIcon} size={18} strokeWidth={1.5} />
+          </motion.button>
+          <label htmlFor="chat-input" className="sr-only">
+            Message
+          </label>
+          <textarea
+            id="chat-input"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                void send(input)
+              }
+            }}
+            rows={1}
+            maxLength={MAX_INPUT_LENGTH}
+            placeholder="Type a message..."
+            className="focus-glow max-h-40 min-h-10 flex-1 resize-none rounded-xl px-3.5 py-2.5 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
             style={{
               background: 'var(--bg-input)',
               border: '1px solid var(--border-medium)',
             }}
-          >
-            Stop
-          </motion.button>
-        ) : (
-          <motion.button
-            type="submit"
-            disabled={!canSend}
-            aria-label="Send"
-            whileHover={
-              reducedMotion
-                ? undefined
-                : { scale: 1.02, boxShadow: '0 0 20px rgba(6,182,212),0.25)' }
-            }
-            whileTap={reducedMotion ? undefined : { scale: 0.98 }}
-            className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-950 transition-all disabled:cursor-not-allowed disabled:opacity-30"
-            style={{
-              background: 'linear-gradient(to right, #06b6d4, #0891b2)',
-              boxShadow: '0 4px 14px 0 rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
-            }}
-          >
-            <HugeiconsIcon icon={SendIcon} size={16} strokeWidth={1.5} />
-          </motion.button>
-        )}
+          />
+          {isStreaming ? (
+            <motion.button
+              type="button"
+              onClick={stop}
+              whileHover={reducedMotion ? undefined : { scale: 1.02 }}
+              whileTap={reducedMotion ? undefined : { scale: 0.98 }}
+              className="rounded-xl px-3.5 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)]"
+              style={{
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border-medium)',
+              }}
+            >
+              Stop
+            </motion.button>
+          ) : (
+            <motion.button
+              type="submit"
+              disabled={!canSend}
+              aria-label="Send"
+              whileHover={
+                reducedMotion
+                  ? undefined
+                  : { scale: 1.02, boxShadow: '0 0 20px rgba(6,182,212),0.25)' }
+              }
+              whileTap={reducedMotion ? undefined : { scale: 0.98 }}
+              className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-950 transition-all disabled:cursor-not-allowed disabled:opacity-30"
+              style={{
+                background: 'linear-gradient(to right, #06b6d4, #0891b2)',
+                boxShadow: '0 4px 14px 0 rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+              }}
+            >
+              <HugeiconsIcon icon={SendIcon} size={16} strokeWidth={1.5} />
+            </motion.button>
+          )}
+        </FileUpload>
       </form>
     </div>
   )

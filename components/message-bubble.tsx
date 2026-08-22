@@ -5,8 +5,16 @@ import { UserIcon, BotMessageSquareIcon } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import type { ChatMessage } from '@/lib/types'
 import Markdown from './markdown'
+import StructuredResponse from './structured-response'
+import { parseStructuredResponse } from '@/lib/structured-output'
 
-export default function MessageBubble({ message }: { message: ChatMessage }) {
+export default function MessageBubble({
+  message,
+  sessionId = null,
+}: {
+  message: ChatMessage
+  sessionId?: string | null
+}) {
   const isUser = message.role === 'user'
   const reducedMotion = useReducedMotion()
 
@@ -87,8 +95,10 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
               style={{ animationDelay: '0.3s' }}
             />
           </span>
+        ) : parseStructuredResponse(message.content) ? (
+          <StructuredResponse content={message.content} sessionId={sessionId} />
         ) : (
-          <Markdown content={message.content} />
+          <Markdown content={message.content} sessionId={sessionId} />
         )}
       </div>
     </motion.div>
