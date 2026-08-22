@@ -35,6 +35,8 @@ import MediaUpload from './media-upload'
 interface ChatProps {
   sessionId: string | null
   modelKey: ModelKey
+  /** Per-session skill override; null = default catalog. */
+  enabledSkills: string[] | null
   onSessionChange: (id: string | null) => void
   onConversationChanged: () => void
 }
@@ -48,6 +50,7 @@ function newId(): string {
 export default function Chat({
   sessionId,
   modelKey,
+  enabledSkills,
   onSessionChange,
   onConversationChanged,
 }: ChatProps) {
@@ -233,6 +236,7 @@ export default function Chat({
           messages: history.map<ChatWireMessage>(({ role, content: c }) => ({ role, content: c })),
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(sessionId ? { sessionId } : {}),
+          ...(enabledSkills !== null ? { enabledSkills } : {}),
           model: modelKey,
           ...(structuredOutput ? { structuredOutput } : {}),
           ...(videoFrames.length > 0 ? { videoFrames } : {}),
@@ -311,7 +315,13 @@ export default function Chat({
       sid = newId()
       onSessionChange(sid)
     }
-    const result = await saveChatMessages({ sessionId: sid, messages: thread })
+    // The override rides along with the first save so it is stored atomically
+    // with session creation (upsert `create` includes it).
+    const result = await saveChatMessages({
+      sessionId: sid,
+      messages: thread,
+      ...(enabledSkills !== null ? { enabledSkills } : {}),
+    })
     if (result.ok) onConversationChanged()
   }
 

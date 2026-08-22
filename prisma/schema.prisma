@@ -61,16 +61,19 @@ model Session {
 /// `title` is an optional user-renamed sidebar label; when null, the sidebar
 /// derives the title from the first message.
 model ChatSession {
-  id           String        @id @default(cuid())
-  userId       String?
-  title        String?
-  systemPrompt String?
-  pinned       Boolean       @default(false)
-  archived     Boolean       @default(false)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  messages     ChatMessage[]
-  documents    Document[]
+  id            String        @id @default(cuid())
+  userId        String?
+  title         String?
+  systemPrompt  String?
+  // Comma-separated skill ids active for this session. Null = defaults
+  // (SKILLS_ENABLED env or the full catalog); empty string = none enabled.
+  enabledSkills String?
+  pinned        Boolean       @default(false)
+  archived      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  messages      ChatMessage[]
+  documents     Document[]
 
   @@index([userId])
   @@map("chat_sessions")
@@ -127,15 +130,18 @@ model DocumentChunk {
 }
 
 /// Per-user preferences: display name, avatar URL, personal API key,
-/// and custom system prompt presets stored as JSON.
+/// custom system prompt presets stored as JSON, and the Google Calendar
+/// service-account key (JSON) used by the schedule_block skill tool.
 model UserPreference {
-  id                   String  @id @default(cuid())
-  userId               String  @unique
-  displayName          String?
-  avatarUrl            String?
-  apiKey               String?
-  systemPromptPresets  String  @default("[]")
-  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                        String  @id @default(cuid())
+  userId                    String  @unique
+  displayName               String?
+  avatarUrl                 String?
+  apiKey                    String?
+  systemPromptPresets       String  @default("[]")
+  googleCalendarId          String?
+  googleServiceAccountKey   String?
+  user                      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
 }

@@ -4,10 +4,13 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { CopyIcon, CheckIcon, CodeIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import type { Element } from 'hast'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
+import { isSvgDataUrl } from '@/lib/svg-data-url'
 import CitationDrawer from './citation-drawer'
+import DiagramCard from './diagram-card'
 
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false)
@@ -99,6 +102,20 @@ function linkifyCitations(content: string): string {
 }
 
 /**
+ * react-markdown's default URL transform strips `data:` URLs (not in its safe
+ * protocol list), which would drop the SVG data URLs the `diagram_render`
+ * tool returns. Permit them for image sources only — markdown never produces
+ * other `src` elements, `<img>` data URLs cannot execute scripts, and links
+ * keep the default sanitization.
+ */
+function markdownUrlTransform(url: string, key: string, node: Element): string {
+  if (key === 'src' && node.tagName === 'img' && isSvgDataUrl(url)) {
+    return url
+  }
+  return defaultUrlTransform(url)
+}
+
+/**
  * Renders assistant markdown. No `rehype-raw`, so raw HTML in the LLM reply
  * is escaped and displayed literally - the NFR-3 security property holds.
  */
@@ -108,6 +125,7 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
+        urlTransform={markdownUrlTransform}
         components={{
           pre: ({ children }) => <>{children}</>,
           a({ href, children, ...props }) {
@@ -144,6 +162,17 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
               )
             }
             return <CodeBlock language={match[1]!} code={text} />
+          },
+          img({ src, alt, ...props }) {
+            // Provider-rendered diagrams (SVG data URLs from diagram_render)
+            // render in a card with copy/export controls; other images stay
+            // plain.
+            if (typeof src === 'string' && isSvgDataUrl(src)) {
+              return <DiagramCard src={src} alt={alt} />
+            }
+            return (
+              <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
+            )
           },
         }}
       >

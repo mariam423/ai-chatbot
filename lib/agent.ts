@@ -12,6 +12,13 @@ import {
   listBuiltInAgentTools,
   type AgentToolDefinition,
 } from '@/lib/agent-tools'
+import {
+  executeSkillTool,
+  listSkillTools,
+  toOpenAISkillTools,
+  type SkillTool,
+  type SkillToolContext,
+} from '@/lib/skills/tools'
 
 export const MAX_AGENT_STEPS = 4
 const ToolCallSchema = z.object({
@@ -58,6 +65,9 @@ export interface AgentRunOptions {
   systemPrompt: string
   tools?: McpTool[]
   builtInTools?: AgentToolDefinition[]
+  skillTools?: SkillTool[]
+  /** Per-user provider credentials resolved server-side (e.g. from Settings). */
+  skillContext?: SkillToolContext
   signal?: AbortSignal
   headers?: Record<string, string>
 }
@@ -127,12 +137,17 @@ async function complete(
 async function executeTool(
   tools: McpTool[],
   builtInTools: AgentToolDefinition[],
+  skillTools: SkillTool[],
   name: string,
   argumentsJson: string,
+  skillContext?: SkillToolContext,
 ): Promise<unknown> {
   if (name.startsWith('mcp__')) return callMcpTool(tools, name, argumentsJson)
   if (builtInTools.some((tool) => tool.name === name)) {
     return executeBuiltInAgentTool({ name, arguments: parseToolArguments(argumentsJson) })
+  }
+  if (skillTools.some((tool) => tool.name === name)) {
+    return executeSkillTool(name, argumentsJson, skillContext)
   }
   throw new Error(`Unknown agent tool: ${name}`)
 }
@@ -147,7 +162,12 @@ export { hasBuiltInToolIntent }
 export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult> {
   const mcpTools = options.tools ?? (await listMcpTools())
   const builtInTools = options.builtInTools ?? listBuiltInAgentTools()
-  const availableTools = [...toOpenAITools(mcpTools), ...builtInDefinitions(builtInTools)]
+  const skillTools = options.skillTools ?? listSkillTools()
+  const availableTools = [
+    ...toOpenAITools(mcpTools),
+    ...builtInDefinitions(builtInTools),
+    ...toOpenAISkillTools(skillTools),
+  ]
   const execution: AgentMessage[] = options.messages.map(({ role, content }) => ({
     role,
     content,
@@ -174,8 +194,10 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
         output = await executeTool(
           mcpTools,
           builtInTools,
+          skillTools,
           toolCall.function.name,
           toolCall.function.arguments,
+          options.skillContext,
         )
       } catch (error) {
         output = { error: error instanceof Error ? error.message : 'Tool execution failed.' }

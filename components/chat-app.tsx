@@ -16,10 +16,12 @@ import { useSession, signOut } from 'next-auth/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   clearChatSession,
+  getSessionSkills,
   listChatSessions,
   renameChatSession,
   togglePinSession,
   toggleArchiveSession,
+  updateSessionSkills,
 } from '@/app/actions'
 import { withThemeTransition } from '@/lib/theme-transition'
 import { clearSessionId, clearThread, getSessionId, setSessionId } from '@/lib/storage'
@@ -28,6 +30,7 @@ import type { ChatSessionSummary } from '@/lib/types'
 import Chat from './chat'
 import Sidebar from './sidebar'
 import CommandPalette from './command-palette'
+import SkillPicker from './skill-picker'
 
 export default function ChatApp() {
   const { data: session } = useSession()
@@ -41,6 +44,11 @@ export default function ChatApp() {
   const [showArchived, setShowArchived] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelKey>(DEFAULT_MODEL_KEY)
+  // Per-session skill override. null = use the full catalog (defaults).
+  const [enabledSkills, setEnabledSkills] = useState<string[] | null>(null)
+  // Override chosen before a session existed; applied + persisted the moment a
+  // session id arrives (see the skill-load effect below).
+  const pendingSkillsRef = useRef<string[] | null>(null)
   const reducedMotion = useReducedMotion()
   const loadingMoreRef = useRef(false)
 
@@ -101,6 +109,42 @@ export default function ChatApp() {
     } else {
       clearSessionId()
       clearThread()
+      pendingSkillsRef.current = null
+    }
+    // Start blank; the skill-load effect below fetches the real override.
+    setEnabledSkills(null)
+  }
+
+  /**
+   * Load a session's skill override. When a session was just created while the
+   * user had customized skills (pending override), persist it to the session
+   * and use it instead of the (likely empty) fetched value.
+   */
+  useEffect(() => {
+    if (!sessionId) return
+    let cancelled = false
+    void getSessionSkills(sessionId).then((result) => {
+      if (cancelled || !result.ok) return
+      const pending = pendingSkillsRef.current
+      if (pending !== null) {
+        pendingSkillsRef.current = null
+        setEnabledSkills(pending)
+        void updateSessionSkills({ sessionId, enabledSkills: pending })
+        return
+      }
+      setEnabledSkills(result.enabledSkills)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  function handleEnabledSkillsChange(next: string[] | null) {
+    setEnabledSkills(next)
+    if (sessionId) {
+      void updateSessionSkills({ sessionId, enabledSkills: next })
+    } else {
+      pendingSkillsRef.current = next
     }
   }
 
@@ -262,6 +306,7 @@ export default function ChatApp() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <SkillPicker enabledSkills={enabledSkills} onChange={handleEnabledSkillsChange} />
             <label
               className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
               style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
@@ -393,6 +438,7 @@ export default function ChatApp() {
           <Chat
             sessionId={sessionId}
             modelKey={selectedModel}
+            enabledSkills={enabledSkills}
             onSessionChange={handleSessionChange}
             onConversationChanged={refreshSessions}
           />

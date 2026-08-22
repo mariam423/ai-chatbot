@@ -7,11 +7,16 @@ import {
   Settings02Icon,
   CheckIcon,
   ArrowLeft01Icon,
+  Calendar01Icon,
 } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useSession } from 'next-auth/react'
 import { useCallback, useEffect, useState } from 'react'
-import { getUserPreferences, updateUserPreferences } from '@/app/actions'
+import {
+  getUserPreferences,
+  testGoogleCalendarConnection,
+  updateUserPreferences,
+} from '@/app/actions'
 import { BUILTIN_PRESETS, type SystemPromptPreset } from '@/lib/types'
 import { useViewTransitionRouter } from '@/hooks/use-view-transition-router'
 
@@ -27,6 +32,10 @@ export default function SettingsPage() {
   const [presets, setPresets] = useState<SystemPromptPreset[]>([])
   const [newPresetName, setNewPresetName] = useState('')
   const [newPresetPrompt, setNewPresetPrompt] = useState('')
+  const [googleCalendarId, setGoogleCalendarId] = useState('')
+  const [googleServiceAccountKey, setGoogleServiceAccountKey] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -42,6 +51,8 @@ export default function SettingsPage() {
       setDisplayName(result.data.displayName)
       setAvatarUrl(result.data.avatarUrl)
       setApiKey(result.data.apiKey)
+      setGoogleCalendarId(result.data.googleCalendarId)
+      setGoogleServiceAccountKey(result.data.googleServiceAccountKey)
       try {
         setPresets(JSON.parse(result.data.systemPromptPresets) as SystemPromptPreset[])
       } catch {
@@ -50,7 +61,9 @@ export default function SettingsPage() {
       setLoading(false)
     }
     void load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const save = useCallback(async () => {
@@ -62,15 +75,31 @@ export default function SettingsPage() {
       avatarUrl,
       apiKey,
       systemPromptPresets: JSON.stringify(presets),
+      googleCalendarId,
+      googleServiceAccountKey,
     })
     setSaving(false)
     if (result.ok) {
       setSaved(true)
+      setTestResult(null)
       setTimeout(() => setSaved(false), 2000)
     } else {
       setError(result.error)
     }
-  }, [displayName, avatarUrl, apiKey, presets])
+  }, [displayName, avatarUrl, apiKey, presets, googleCalendarId, googleServiceAccountKey])
+
+  const testConnection = useCallback(async () => {
+    setTesting(true)
+    setTestResult(null)
+    setError(null)
+    const result = await testGoogleCalendarConnection()
+    setTesting(false)
+    if (result.ok) {
+      setTestResult(result.message)
+    } else {
+      setError(result.error)
+    }
+  }, [])
 
   function addPreset() {
     const name = newPresetName.trim()
@@ -96,7 +125,11 @@ export default function SettingsPage() {
     setPresets((prev) =>
       prev.map((p) =>
         p.id === editingPresetId
-          ? { ...p, name: editDraft.name.trim() || p.name, prompt: editDraft.prompt.trim() || p.prompt }
+          ? {
+              ...p,
+              name: editDraft.name.trim() || p.name,
+              prompt: editDraft.prompt.trim() || p.prompt,
+            }
           : p,
       ),
     )
@@ -105,7 +138,10 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex h-dvh items-center justify-center" style={{ background: 'var(--bg-deep)' }}>
+      <div
+        className="flex h-dvh items-center justify-center"
+        style={{ background: 'var(--bg-deep)' }}
+      >
         <div className="skeleton-bar h-8 w-48" />
       </div>
     )
@@ -132,8 +168,15 @@ export default function SettingsPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} size={20} strokeWidth={1.5} />
         </motion.button>
-        <HugeiconsIcon icon={Settings02Icon} size={18} strokeWidth={1.5} className="text-[var(--text-secondary)]" />
-        <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">Settings</h1>
+        <HugeiconsIcon
+          icon={Settings02Icon}
+          size={18}
+          strokeWidth={1.5}
+          className="text-[var(--text-secondary)]"
+        />
+        <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+          Settings
+        </h1>
       </header>
 
       <div className="mx-auto max-w-2xl space-y-6 p-4 py-8">
@@ -141,7 +184,11 @@ export default function SettingsPage() {
           <div
             role="alert"
             className="rounded-xl px-3 py-2.5 text-sm"
-            style={{ background: 'var(--error-bg)', border: '1px solid var(--error-border)', color: 'var(--error-text)' }}
+            style={{
+              background: 'var(--error-bg)',
+              border: '1px solid var(--error-border)',
+              color: 'var(--error-text)',
+            }}
           >
             {error}
           </div>
@@ -165,7 +212,10 @@ export default function SettingsPage() {
           </div>
           <div className="space-y-4">
             <div>
-              <label htmlFor="settings-name" className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+              <label
+                htmlFor="settings-name"
+                className="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+              >
                 Display Name
               </label>
               <input
@@ -179,7 +229,10 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label htmlFor="settings-avatar" className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+              <label
+                htmlFor="settings-avatar"
+                className="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+              >
                 Avatar URL
               </label>
               <input
@@ -194,7 +247,9 @@ export default function SettingsPage() {
             </div>
             {session?.user?.email && (
               <div>
-                <span className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Email</span>
+                <span className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                  Email
+                </span>
                 <span className="text-sm text-[var(--text-tertiary)]">{session.user.email}</span>
               </div>
             )}
@@ -218,7 +273,8 @@ export default function SettingsPage() {
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">API Key</h2>
           </div>
           <p className="mb-3 text-xs text-[var(--text-tertiary)]">
-            Provide your own OpenRouter API key to use your personal quota instead of the shared key.
+            Provide your own OpenRouter API key to use your personal quota instead of the shared
+            key.
           </p>
           <div className="relative">
             <label htmlFor="settings-apikey" className="sr-only">
@@ -243,6 +299,89 @@ export default function SettingsPage() {
           </div>
         </motion.section>
 
+        {/* ─── Google Calendar ─── */}
+        <motion.section
+          initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.08 }}
+          className="rounded-2xl p-5"
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            boxShadow: 'var(--glass-shadow)',
+          }}
+        >
+          <div className="mb-4 flex items-center gap-2">
+            <HugeiconsIcon
+              icon={Calendar01Icon}
+              size={16}
+              strokeWidth={1.5}
+              className="text-cyan-500"
+            />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Google Calendar</h2>
+          </div>
+          <p className="mb-3 text-xs text-[var(--text-tertiary)]">
+            Connect a service account so the{' '}
+            <span className="font-mono text-[var(--text-secondary)]">schedule_block</span> skill can
+            create real events. Share your calendar with the service account email (Calendar
+            settings → Share with specific people) and paste its JSON key below. Leave blank to use
+            the server&apos;s GOOGLE_* environment variables.
+          </p>
+          <div className="space-y-4">
+            <div>
+              <label
+                htmlFor="settings-calendar-id"
+                className="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+              >
+                Calendar ID
+              </label>
+              <input
+                id="settings-calendar-id"
+                type="text"
+                value={googleCalendarId}
+                onChange={(e) => setGoogleCalendarId(e.target.value)}
+                placeholder="primary or someone@example.com"
+                className="focus-glow w-full rounded-xl px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="settings-calendar-key"
+                className="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+              >
+                Service Account Key (JSON)
+              </label>
+              <textarea
+                id="settings-calendar-key"
+                value={googleServiceAccountKey}
+                onChange={(e) => setGoogleServiceAccountKey(e.target.value)}
+                rows={6}
+                placeholder='{ "client_email": "...", "private_key": "-----BEGIN PRIVATE KEY-----" }'
+                className="focus-glow w-full resize-y rounded-xl px-3 py-2.5 font-mono text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void testConnection()}
+                disabled={testing}
+                className="rounded-xl border px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ borderColor: 'var(--border-medium)' }}
+              >
+                {testing ? 'Testing…' : 'Test connection'}
+              </button>
+              {testResult && (
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-500">
+                  <HugeiconsIcon icon={CheckIcon} size={12} strokeWidth={2} />
+                  {testResult}
+                </span>
+              )}
+            </div>
+          </div>
+        </motion.section>
+
         {/* ─── System Prompt Presets ─── */}
         <motion.section
           initial={reducedMotion ? false : { opacity: 0, y: 12 }}
@@ -256,8 +395,15 @@ export default function SettingsPage() {
           }}
         >
           <div className="mb-4 flex items-center gap-2">
-            <HugeiconsIcon icon={Settings02Icon} size={16} strokeWidth={1.5} className="text-cyan-500" />
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">System Prompt Presets</h2>
+            <HugeiconsIcon
+              icon={Settings02Icon}
+              size={16}
+              strokeWidth={1.5}
+              className="text-cyan-500"
+            />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              System Prompt Presets
+            </h2>
           </div>
 
           {/* Built-in presets */}
@@ -270,10 +416,15 @@ export default function SettingsPage() {
                 <div
                   key={preset.id}
                   className="rounded-xl px-3 py-2.5"
-                  style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
                 >
                   <p className="text-sm font-medium text-[var(--text-primary)]">{preset.name}</p>
-                  <p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-tertiary)]">{preset.prompt}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-tertiary)]">
+                    {preset.prompt}
+                  </p>
                 </div>
               ))}
             </div>
@@ -290,7 +441,10 @@ export default function SettingsPage() {
                   <div
                     key={preset.id}
                     className="group flex items-start gap-2 rounded-xl px-3 py-2.5"
-                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
+                    style={{
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-subtle)',
+                    }}
                   >
                     {editingPresetId === preset.id ? (
                       <div className="flex-1 space-y-2">
@@ -298,14 +452,20 @@ export default function SettingsPage() {
                           value={editDraft.name}
                           onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
                           className="focus-glow w-full rounded-lg px-2 py-1 text-sm text-[var(--text-primary)] outline-none"
-                          style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }}
+                          style={{
+                            background: 'var(--bg-input)',
+                            border: '1px solid var(--border-medium)',
+                          }}
                         />
                         <textarea
                           value={editDraft.prompt}
                           onChange={(e) => setEditDraft((d) => ({ ...d, prompt: e.target.value }))}
                           rows={3}
                           className="focus-glow w-full resize-none rounded-lg px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
-                          style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }}
+                          style={{
+                            background: 'var(--bg-input)',
+                            border: '1px solid var(--border-medium)',
+                          }}
                         />
                         <div className="flex gap-1">
                           <button
@@ -328,8 +488,12 @@ export default function SettingsPage() {
                     ) : (
                       <>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-[var(--text-primary)]">{preset.name}</p>
-                          <p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-tertiary)]">{preset.prompt}</p>
+                          <p className="text-sm font-medium text-[var(--text-primary)]">
+                            {preset.name}
+                          </p>
+                          <p className="mt-0.5 line-clamp-2 text-xs text-[var(--text-tertiary)]">
+                            {preset.prompt}
+                          </p>
                         </div>
                         <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                           <button
@@ -356,8 +520,13 @@ export default function SettingsPage() {
           )}
 
           {/* Add new preset */}
-          <div className="rounded-xl p-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
-            <h3 className="mb-2 text-xs font-medium text-[var(--text-tertiary)]">Add Custom Preset</h3>
+          <div
+            className="rounded-xl p-3"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}
+          >
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-tertiary)]">
+              Add Custom Preset
+            </h3>
             <div className="space-y-2">
               <input
                 value={newPresetName}
@@ -408,12 +577,16 @@ export default function SettingsPage() {
                 : '0 2px 12px rgba(8,145,178,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
             }}
           >
-            {saving ? 'Saving...' : saved ? (
+            {saving ? (
+              'Saving...'
+            ) : saved ? (
               <>
                 <HugeiconsIcon icon={CheckIcon} size={14} strokeWidth={2} />
                 Saved
               </>
-            ) : 'Save Changes'}
+            ) : (
+              'Save Changes'
+            )}
           </motion.button>
         </div>
       </div>
