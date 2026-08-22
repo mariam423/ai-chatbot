@@ -25,6 +25,12 @@
       "skillPath": "javascript/compression/SKILL.md",
       "computedHash": "f0878e8f642dc2b938207c8597a346d3c64f6c6265ce7c9e0d1c58dd374bd958"
     },
+    "doc-coauthoring": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/doc-coauthoring/SKILL.md",
+      "computedHash": "b964e4c3ffe13f66f76dd7919073e60c7aec622cd8a8363bb36323188100cf8e"
+    },
     "loading-states-and-perceived-performance": {
       "source": "dembrandt/dembrandt-skills",
       "sourceType": "github",
@@ -42,6 +48,12 @@
       "sourceType": "github",
       "skillPath": "plugins/nextjs-master/skills/nextjs-server-actions/SKILL.md",
       "computedHash": "70cde62a513dff359aada16c8d562916c3c0e4dba39cf650b8aad86ed3833ee5"
+    },
+    "pdf": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/pdf/SKILL.md",
+      "computedHash": "cfbc539377088ca7e44a813b30c306327385bbd973cd7a721e1743f60837dd62"
     },
     "prisma-cli": {
       "source": "prisma/skills",
@@ -84,6 +96,18 @@
       "sourceType": "github",
       "skillPath": "toolchains/ai/techniques/session-compression/SKILL.md",
       "computedHash": "9b305c921e6ea15ce26fc9208dc7179210d1744d4ec4250f28ce20d6dfb80512"
+    },
+    "streaming": {
+      "source": "assistant-ui/skills",
+      "sourceType": "github",
+      "skillPath": "assistant-ui/skills/streaming/SKILL.md",
+      "computedHash": "acae2aa7a94eaacf6883aafd2c84f6c4664e7d461792fe70e80658d10f7bd104"
+    },
+    "vercel-composition-patterns": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/composition-patterns/SKILL.md",
+      "computedHash": "575757e3e25761c8c562d6e395d29f0b76c98b1273c0bd72d88e6ab1bc9c7d42"
     },
     "vercel-react-best-practices": {
       "source": "vercel-labs/agent-skills",

@@ -24,4 +24,8 @@ package-lock.json
 .agents/skills/assistant-ui
 .agents/skills/loading-states-and-perceived-performance
 .agents/skills/micro-interaction-spec
+.agents/skills/pdf
+.agents/skills/doc-coauthoring
+.agents/skills/vercel-composition-patterns
+.agents/skills/streaming
 e2e/**/*-snapshots
