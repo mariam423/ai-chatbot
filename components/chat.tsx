@@ -16,10 +16,17 @@ import {
   getChatSession,
   getUserPreferences,
   saveChatMessages,
+  setActiveBranch,
   updateSessionSystemPrompt,
 } from '@/app/actions'
 import { readSSEStream } from '@/lib/sse'
-import { clearThread, loadThreadState, saveThreadState, type ThreadState } from '@/lib/storage'
+import {
+  clearThread,
+  loadThreadState,
+  saveThreadState,
+  setSessionId,
+  type ThreadState,
+} from '@/lib/storage'
 import { detectStructuredOutputKind, renderStructuredResponse } from '@/lib/structured-output'
 import type { VideoFrame } from '@/lib/video'
 import type { ModelKey } from '@/lib/models'
@@ -66,6 +73,9 @@ export default function Chat({
   onConversationChanged,
 }: ChatProps) {
   const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD)
+  // Imperative mirror of `thread`, kept current so async persistence and the
+  // fork-on-edit flow read the latest state without stale render closures.
+  const threadRef = useRef<ThreadState>(EMPTY_THREAD)
   const [restored, setRestored] = useState(false)
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -90,16 +100,26 @@ export default function Chat({
   // toggling when a past prompt has been edited (tree-branching / forks).
   const messages = useMemo(() => thread.branches[thread.active] ?? [], [thread])
 
-  /** Update the currently active branch in place (streaming appends, etc.). */
-  const updateActive = useCallback((updater: (msgs: ChatMessage[]) => ChatMessage[]) => {
-    setThread((prev) => {
-      if (prev.active < 0 || prev.active >= prev.branches.length) return prev
-      return {
-        ...prev,
-        branches: prev.branches.map((branch, i) => (i === prev.active ? updater(branch) : branch)),
-      }
-    })
+  /** Set the thread state, keeping `threadRef` in sync imperatively. */
+  const commitThread = useCallback((next: ThreadState) => {
+    threadRef.current = next
+    setThread(next)
   }, [])
+
+  /** Update the currently active branch in place (streaming appends, etc.). */
+  const updateActive = useCallback(
+    (updater: (msgs: ChatMessage[]) => ChatMessage[]) => {
+      const prev = threadRef.current
+      if (prev.active < 0 || prev.active >= prev.branches.length) return
+      commitThread({
+        ...prev,
+        branches: prev.branches.map((branch, i) =>
+          i === prev.active ? updater(branch) : branch,
+        ),
+      })
+    },
+    [commitThread],
+  )
 
   const scrollToBottom = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -113,14 +133,15 @@ export default function Chat({
       if (sessionId) {
         const result = await getChatSession(sessionId)
         if (!cancelled && gen === threadGenRef.current && result.ok) {
-          if (result.messages.length > 0) {
-            initial = { branches: [result.messages], active: 0 }
+          if (result.branches.length > 0 && result.branches.some((b) => b.length > 0)) {
+            // Restore DB-persisted branches (survives session switches).
+            initial = { branches: result.branches, active: result.active }
           }
           setSystemPrompt(result.systemPrompt ?? null)
         }
       }
       if (!cancelled && gen === threadGenRef.current) {
-        setThread(initial)
+        commitThread(initial)
         setRestored(true)
       }
     }
@@ -241,7 +262,6 @@ export default function Chat({
     const assistantId = newId()
     let reply = ''
     let pendingReply = ''
-    let settled = false
     const structuredOutput = detectStructuredOutputKind(content, documents.length > 0)
     updateActive(() => [...history, { id: assistantId, role: 'assistant', content: '' }])
 
@@ -307,7 +327,6 @@ export default function Chat({
           return [...prev.slice(0, -1), { ...last, content: rendered }]
         })
       }
-      settled = true
       if (!aborted) setError(null)
     } catch (err) {
       if (controller.signal.aborted) {
@@ -325,15 +344,7 @@ export default function Chat({
       abortRef.current = null
     }
 
-    const settledReply =
-      structuredOutput && reply !== '' && structuredOutput !== 'chart'
-        ? renderStructuredResponse(reply)
-        : reply
-    const settledThread: ChatMessage[] =
-      settled && settledReply !== ''
-        ? [...history, { id: assistantId, role: 'assistant', content: settledReply }]
-        : history
-    void persistToDb(settledThread)
+    void persistToDb()
   }
 
   /**
@@ -347,26 +358,33 @@ export default function Chat({
     const prefix = messages.slice(0, index)
     // Activate a fresh fork from the shared prefix; send() appends the edited
     // prompt and streams the regenerated reply onto this new active branch.
-    setThread((prev) => ({
-      branches: [...prev.branches, prefix],
-      active: prev.branches.length,
-    }))
+    const prev = threadRef.current
+    commitThread({ branches: [...prev.branches, prefix], active: prev.branches.length })
     void send(content, prefix)
   }
 
-  async function persistToDb(threadMsgs: ChatMessage[]): Promise<void> {
+  async function persistToDb(): Promise<void> {
+    // Persist the whole branched thread so forks survive a session switch. The
+    // active branch + any skill override ride along (atomically on first save).
+    const state = threadRef.current
     let sid = sessionId
     if (!sid) {
       sid = newId()
-      onSessionChange(sid)
+      // Write the session id to localStorage synchronously so a fast reload
+      // right after send still finds it (the DB save is async and may not have
+      // landed by the time the user navigates away). BUT don't publish it to
+      // React state yet — the [sessionId] restore effect would re-run against
+      // the as-yet-unsaved session and clobber the live thread. Publish it via
+      // onSessionChange only once the save commits.
+      setSessionId(sid)
     }
-    // The override rides along with the first save so it is stored atomically
-    // with session creation (upsert `create` includes it).
     const result = await saveChatMessages({
       sessionId: sid,
-      messages: threadMsgs,
+      branches: state.branches,
+      active: state.active,
       ...(enabledSkills !== null ? { enabledSkills } : {}),
     })
+    if (result.ok && !sessionId) onSessionChange(sid)
     if (result.ok) onConversationChanged()
   }
 
@@ -392,7 +410,7 @@ export default function Chat({
     if (sessionId) void clearChatSession(sessionId)
     onSessionChange(null)
     clearThread()
-    setThread(EMPTY_THREAD)
+    commitThread(EMPTY_THREAD)
     setError(null)
     setRetryMessage(null)
     setInput('')
@@ -436,7 +454,11 @@ export default function Chat({
                 <button
                   key={i}
                   type="button"
-                  onClick={() => setThread((prev) => ({ ...prev, active: i }))}
+                  onClick={() => {
+                    commitThread({ ...threadRef.current, active: i })
+                    // Persist the newly active branch for this session.
+                    if (sessionId) void setActiveBranch({ sessionId, active: i })
+                  }}
                   aria-pressed={active}
                   aria-label={`Show version ${i + 1}`}
                   className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors"
