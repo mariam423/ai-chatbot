@@ -38,7 +38,7 @@ export default function GlobalError({
             type="button"
             onClick={reset}
             className="mt-5 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-950 transition-opacity hover:opacity-90"
-            style={{ background: 'linear-gradient(to right, #06b6d4, #0891b2)' }}
+            style={{ background: 'linear-gradient(to right, #10b981, #0d9488)' }}
           >
             Try again
           </button>

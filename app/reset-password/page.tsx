@@ -54,7 +54,7 @@ export default function ResetPasswordPage() {
       style={{ backgroundColor: 'var(--bg-deep)' }}
     >
       <div className="pointer-events-none absolute inset-0">
-        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-cyan-600/20 blur-[140px]" />
+        <div className="ambient-glow absolute -left-32 -top-32 size-[520px] rounded-full bg-emerald-600/20 blur-[140px]" />
         <div className="ambient-glow-slow absolute -bottom-32 -right-32 size-[480px] rounded-full bg-indigo-500/15 blur-[130px]" />
       </div>
 
@@ -90,8 +90,9 @@ export default function ResetPasswordPage() {
                 href="/login"
                 className="mt-6 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white"
                 style={{
-                  background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
-                  boxShadow: '0 4px 20px rgba(6,182,212,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
+                  background: 'linear-gradient(135deg, #10b981 0%, #0d9488 100%)',
+                  boxShadow:
+                    '0 4px 20px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
                 }}
               >
                 Go to sign in
@@ -196,13 +197,13 @@ export default function ResetPasswordPage() {
                 <motion.button
                   type="submit"
                   disabled={loading}
-                  whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(6,182,212,0.3)' }}
+                  whileHover={{ scale: 1.01, boxShadow: '0 0 28px rgba(16,185,129,0.35)' }}
                   whileTap={{ scale: 0.98 }}
                   className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-all"
                   style={{
-                    background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
+                    background: 'linear-gradient(135deg, #10b981 0%, #0d9488 100%)',
                     boxShadow:
-                      '0 4px 20px rgba(6,182,212,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
+                      '0 4px 20px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.12)',
                   }}
                 >
                   {loading ? (

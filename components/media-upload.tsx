@@ -131,7 +131,7 @@ export default function MediaUpload({
             icon={FileAudioIcon}
             size={14}
             strokeWidth={1.5}
-            className="text-cyan-500"
+            className="text-emerald-500"
           />
           <span className="text-[11px] text-[var(--text-tertiary)]">Audio</span>
           <button

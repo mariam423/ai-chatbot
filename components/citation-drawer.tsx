@@ -55,7 +55,7 @@ export default function CitationDrawer({ sessionId, documentName, section }: Cit
         type="button"
         onClick={() => void openCitation()}
         disabled={!sessionId}
-        className="rounded-md px-1 py-0.5 text-left font-medium text-cyan-500 underline decoration-cyan-500/40 underline-offset-2 transition-colors hover:bg-cyan-500/10 hover:text-cyan-400 disabled:cursor-default disabled:no-underline"
+        className="rounded-md px-1 py-0.5 text-left font-medium text-emerald-500 underline decoration-emerald-500/40 underline-offset-2 transition-colors hover:bg-emerald-500/10 hover:text-emerald-400 disabled:cursor-default disabled:no-underline"
         aria-label={`Open source ${documentName}, section ${section}`}
       >
         [Document: {documentName}, section {section}]
@@ -86,7 +86,7 @@ export default function CitationDrawer({ sessionId, documentName, section }: Cit
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-semibold tracking-widest text-cyan-500 uppercase">
+                  <p className="text-[10px] font-semibold tracking-widest text-emerald-500 uppercase">
                     Source excerpt
                   </p>
                   <h2 className="mt-1 truncate text-base font-semibold text-[var(--text-primary)]">

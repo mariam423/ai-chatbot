@@ -74,7 +74,7 @@ function TemperatureControl({
         step="0.01"
         value={value ?? 0.7}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-cyan-500"
+        className="w-full accent-emerald-500"
         aria-invalid={invalid}
       />
       <div className="mt-1 flex justify-between text-[10px] text-[var(--text-tertiary)]">
@@ -135,7 +135,7 @@ function MaxTokensControl({
         step="256"
         value={value ?? 2048}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-cyan-500"
+        className="w-full accent-emerald-500"
         aria-invalid={invalid}
       />
       <div className="mt-1 flex justify-between text-[10px] text-[var(--text-tertiary)]">
@@ -423,7 +423,12 @@ export default function SettingsPage() {
           }}
         >
           <div className="mb-4 flex items-center gap-2">
-            <HugeiconsIcon icon={UserIcon} size={16} strokeWidth={1.5} className="text-cyan-500" />
+            <HugeiconsIcon
+              icon={UserIcon}
+              size={16}
+              strokeWidth={1.5}
+              className="text-emerald-500"
+            />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Profile</h2>
           </div>
           <div className="space-y-4">
@@ -489,7 +494,7 @@ export default function SettingsPage() {
               icon={Settings02Icon}
               size={16}
               strokeWidth={1.5}
-              className="text-cyan-500"
+              className="text-emerald-500"
             />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Model & Generation</h2>
           </div>
@@ -551,7 +556,7 @@ export default function SettingsPage() {
               icon={CircleGaugeIcon}
               size={16}
               strokeWidth={1.5}
-              className="text-cyan-500"
+              className="text-emerald-500"
             />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Plan & Billing</h2>
           </div>
@@ -586,7 +591,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={() => void handleUpgrade()}
                     disabled={billingAction !== null}
-                    className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                    className="rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
                     {billingAction === 'upgrade' ? 'Starting…' : 'Upgrade to Pro'}
                   </button>
@@ -617,7 +622,12 @@ export default function SettingsPage() {
           }}
         >
           <div className="mb-4 flex items-center gap-2">
-            <HugeiconsIcon icon={Key02Icon} size={16} strokeWidth={1.5} className="text-cyan-500" />
+            <HugeiconsIcon
+              icon={Key02Icon}
+              size={16}
+              strokeWidth={1.5}
+              className="text-emerald-500"
+            />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">API Key</h2>
           </div>
           <p className="mb-3 text-xs text-[var(--text-tertiary)]">
@@ -664,7 +674,7 @@ export default function SettingsPage() {
               icon={Calendar01Icon}
               size={16}
               strokeWidth={1.5}
-              className="text-cyan-500"
+              className="text-emerald-500"
             />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Google Calendar</h2>
           </div>
@@ -747,7 +757,7 @@ export default function SettingsPage() {
               icon={Settings02Icon}
               size={16}
               strokeWidth={1.5}
-              className="text-cyan-500"
+              className="text-emerald-500"
             />
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">
               System Prompt Presets
@@ -819,7 +829,7 @@ export default function SettingsPage() {
                           <button
                             type="button"
                             onClick={saveEditPreset}
-                            className="inline-flex items-center gap-1 rounded-lg bg-cyan-600 px-2 py-1 text-[11px] font-medium text-white"
+                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white"
                           >
                             <HugeiconsIcon icon={CheckIcon} size={10} strokeWidth={2} />
                             Save
@@ -897,7 +907,7 @@ export default function SettingsPage() {
                 disabled={!newPresetName.trim() || !newPresetPrompt.trim()}
                 className="rounded-xl px-3 py-2 text-sm font-medium text-white transition-all disabled:cursor-not-allowed disabled:opacity-30"
                 style={{
-                  background: 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
+                  background: 'linear-gradient(135deg, #10b981 0%, #0d9488 100%)',
                   boxShadow: '0 2px 12px rgba(8,145,178,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
                 }}
               >
@@ -919,7 +929,7 @@ export default function SettingsPage() {
             style={{
               background: saved
                 ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
-                : 'linear-gradient(135deg, #0891B2 0%, #4F46E5 100%)',
+                : 'linear-gradient(135deg, #10b981 0%, #0d9488 100%)',
               boxShadow: saved
                 ? '0 2px 12px rgba(16,185,129,0.25)'
                 : '0 2px 12px rgba(8,145,178,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',

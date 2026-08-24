@@ -321,12 +321,15 @@ export default function ChatApp() {
               <HugeiconsIcon icon={MenuIcon} size={20} strokeWidth={1.5} />
             </motion.button>
             <div className="flex items-center gap-2">
-              <div className="flex size-7 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/20 vt-brand-icon">
+              <div
+                className="vt-brand-icon flex size-7 items-center justify-center rounded-lg border"
+                style={{ background: 'var(--gold-soft)', borderColor: 'var(--gold-border)' }}
+              >
                 <HugeiconsIcon
                   icon={MenuIcon}
                   size={13}
                   strokeWidth={2}
-                  className="text-cyan-400"
+                  className="text-[var(--gold)]"
                 />
               </div>
               <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
@@ -395,12 +398,12 @@ export default function ChatApp() {
                       className="size-6 rounded-full"
                     />
                   ) : (
-                    <div className="flex size-6 items-center justify-center rounded-full bg-cyan-500/10 border border-cyan-500/20">
+                    <div className="flex size-6 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20">
                       <HugeiconsIcon
                         icon={UserIcon}
                         size={12}
                         strokeWidth={1.5}
-                        className="text-cyan-400"
+                        className="text-emerald-400"
                       />
                     </div>
                   )}

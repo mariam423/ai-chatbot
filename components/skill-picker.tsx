@@ -74,12 +74,12 @@ export default function SkillPicker({ enabledSkills, onChange }: SkillPickerProp
           icon={Settings02Icon}
           size={15}
           strokeWidth={1.5}
-          className={customized ? 'text-cyan-500' : ''}
+          className={customized ? 'text-emerald-500' : ''}
         />
         <span className="hidden sm:inline">Skills</span>
         {customized && (
           <span
-            className="rounded px-1 py-0.5 text-[10px] font-semibold text-cyan-500"
+            className="rounded px-1 py-0.5 text-[10px] font-semibold text-emerald-500"
             style={{ background: 'var(--accent-soft)' }}
           >
             {activeCount}/{SKILLS.length}
@@ -141,7 +141,7 @@ export default function SkillPicker({ enabledSkills, onChange }: SkillPickerProp
                       className="mt-0.5 flex h-4 w-7 shrink-0 items-center rounded-full px-0.5 transition-colors"
                       style={{
                         background: active
-                          ? 'linear-gradient(135deg, #0891B2, #4F46E5)'
+                          ? 'linear-gradient(135deg, #10b981, #0d9488)'
                           : 'var(--bg-input)',
                         border: '1px solid var(--border-medium)',
                       }}
@@ -159,7 +159,7 @@ export default function SkillPicker({ enabledSkills, onChange }: SkillPickerProp
                         {skill.description}
                       </span>
                       {skill.toolNames.length > 0 && (
-                        <span className="mt-0.5 block text-[10px] font-medium text-cyan-500/90">
+                        <span className="mt-0.5 block text-[10px] font-medium text-emerald-500/90">
                           {skill.toolNames.map((name) => `\`${name}\``).join(' · ')}
                         </span>
                       )}
