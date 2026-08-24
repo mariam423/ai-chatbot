@@ -6,7 +6,11 @@ import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-/** Upper bound for a transcribed voice clip (matches the in-app audio cap). */
+/**
+ * Upper bound for a transcribed voice clip. This is the composer-mic
+ * fallback (short recordings only) and is deliberately separate from the
+ * 20 MB media-attachment cap on the chat composer.
+ */
 const MAX_AUDIO_BYTES = 2_000_000
 const TRANSCRIBE_TIMEOUT_MS = 20_000
 

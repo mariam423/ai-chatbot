@@ -4,11 +4,17 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Cancel01Icon, FileAudioIcon, Video01Icon } from '@hugeicons/core-free-icons'
 import { useRef, useState } from 'react'
 import { extractVideoFrames, type VideoFrame } from '@/lib/video'
+import {
+  compressImageDataUrl,
+  MAX_AUDIO_BYTES,
+  MAX_AUDIO_DATA_URL_LENGTH,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_DATA_URL_LENGTH,
+  shouldCompressImage,
+} from '@/lib/media-compress'
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-const MAX_AUDIO_BYTES = 1.5 * 1024 * 1024
-const MAX_IMAGE_DATA_URL_LENGTH = 1_200_000
-const MAX_AUDIO_DATA_URL_LENGTH = 2_000_000
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const AUDIO_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav']
 
 interface MediaUploadProps {
   frames: VideoFrame[]
@@ -20,7 +26,8 @@ interface MediaUploadProps {
   disabled?: boolean
 }
 
-function readDataUrl(file: File, maxBytes: number, maxLength: number): Promise<string> {
+/** Read a media file as a data URL, enforcing only the 20 MB file cap. */
+function readDataUrl(file: File, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     if (file.size === 0 || file.size > maxBytes) {
       reject(
@@ -31,8 +38,8 @@ function readDataUrl(file: File, maxBytes: number, maxLength: number): Promise<s
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result
-      if (typeof result !== 'string' || result.length > maxLength) {
-        reject(new Error('This media attachment is too large to analyze safely.'))
+      if (typeof result !== 'string') {
+        reject(new Error('The media file could not be read.'))
       } else {
         resolve(result)
       }
@@ -40,6 +47,22 @@ function readDataUrl(file: File, maxBytes: number, maxLength: number): Promise<s
     reader.onerror = () => reject(new Error('The media file could not be read.'))
     reader.readAsDataURL(file)
   })
+}
+
+/**
+ * Read an image and, when it is over 5 MB (or its raw data URL would exceed
+ * the payload cap), re-encode it through a canvas so vision models receive an
+ * optimal size without blowing up the chat request body.
+ */
+async function readAndOptimizeImage(file: File): Promise<string> {
+  let dataUrl = await readDataUrl(file, MAX_IMAGE_BYTES)
+  if (shouldCompressImage(file.type, file.size, dataUrl.length)) {
+    dataUrl = await compressImageDataUrl(dataUrl)
+  }
+  if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
+    throw new Error('This image is too large to analyze safely, even after compression.')
+  }
+  return dataUrl
 }
 
 export default function MediaUpload({
@@ -60,19 +83,23 @@ export default function MediaUpload({
     setBusy(true)
     try {
       const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
-      if (file.type.startsWith('video/') || ['.mp4', '.webm'].includes(extension)) {
+      // Audio files must not fall through to the video branch via the .webm
+      // extension fallback (audio/webm is not a provider-supported format).
+      const isVideo =
+        file.type.startsWith('video/') ||
+        (['.mp4', '.webm'].includes(extension) && !AUDIO_TYPES.includes(file.type))
+      if (isVideo) {
         onFramesChange(await extractVideoFrames(file))
-      } else if (file.type === 'image/jpeg' || file.type === 'image/png') {
-        onImageChange(await readDataUrl(file, MAX_IMAGE_BYTES, MAX_IMAGE_DATA_URL_LENGTH))
-      } else if (
-        file.type === 'audio/mpeg' ||
-        file.type === 'audio/mp3' ||
-        file.type === 'audio/wav' ||
-        file.type === 'audio/x-wav'
-      ) {
-        onAudioChange(await readDataUrl(file, MAX_AUDIO_BYTES, MAX_AUDIO_DATA_URL_LENGTH))
+      } else if (IMAGE_TYPES.includes(file.type)) {
+        onImageChange(await readAndOptimizeImage(file))
+      } else if (AUDIO_TYPES.includes(file.type)) {
+        const dataUrl = await readDataUrl(file, MAX_AUDIO_BYTES)
+        if (dataUrl.length > MAX_AUDIO_DATA_URL_LENGTH) {
+          throw new Error('This audio attachment is too large to analyze safely.')
+        }
+        onAudioChange(dataUrl)
       } else {
-        throw new Error('Only MP4, WebM, JPEG, PNG, MP3, and WAV files are supported.')
+        throw new Error('Only MP4, WebM, JPEG, PNG, WEBP, GIF, MP3, and WAV files are supported.')
       }
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Could not process the media.')
@@ -87,7 +114,7 @@ export default function MediaUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="video/mp4,video/webm,image/jpeg,image/png,audio/mpeg,audio/wav,.mp4,.webm,.jpg,.jpeg,.png,.mp3,.wav"
+        accept="video/mp4,video/webm,image/jpeg,image/png,image/webp,image/gif,audio/mpeg,audio/wav,.mp4,.webm,.jpg,.jpeg,.png,.webp,.gif,.mp3,.wav"
         className="sr-only"
         onChange={(event) => {
           const file = event.target.files?.[0]
