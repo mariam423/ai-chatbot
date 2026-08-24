@@ -8,22 +8,162 @@ import {
   CheckIcon,
   ArrowLeft01Icon,
   Calendar01Icon,
+  CircleGaugeIcon,
 } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useSession } from 'next-auth/react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { z } from 'zod'
 import {
+  getBillingStatus,
   getUserPreferences,
+  openBillingPortal,
   testGoogleCalendarConnection,
   updateUserPreferences,
+  upgradeToPro,
 } from '@/app/actions'
 import { BUILTIN_PRESETS, type SystemPromptPreset } from '@/lib/types'
+import { MODEL_OPTIONS } from '@/lib/models'
+import { pageTitle } from '@/lib/seo'
+import { EVENTS, useAnalytics } from '@/lib/use-analytics'
 import { useViewTransitionRouter } from '@/hooks/use-view-transition-router'
+
+/**
+ * Client-side Zod validation for the generation-tuning controls. Values are
+ * checked in real time as the sliders move, and only valid values are
+ * persisted — mirroring the server-side schema in app/actions.ts.
+ */
+const TemperatureSchema = z.number().min(0).max(1)
+const MaxCompletionTokensSchema = z.number().int().min(256).max(16384)
+
+/**
+ * Temperature slider (0.0–1.0). The value is re-validated against
+ * TemperatureSchema on every change; the current state + an inline error (if
+ * the value ever escaped the valid range) are shown live.
+ */
+function TemperatureControl({
+  value,
+  onChange,
+}: {
+  value: number | null
+  onChange: (next: number | null) => void
+}) {
+  const result = useMemo(() => TemperatureSchema.safeParse(value), [value])
+  // null means "provider default" — a valid state, not an out-of-range value.
+  const invalid = value !== null && !result.success
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label
+          htmlFor="settings-temperature"
+          className="text-xs font-medium text-[var(--text-secondary)]"
+        >
+          Temperature
+        </label>
+        <span
+          className={`font-mono text-xs ${invalid ? 'text-red-500' : 'text-[var(--text-secondary)]'}`}
+        >
+          {value === null ? 'default' : value.toFixed(2)}
+        </span>
+      </div>
+      <input
+        id="settings-temperature"
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value={value ?? 0.7}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-cyan-500"
+        aria-invalid={invalid}
+      />
+      <div className="mt-1 flex justify-between text-[10px] text-[var(--text-tertiary)]">
+        <span>0.0</span>
+        <span>1.0</span>
+      </div>
+      {invalid && (
+        <p role="alert" className="mt-1 text-[11px] text-red-500">
+          Temperature must be between 0.0 and 1.0.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Max completion tokens slider (256–16384). Re-validated against
+ * MaxCompletionTokensSchema in real time; only valid integers persist.
+ */
+function MaxTokensControl({
+  value,
+  onChange,
+}: {
+  value: number | null
+  onChange: (next: number | null) => void
+}) {
+  const result = useMemo(() => MaxCompletionTokensSchema.safeParse(value), [value])
+  // null means "provider default" — a valid state, not an out-of-range value.
+  const invalid = value !== null && !result.success
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label
+          htmlFor="settings-max-tokens"
+          className="text-xs font-medium text-[var(--text-secondary)]"
+        >
+          Max Completion Tokens
+        </label>
+        <span
+          className={`font-mono text-xs ${invalid ? 'text-red-500' : 'text-[var(--text-secondary)]'}`}
+        >
+          {value === null ? 'default' : value.toLocaleString()}
+        </span>
+      </div>
+      <input
+        id="settings-max-tokens"
+        type="range"
+        min="256"
+        max="16384"
+        step="256"
+        value={value ?? 2048}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-cyan-500"
+        aria-invalid={invalid}
+      />
+      <div className="mt-1 flex justify-between text-[10px] text-[var(--text-tertiary)]">
+        <span>256</span>
+        <span>16,384</span>
+      </div>
+      {invalid && (
+        <p role="alert" className="mt-1 text-[11px] text-red-500">
+          Max tokens must be a whole number between 256 and 16,384.
+        </p>
+      )}
+    </div>
+  )
+}
 
 export default function SettingsPage() {
   const { data: session } = useSession()
   const { navigate } = useViewTransitionRouter()
   const reducedMotion = useReducedMotion()
+  const { track } = useAnalytics()
+
+  // Billing state: current plan, usage, and Stripe availability.
+  const [billing, setBilling] = useState<{
+    plan: string
+    planLabel: string
+    dailyLimit: number | null
+    usedToday: number
+    overLimit: boolean
+    stripeConfigured: boolean
+  } | null>(null)
+  const [billingAction, setBillingAction] = useState<'upgrade' | 'portal' | null>(null)
+
+  // Dynamic page title (this is a client page, so set it directly).
+  useEffect(() => {
+    document.title = pageTitle('Settings')
+  }, [])
 
   const [displayName, setDisplayName] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
@@ -34,6 +174,9 @@ export default function SettingsPage() {
   const [newPresetPrompt, setNewPresetPrompt] = useState('')
   const [googleCalendarId, setGoogleCalendarId] = useState('')
   const [googleServiceAccountKey, setGoogleServiceAccountKey] = useState('')
+  const [preferredModel, setPreferredModel] = useState('')
+  const [temperature, setTemperature] = useState<number | null>(null)
+  const [maxCompletionTokens, setMaxCompletionTokens] = useState<number | null>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -42,6 +185,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState({ name: '', prompt: '' })
+
+  useEffect(() => {
+    void getBillingStatus().then((result) => {
+      if (result.ok) setBilling(result.data)
+    })
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +202,9 @@ export default function SettingsPage() {
       setApiKey(result.data.apiKey)
       setGoogleCalendarId(result.data.googleCalendarId)
       setGoogleServiceAccountKey(result.data.googleServiceAccountKey)
+      setPreferredModel(result.data.preferredModel)
+      setTemperature(result.data.temperature)
+      setMaxCompletionTokens(result.data.maxCompletionTokens)
       try {
         setPresets(JSON.parse(result.data.systemPromptPresets) as SystemPromptPreset[])
       } catch {
@@ -77,6 +229,9 @@ export default function SettingsPage() {
       systemPromptPresets: JSON.stringify(presets),
       googleCalendarId,
       googleServiceAccountKey,
+      preferredModel,
+      ...(temperature !== null ? { temperature } : {}),
+      ...(maxCompletionTokens !== null ? { maxCompletionTokens } : {}),
     })
     setSaving(false)
     if (result.ok) {
@@ -86,7 +241,17 @@ export default function SettingsPage() {
     } else {
       setError(result.error)
     }
-  }, [displayName, avatarUrl, apiKey, presets, googleCalendarId, googleServiceAccountKey])
+  }, [
+    displayName,
+    avatarUrl,
+    apiKey,
+    presets,
+    googleCalendarId,
+    googleServiceAccountKey,
+    preferredModel,
+    temperature,
+    maxCompletionTokens,
+  ])
 
   const testConnection = useCallback(async () => {
     setTesting(true)
@@ -100,6 +265,41 @@ export default function SettingsPage() {
       setError(result.error)
     }
   }, [])
+
+  async function handleUpgrade() {
+    if (billingAction) return
+    setBillingAction('upgrade')
+    setError(null)
+    track(EVENTS.upgradeClicked)
+    const result = await upgradeToPro()
+    setBillingAction(null)
+    if (!result.ok) {
+      setError(
+        result.notConfigured
+          ? 'Stripe billing is not configured on this server yet.'
+          : result.error,
+      )
+      return
+    }
+    window.location.href = result.url
+  }
+
+  async function handleManageBilling() {
+    if (billingAction) return
+    setBillingAction('portal')
+    setError(null)
+    const result = await openBillingPortal()
+    setBillingAction(null)
+    if (!result.ok) {
+      setError(
+        result.notConfigured
+          ? 'Stripe billing is not configured on this server yet.'
+          : result.error,
+      )
+      return
+    }
+    window.location.href = result.url
+  }
 
   function addPreset() {
     const name = newPresetName.trim()
@@ -256,11 +456,139 @@ export default function SettingsPage() {
           </div>
         </motion.section>
 
-        {/* ─── API Key Section ─── */}
+        {/* ─── Model & Generation Section ─── */}
         <motion.section
           initial={reducedMotion ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.05 }}
+          className="rounded-2xl p-5"
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            boxShadow: 'var(--glass-shadow)',
+          }}
+        >
+          <div className="mb-4 flex items-center gap-2">
+            <HugeiconsIcon
+              icon={Settings02Icon}
+              size={16}
+              strokeWidth={1.5}
+              className="text-cyan-500"
+            />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Model & Generation</h2>
+          </div>
+          <div className="space-y-5">
+            {/* Preferred default model */}
+            <div>
+              <label
+                htmlFor="settings-model"
+                className="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+              >
+                Preferred Default Model
+              </label>
+              <select
+                id="settings-model"
+                value={preferredModel}
+                onChange={(e) => setPreferredModel(e.target.value)}
+                className="focus-glow w-full rounded-xl px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none"
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }}
+              >
+                <option value="">Provider default</option>
+                {MODEL_OPTIONS.filter((option) => option.model !== null).map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                Used as the default model for new chats. You can still switch per chat from the
+                header dropdown.
+              </p>
+            </div>
+
+            {/* Temperature slider with real-time Zod validation */}
+            <TemperatureControl value={temperature} onChange={setTemperature} />
+
+            {/* Max completion tokens slider with real-time Zod validation */}
+            <MaxTokensControl value={maxCompletionTokens} onChange={setMaxCompletionTokens} />
+          </div>
+        </motion.section>
+
+        {/* ─── Plan & Billing Section ─── */}
+        <motion.section
+          initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.05 }}
+          className="rounded-2xl p-5"
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            boxShadow: 'var(--glass-shadow)',
+          }}
+        >
+          <div className="mb-4 flex items-center gap-2">
+            <HugeiconsIcon
+              icon={CircleGaugeIcon}
+              size={16}
+              strokeWidth={1.5}
+              className="text-cyan-500"
+            />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Plan & Billing</h2>
+          </div>
+          {billing ? (
+            <div className="space-y-4">
+              <div
+                className="flex items-center justify-between rounded-xl px-4 py-3"
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
+              >
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">
+                    {billing.planLabel} plan
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+                    {billing.dailyLimit === null
+                      ? 'Unlimited daily chat requests'
+                      : `${billing.usedToday} of ${billing.dailyLimit} daily chat requests used`}
+                  </p>
+                </div>
+                {billing.plan === 'pro' ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleManageBilling()}
+                    disabled={billingAction !== null}
+                    className="rounded-xl px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+                    style={{ border: '1px solid var(--border-medium)' }}
+                  >
+                    {billingAction === 'portal' ? 'Opening…' : 'Manage billing'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleUpgrade()}
+                    disabled={billingAction !== null}
+                    className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {billingAction === 'upgrade' ? 'Starting…' : 'Upgrade to Pro'}
+                  </button>
+                )}
+              </div>
+              {billing.overLimit && (
+                <p role="alert" className="text-xs text-red-500">
+                  You&apos;ve reached your daily request limit — upgrade to Pro for unlimited
+                  requests.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--text-tertiary)]">Loading billing status…</p>
+          )}
+        </motion.section>
+
+        {/* ─── API Key Section ─── */}
+        <motion.section
+          initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.08 }}
           className="rounded-2xl p-5"
           style={{
             background: 'var(--bg-card)',

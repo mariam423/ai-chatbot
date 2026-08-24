@@ -142,16 +142,6 @@ export interface ChatSessionSummary {
   systemPrompt?: string | null
 }
 
-// ─── User Preferences ───
-
-/** User preferences stored in the DB. */
-export interface UserPreferences {
-  displayName: string
-  avatarUrl: string
-  apiKey: string
-  systemPromptPresets: SystemPromptPreset[]
-}
-
 // ─── Command Palette ───
 
 /** Command palette action item. */

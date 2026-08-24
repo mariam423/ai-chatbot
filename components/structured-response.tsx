@@ -1,16 +1,12 @@
 'use client'
 
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { lazy, Suspense } from 'react'
 import { parseStructuredResponse, renderStructuredResponse } from '@/lib/structured-output'
 import Markdown from './markdown'
+
+// Recharts is a heavy dependency — lazy-load the chart so it ships as its own
+// chunk, fetched only when an assistant reply actually contains a chart.
+const StructuredChart = lazy(() => import('./structured-chart'))
 
 interface StructuredResponseProps {
   content: string
@@ -29,36 +25,18 @@ export default function StructuredResponse({ content, sessionId }: StructuredRes
   return (
     <div className="space-y-3">
       {response.content && <Markdown content={response.content} sessionId={sessionId} />}
-      <div
-        className="h-64 w-full rounded-xl p-3"
-        style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
-        role="img"
-        aria-label="Interactive time-series chart"
+      <Suspense
+        fallback={
+          <div
+            className="flex h-64 w-full items-center justify-center rounded-xl"
+            style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
+          >
+            <span className="text-xs text-[var(--text-tertiary)]">Loading chart…</span>
+          </div>
+        }
       >
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={response.chart} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
-            <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
-            <XAxis dataKey="timestamp" tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }} />
-            <YAxis tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }} />
-            <Tooltip
-              contentStyle={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 8,
-                color: 'var(--text-primary)',
-              }}
-            />
-            <Line
-              type="monotone"
-              dataKey="value"
-              stroke="var(--accent)"
-              strokeWidth={2}
-              dot={{ r: 3, fill: 'var(--accent)' }}
-              activeDot={{ r: 5 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+        <StructuredChart points={response.chart} />
+      </Suspense>
     </div>
   )
 }

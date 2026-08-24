@@ -28,7 +28,7 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   `enabledSkills` comma-separated query param mirrors the per-session override
   sent with `/api/chat`; otherwise `SKILLS_ENABLED` env or the full catalog
   applies. The chat empty state fetches it to advertise clickable capability
-  chips.
+  chips. Guarded by a per-IP rate limit (no CSRF — read-only GET).
 - **`app/api/upload/route.ts`** — Node-runtime document API. `POST` accepts
   PDF/TXT/MD/CSV multipart uploads, validates ownership and limits, extracts
   text, chunks and embeds it, and stores metadata. `GET` lists session
@@ -39,7 +39,17 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   discriminated unions.
 - **`components/chat-app.tsx`** — Client shell for sessions, sidebar, command
   palette, theme, and the model selector. The selected stable model key is
-  persisted as `chat.model`.
+  persisted as `chat.model`; on load it also reads user preferences to apply
+  the preferred default model (only when no local choice exists) and carries
+  generation tuning (temperature/max completion tokens) into `Chat`.
+- **`app/settings/page.tsx`** — Settings UI (Profile, Model & Generation,
+  API Key, Google Calendar, System Prompt Presets). The Model & Generation
+  section picks a preferred default model (from `lib/models.ts`) and has
+  Temperature (0.0–1.0) + Max Completion Tokens (256–16384) sliders whose
+  values are re-validated against client-side Zod schemas in real time before
+  being persisted via `updateUserPreferences`; `chat.tsx` forwards them to
+  `/api/chat`, which validates them again and applies them to the upstream
+  body (`temperature` / `max_tokens`).
 - **`components/chat.tsx`** — Chat state/orchestration for restore, send,
   retry, regenerate, stop, clear, document attachments, video frame state,
   SSE consumption, and persistence. Normal deltas are coalesced into
@@ -69,11 +79,80 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   `chatToJson`/`exportFileName` helpers) or JSON via a generated Blob, and
   renders a styled self-contained transcript into a hidden iframe for the
   browser's native **Print → Save-as-PDF** flow (no PDF dependency).
-- **`components/audio-input.tsx`** — A mic button in the composer using the
-  browser Web Speech `SpeechRecognition` API (Chrome/Edge only; renders
-  nothing when unsupported). While listening it shows a pulsing red indicator
-  and an animated equalizer, and the finalized transcript is appended to the
-  composer input via `onTranscript`.
+- **`components/audio-input.tsx`** — A mic button in the composer. Engine
+  selection is `pickVoiceEngine`: the browser Web Speech `SpeechRecognition`
+  API when available (Chrome/Edge, no network), otherwise a MediaRecorder
+  fallback that records a clip and POSTs it to `/api/transcribe` for
+  server-side transcription (Firefox/Safari). Renders nothing when neither is
+  available. While active it shows a pulsing red indicator and an animated
+  equalizer (recording or transcribing), a transient inline pill on failure,
+  and the finalized transcript is appended to the composer via `onTranscript`.
+- **`app/api/transcribe/route.ts`** — Server-side speech-to-text fallback. It
+  accepts a multipart audio `file`, enforces a size cap, and forwards it to
+  the configured provider's OpenAI-compatible `/audio/transcriptions` endpoint
+  (API key stays server-side; `TRANSCRIBE_MODEL` overrides the default
+  `whisper-1`), returning `{ transcript }` with timeout/error mapping. Same-origin
+  check + per-IP rate limit.
+- **`app/api/analytics/route.ts`** — Thin client bridge for user-activity
+  events: validates `{ event, properties }` with Zod and forwards to the
+  configured provider (PostHog) server-side so the key never reaches the
+  browser. No-op by default.
+- **`app/api/webhooks/stripe/route.ts`** — Signature-verified Stripe webhook
+  (`STRIPE_WEBHOOK_SECRET`; unverified → 401, unconfigured → 501). Handles
+  `checkout.session.completed` (upgrade → pro, stores customer/subscription
+  ids) and `customer.subscription.updated`/`deleted` (downgrade → free).
+  Guarded by a generous per-IP flood brake (signature verification is the
+  real auth; the CSRF check is defense in depth — Stripe's server-to-server
+  calls carry no Origin).
+- **`lib/security.ts`** — Shared guardrails: `checkCsrf`
+  (Origin/Referer vs `NEXT_PUBLIC_APP_URL`; absent Origin allowed for
+  non-browser traffic), `sanitizeInput`, `requireSession` (lazy `auth()`
+  import keeps the module vitest-safe; `AUTH_DISABLED` bypasses), and
+  `guardRoute` — a one-call composition (CSRF → optional session → rate
+  limit) used by every API route. Each route's config lives in the exported
+  `ROUTE_GUARDS` map (keyed by `RouteGuardKey`): bucket namespace, scope
+  (signed-in user for chat, IP otherwise), session/CSRF flags, and the
+  limit (literal or env-var name + `defaultLimit`). The return is a
+  discriminated union: `{ ok: true, userId }` or `{ ok: false, response }`.
+  It re-exports `rateLimit`/`rateLimitResponse` from `lib/rate-limit.ts`.
+- **`lib/rate-limit.ts`** — The shared rate-limit store behind
+  `guardRoute`. A fixed-window counter (slides forward on expiry) behind a
+  narrow `RateLimitStore` interface: `MemoryRateLimitStore` (per-process
+  Map, opportunistic cleanup) by default, `RedisRateLimitStore` when
+  `REDIS_URL` is set. The Redis path uses ioredis with a single atomic Lua
+  script (`INCR` + `PEXPIRE` + `PTTL`) so buckets are shared across
+  instances and survive restarts without races; the client is fail-fast
+  (`lazyConnect`, no reconnect strategy, error listener), and `rateLimit`
+  degrades to a shared in-memory fallback while Redis is unreachable so a
+  limiter outage never blocks requests.
+- **`lib/billing/plans.ts`** — Plan tiers (free: `FREE_PLAN_DAILY_LIMIT`
+  daily chat cap, default 20; pro: unlimited) + `parsePlanKey`/`getPlan`/
+  `isOverDailyLimit` helpers shared by the route guard, webhook, and UI.
+- **`lib/billing/usage.ts`** — `checkAndRecordUsage(userId)`: reads the user's
+  plan + today's counter and either increments (allowing) or returns an
+  over-limit error the route surfaces as 429. Enforced in `/api/chat` before
+  any RAG/provider work when the user is signed in.
+- **`lib/billing/stripe.ts`** — SDK-free Stripe REST client (plain fetch):
+  `createCheckoutSession`, `createBillingPortalSession`, and
+  `verifyStripeWebhookSignature` (HMAC + timing-safe compare + 5-minute skew
+  window). All helpers env-gated; when `STRIPE_SECRET_KEY` is unset they
+  return `{ ok: false, notConfigured: true }` and the settings UI hides
+  billing.
+- **`lib/analytics.ts`** + **`lib/use-analytics.ts`** — Env-gated tracking:
+  PostHog capture (`POSTHOG_API_KEY`/`POSTHOG_HOST`) or `ANALYTICS_DEBUG`
+  console logging; otherwise a complete no-op (the app never phones home by
+  default). The client hook posts to `/api/analytics` (fire-and-forget);
+  canonical event names in `EVENTS`.
+- **`lib/seo.ts`** — `JSON_LD` WebApplication structured data + `SITE`/
+  `pageTitle` helpers; rendered in `app/layout.tsx` alongside OpenGraph/
+  Twitter metadata (`APP_NAME`, `NEXT_PUBLIC_APP_URL`).
+- **`components/structured-chart.tsx`** — Recharts chart extracted from
+  `structured-response.tsx` and lazy-loaded via `React.lazy` + `Suspense`, so
+  the heavy recharts bundle ships as its own chunk fetched only when a reply
+  contains a chart. `chat.tsx` lazy-loads `AudioInput` (media-recorder
+  logic) via `next/dynamic` with an icon fallback.
+- **`next.config.ts`** — Long-lived immutable `Cache-Control` headers for
+  static image/font assets (`public, max-age=31536000, immutable`).
 - **`components/diagram-card.tsx`** + **`lib/svg-data-url.ts`** — When a reply
   embeds an SVG data URL (the `diagram_render` tool's `imageUrl`), the Markdown
   `img` override routes it into a diagram card rendered via `<img>` (data URLs
@@ -183,7 +262,9 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`prisma/schema.prisma`** — `ChatSession` owns `ChatMessage[]` and
   `Document[]`. `DocumentChunk` stores bounded extracted text and a JSON vector
   embedding. `MemoryRecord` stores user-scoped preferences, entities, and
-  summaries. Document and user relations cascade appropriately.
+  summaries. `User` carries the SaaS billing state (`plan`, `stripeCustomerId`,
+  `stripeSubscriptionId`, daily `usageCount`/`usageDate`). Document and user
+  relations cascade appropriately.
 - **`prisma/migrations/20260822100000_add_documents/migration.sql`** — Creates
   the document and chunk tables and retrieval indexes.
 - **`prisma/migrations/20260822120000_add_memory/migration.sql`** — Creates

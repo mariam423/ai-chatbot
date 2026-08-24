@@ -17,6 +17,19 @@ async function setTheme(page: Page, theme: 'light' | 'dark') {
   await page.waitForTimeout(50)
 }
 
+/**
+ * Navigate to a full-bleed page (error boundary / 404) with the given theme
+ * applied. These pages render outside the app shell, so the theme is set by
+ * flipping the .dark class directly rather than via the app's toggle.
+ */
+async function setThemeAt(page: Page, path: string, theme: 'light' | 'dark') {
+  await page.goto(path)
+  await page.evaluate((t) => {
+    document.documentElement.classList.toggle('dark', t === 'dark')
+  }, theme)
+  await page.waitForTimeout(50)
+}
+
 /* ─── Dark mode (default) ─── */
 
 test.describe('visual regression — dark mode', () => {
@@ -55,6 +68,18 @@ test.describe('visual regression — dark mode', () => {
       maxDiffPixelRatio: 0.02,
       mask: [dialog.locator('ul')],
     })
+  })
+
+  test('404 page renders consistently', async ({ page }) => {
+    await setThemeAt(page, '/this-page-does-not-exist', 'dark')
+    await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+    await expect(page).toHaveScreenshot('not-found-dark.png', { maxDiffPixelRatio: 0.02 })
+  })
+
+  test('error boundary renders consistently', async ({ page }) => {
+    await setThemeAt(page, '/error-demo', 'dark')
+    await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible()
+    await expect(page).toHaveScreenshot('error-boundary-dark.png', { maxDiffPixelRatio: 0.02 })
   })
 })
 
@@ -96,5 +121,17 @@ test.describe('visual regression — light mode', () => {
       maxDiffPixelRatio: 0.02,
       mask: [dialog.locator('ul')],
     })
+  })
+
+  test('404 page renders consistently', async ({ page }) => {
+    await setThemeAt(page, '/this-page-does-not-exist', 'light')
+    await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
+    await expect(page).toHaveScreenshot('not-found-light.png', { maxDiffPixelRatio: 0.02 })
+  })
+
+  test('error boundary renders consistently', async ({ page }) => {
+    await setThemeAt(page, '/error-demo', 'light')
+    await expect(page.getByRole('heading', { name: 'Something went wrong' })).toBeVisible()
+    await expect(page).toHaveScreenshot('error-boundary-light.png', { maxDiffPixelRatio: 0.02 })
   })
 })

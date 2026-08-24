@@ -278,6 +278,45 @@ npm run format       # Format the repository with Prettier
 
 The end-to-end suite builds and starts the production app through Playwright. It does not require a live LLM key because chat requests are mocked in the tests.
 
+## Deployment runbook
+
+### Rate limiting
+
+Every API route runs through a fixed-window rate limiter (60-second windows that slide forward on expiry). Exceeding a cap returns `429` with a `Retry-After` header (seconds until the window resets) and a JSON body:
+
+```json
+{ "error": "Too many requests. Please slow down and try again shortly." }
+```
+
+| Endpoint               | Cap (per minute) | Scope                            | Override                |
+| ---------------------- | ---------------- | -------------------------------- | ----------------------- |
+| `/api/chat`            | 120              | signed-in user (per-IP fallback) | `CHAT_RATE_LIMIT`       |
+| `/api/transcribe`      | 60               | client IP                        | `TRANSCRIBE_RATE_LIMIT` |
+| `/api/upload`          | 60               | client IP                        | `UPLOAD_RATE_LIMIT`     |
+| `/api/citation`        | 120              | client IP                        | — (fixed)               |
+| `/api/skills`          | 600              | client IP                        | — (fixed)               |
+| `/api/webhooks/stripe` | 600              | client IP                        | — (fixed)               |
+
+Operational notes:
+
+- An unset override variable falls back to the default in the table — the cap is never silently disabled. (The `defaultLimit` is part of the guard config; see `lib/security.ts`.)
+- `/api/chat` buckets by the signed-in user id when authenticated and falls back to the client IP for anonymous traffic (e.g. `AUTH_DISABLED` mode).
+- The webhook cap is a generous flood brake — signature verification (`STRIPE_WEBHOOK_SECRET`) is the real auth, and Stripe delivers bursts and retries with backoff.
+- The client IP is read from the first `X-Forwarded-For` entry, then `X-Real-IP`, then `unknown` — put a trusted proxy in front of the app if you need real client IPs.
+
+### Redis-backed limits (multi-instance)
+
+By default the buckets live in memory per process: a restart resets them, and each instance of a load-balanced deployment counts separately (effectively multiplying the cap by the instance count). Point `REDIS_URL` at any Redis-compatible service to share one counter across all instances and survive restarts:
+
+```env
+REDIS_URL=rediss://default:password@host:6379
+```
+
+- Accepts `redis://`, `rediss://` (TLS), or a Unix socket — Upstash, Redis Cloud, ElastiCache, Valkey/Dragonfly, or self-hosted all work.
+- Buckets are fixed-window counters incremented with a single atomic Lua script (`INCR` + `PEXPIRE` + `PTTL`), so concurrent instances never race on the same bucket.
+- The client is fail-fast (lazy connect, no reconnect queue, bounded per-command retries). If Redis is unreachable at runtime the limiter degrades to a shared in-memory fallback and logs `[rate-limit] …` warnings — requests are never blocked by the limiter's infrastructure, but limits become per-instance until Redis recovers.
+- Without `REDIS_URL` the limiter stays in per-process memory — right for local dev and single-instance deploys, but restarts reset buckets and scaling out splits the caps.
+
 ## Security and Runtime Boundaries
 
 - API credentials remain on the server.

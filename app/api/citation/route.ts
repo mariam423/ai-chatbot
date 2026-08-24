@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
+import { errorResponse } from '@/lib/http'
+import { findOwnedSession } from '@/lib/session-access'
+import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,26 +15,20 @@ const CitationQuerySchema = z.object({
 })
 
 export async function GET(request: Request) {
+  const guard = await guardRoute(request, ROUTE_GUARDS.citation)
+  if (!guard.ok) return guard.response
+
   const params = new URL(request.url).searchParams
   const parsed = CitationQuerySchema.safeParse({
     sessionId: params.get('sessionId'),
     documentName: params.get('documentName'),
     section: params.get('section'),
   })
-  if (!parsed.success) return NextResponse.json({ error: 'Invalid citation.' }, { status: 400 })
+  if (!parsed.success) return errorResponse('Invalid citation.')
 
   try {
-    const { getCurrentUserId } = await import('@/lib/auth-context')
-    const userId = await getCurrentUserId()
-    if (process.env.AUTH_DISABLED !== 'true' && !userId) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 })
-    }
-
-    const session = await prisma.chatSession.findFirst({
-      where: { id: parsed.data.sessionId, ...(userId ? { userId } : {}) },
-      select: { id: true },
-    })
-    if (!session) return NextResponse.json({ error: 'Chat session not found.' }, { status: 404 })
+    const session = await findOwnedSession(parsed.data.sessionId)
+    if (!session) return errorResponse('Chat session not found.', 404)
 
     const chunk = await prisma.documentChunk.findFirst({
       where: {
@@ -49,7 +46,7 @@ export async function GET(request: Request) {
         },
       },
     })
-    if (!chunk) return NextResponse.json({ error: 'Citation not found.' }, { status: 404 })
+    if (!chunk) return errorResponse('Citation not found.', 404)
 
     return NextResponse.json({
       section: chunk.chunkIndex + 1,
@@ -60,6 +57,6 @@ export async function GET(request: Request) {
       },
     })
   } catch {
-    return NextResponse.json({ error: 'Could not load citation.' }, { status: 500 })
+    return errorResponse('Could not load citation.', 500)
   }
 }

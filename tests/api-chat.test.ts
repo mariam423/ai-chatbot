@@ -185,6 +185,55 @@ describe('POST /api/chat', () => {
     expect(payload.model).toBe('deepseek/deepseek-v4')
   })
 
+  it('forwards validated temperature and maxTokens tuning to the provider body', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'tune me' }],
+          temperature: 0.3,
+          maxTokens: 4096,
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      temperature?: number
+      max_tokens?: number
+    }
+    expect(payload.temperature).toBe(0.3)
+    expect(payload.max_tokens).toBe(4096)
+  })
+
+  it('rejects out-of-range temperature and maxTokens with 400', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    for (const body of [
+      { messages: [{ role: 'user', content: 'x' }], temperature: 2.5 },
+      { messages: [{ role: 'user', content: 'x' }], maxTokens: -10 },
+    ]) {
+      const res = await POST(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      )
+      expect(res.status, JSON.stringify(body)).toBe(400)
+    }
+  })
+
   it('truncates long history to the last N messages before the upstream call', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test')
     const sse = new ReadableStream<Uint8Array>({

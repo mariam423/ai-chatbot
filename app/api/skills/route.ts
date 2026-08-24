@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSkillCatalog, normalizeSkillIds } from '@/lib/skills/registry'
+import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,8 +10,15 @@ export const dynamic = 'force-dynamic'
  * `enabledSkills` query param (comma-separated skill ids) mirrors the per-
  * session override sent with /api/chat; when absent, SKILLS_ENABLED env or
  * the full catalog applies.
+ *
+ * Guarded with a per-IP rate limit (no CSRF — GETs change no state). The
+ * limit is generous because the chat empty state and skill picker both fetch
+ * this on every load; the cap just stops scrapers from hammering it.
  */
 export async function GET(request: Request) {
+  const guard = await guardRoute(request, ROUTE_GUARDS.skills)
+  if (!guard.ok) return guard.response
+
   const { searchParams } = new URL(request.url)
   const override = searchParams.has('enabledSkills')
     ? normalizeSkillIds(

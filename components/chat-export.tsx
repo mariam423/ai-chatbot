@@ -5,6 +5,7 @@ import { Download01Icon, FileExportIcon, Pdf01Icon } from '@hugeicons/core-free-
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import { chatToJson, chatToMarkdown, EXPORT_DEFAULT_TITLE, exportFileName } from '@/lib/export-chat'
+import { EVENTS, useAnalytics } from '@/lib/use-analytics'
 import type { ChatMessage } from '@/lib/types'
 
 interface ChatExportProps {
@@ -100,6 +101,7 @@ function escapeHtml(text: string): string {
 }
 
 export default function ChatExport({ messages, title, disabled = false }: ChatExportProps) {
+  const { track } = useAnalytics()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -121,6 +123,7 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
       type: 'text/markdown;charset=utf-8',
     })
     downloadBlob(blob, exportFileName(exportTitle, 'md'))
+    track(EVENTS.exportChat, { format: 'markdown' })
   }
 
   function handleJson() {
@@ -128,6 +131,7 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
       type: 'application/json;charset=utf-8',
     })
     downloadBlob(blob, exportFileName(exportTitle, 'json'))
+    track(EVENTS.exportChat, { format: 'json' })
   }
 
   function handlePdf() {
@@ -139,6 +143,7 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
       frame.contentWindow?.focus()
       frame.contentWindow?.print()
     })
+    track(EVENTS.exportChat, { format: 'pdf' })
   }
 
   const hasMessages = messages.length > 0

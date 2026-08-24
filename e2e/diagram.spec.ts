@@ -50,6 +50,10 @@ test('opens a full-screen pan/zoom viewer with working zoom and Escape close', a
   const card = page.getByTestId('diagram-card')
   const view = card.getByRole('button', { name: 'View full screen' })
   await expect(view).toBeVisible()
+  // Wait for the reply to fully settle (Regenerate appears only after the
+  // stream ends): on a first send the session-restore re-render can replace
+  // the diagram card, which would reset the viewer's open state.
+  await expect(page.getByRole('button', { name: 'Regenerate response' })).toBeVisible()
   await view.click()
 
   const dialog = page.getByRole('dialog', { name: /Diagram viewer/ })
@@ -70,6 +74,74 @@ test('opens a full-screen pan/zoom viewer with working zoom and Escape close', a
     await expect(dialog).toBeHidden()
     await expect(view).toBeFocused()
   })
+})
+
+test('viewer supports zoom-out clamp, double-click zoom, and the close button', async ({
+  page,
+}) => {
+  await mockStream(page, [`Here is the diagram:\n\n![diagram](${DATA_URL})`])
+
+  await page.goto('/')
+  await page.getByLabel('Message').fill('Zoom around')
+  await page.getByRole('button', { name: 'Send' }).click()
+
+  const card = page.getByTestId('diagram-card')
+  const view = card.getByRole('button', { name: 'View full screen' })
+  await expect(view).toBeVisible()
+  // Let the reply settle (see the comment in the viewer-open test above).
+  await expect(page.getByRole('button', { name: 'Regenerate response' })).toBeVisible()
+  await view.click()
+
+  const dialog = page.getByRole('dialog', { name: /Diagram viewer/ })
+  await expect(dialog).toBeVisible()
+
+  await test.step('zoom out clamps at the 100% minimum', async () => {
+    await dialog.getByRole('button', { name: 'Zoom out' }).click()
+    await expect(dialog.getByText('100%')).toBeVisible()
+  })
+
+  await test.step('double-click toggles to 200% and back to 100%', async () => {
+    // The icon SVGs in the header are exposed as generic imgs, so scope by
+    // the diagram's own alt text.
+    const stageImage = dialog.getByRole('img', { name: 'diagram' })
+    await stageImage.dblclick()
+    await expect(dialog.getByText('200%')).toBeVisible()
+    await stageImage.dblclick()
+    await expect(dialog.getByText('100%')).toBeVisible()
+  })
+
+  await test.step('the close button closes the viewer and restores focus', async () => {
+    await dialog.getByRole('button', { name: 'Close diagram viewer' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(view).toBeFocused()
+  })
+})
+
+test('clicking the backdrop closes the viewer', async ({ page }) => {
+  await mockStream(page, [`![diagram](${DATA_URL})`])
+
+  await page.goto('/')
+  await page.getByLabel('Message').fill('Backdrop please')
+  await page.getByRole('button', { name: 'Send' }).click()
+
+  const card = page.getByTestId('diagram-card')
+  const view = card.getByRole('button', { name: 'View full screen' })
+  await expect(view).toBeVisible()
+  // Let the reply settle (see the comment in the viewer-open test above).
+  await expect(page.getByRole('button', { name: 'Regenerate response' })).toBeVisible()
+  await view.click()
+
+  const dialog = page.getByRole('dialog', { name: /Diagram viewer/ })
+  await expect(dialog).toBeVisible()
+
+  // The viewer ignores backdrop presses for 350ms after mount (the opening
+  // click must never close it). Interactions alone can pass within that
+  // window (the readout updates synchronously), so wait it out explicitly.
+  await page.waitForTimeout(450)
+
+  await page.mouse.click(8, 8)
+  await expect(dialog).toBeHidden()
+  await expect(view).toBeFocused()
 })
 
 test('renders a non-SVG image inline without diagram controls', async ({ page }) => {

@@ -83,6 +83,9 @@ interface SessionItemProps {
   onStartRename: (id: string, title: string) => void
   onStartDelete: (id: string) => void
   onSubmitRename: (e: FormEvent, id: string) => void
+  /** Keep the parent's rename draft in sync as the user types, so submitting
+   *  sends the typed title (not the original one captured at startRename). */
+  onDraftChange: (value: string) => void
   onDelete: (id: string) => void
   onCloseActions: () => void
   onTogglePin: (id: string) => void
@@ -101,13 +104,13 @@ function SessionItem({
   onStartRename,
   onStartDelete,
   onSubmitRename,
+  onDraftChange,
   onDelete,
   onCloseActions,
   onTogglePin,
   onToggleArchive,
 }: SessionItemProps) {
   const active = session.id === activeSessionId
-  const [localDraft, setLocalDraft] = useState(draft)
 
   function submitRenameLocal(e: FormEvent) {
     onSubmitRename(e, session.id)
@@ -115,7 +118,12 @@ function SessionItem({
 
   return (
     <li>
-      <div className="group rounded-xl" onKeyDown={(e) => { if (e.key === 'Escape') onCloseActions() }}>
+      <div
+        className="group rounded-xl"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCloseActions()
+        }}
+      >
         <div className="flex items-center gap-0.5">
           <motion.button
             type="button"
@@ -127,12 +135,17 @@ function SessionItem({
             style={{
               background: active ? 'var(--accent-soft)' : 'transparent',
               color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-              boxShadow: active ? 'inset 0 0 0 1px var(--accent-medium), 0 0 16px var(--accent-glow)' : 'none',
+              boxShadow: active
+                ? 'inset 0 0 0 1px var(--accent-medium), 0 0 16px var(--accent-glow)'
+                : 'none',
               border: active ? '1px solid var(--accent-medium)' : '1px solid transparent',
             }}
           >
             {active && (
-              <div className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-cyan-500" style={{ boxShadow: '0 0 8px var(--accent-glow)' }} />
+              <div
+                className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-cyan-500"
+                style={{ boxShadow: '0 0 8px var(--accent-glow)' }}
+              />
             )}
             <HugeiconsIcon
               icon={ChatIcon}
@@ -161,21 +174,47 @@ function SessionItem({
         {/* Menu */}
         <AnimatePresence>
           {menuOpenId === session.id && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
               <div className="flex flex-wrap items-center gap-1 px-2.5 pb-1.5">
-                <button type="button" onClick={() => onStartRename(session.id, session.title)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]">
+                <button
+                  type="button"
+                  onClick={() => onStartRename(session.id, session.title)}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+                >
                   <HugeiconsIcon icon={PencilIcon} size={11} strokeWidth={1.5} />
                   Rename
                 </button>
-                <button type="button" onClick={() => onTogglePin(session.id)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]">
-                  <HugeiconsIcon icon={session.pinned ? PinOffIcon : PinIcon} size={11} strokeWidth={1.5} />
+                <button
+                  type="button"
+                  onClick={() => onTogglePin(session.id)}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+                >
+                  <HugeiconsIcon
+                    icon={session.pinned ? PinOffIcon : PinIcon}
+                    size={11}
+                    strokeWidth={1.5}
+                  />
                   {session.pinned ? 'Unpin' : 'Pin'}
                 </button>
-                <button type="button" onClick={() => onToggleArchive(session.id)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]">
+                <button
+                  type="button"
+                  onClick={() => onToggleArchive(session.id)}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+                >
                   <HugeiconsIcon icon={Archive01Icon} size={11} strokeWidth={1.5} />
                   {session.archived ? 'Unarchive' : 'Archive'}
                 </button>
-                <button type="button" onClick={() => onStartDelete(session.id)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-red-500 transition-colors hover:bg-red-500/10">
+                <button
+                  type="button"
+                  onClick={() => onStartDelete(session.id)}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-red-500 transition-colors hover:bg-red-500/10"
+                >
                   <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
                   Delete
                 </button>
@@ -187,14 +226,43 @@ function SessionItem({
         {/* Rename form */}
         <AnimatePresence>
           {renamingId === session.id && (
-            <motion.form initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden" onSubmit={submitRenameLocal}>
+            <motion.form
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+              onSubmit={submitRenameLocal}
+            >
               <div className="flex items-center gap-1 px-2.5 pb-1.5">
-                <label htmlFor={`rename-${session.id}`} className="sr-only">Session title</label>
-                <input id={`rename-${session.id}`} value={localDraft} onChange={(e) => setLocalDraft(e.target.value)} maxLength={48} autoFocus className="focus-glow min-w-0 flex-1 rounded-lg px-2 py-1 text-sm text-[var(--text-primary)] outline-none" style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }} />
-                <button type="submit" aria-label="Save session title" className="flex size-6 shrink-0 items-center justify-center rounded-lg text-cyan-500 transition-colors hover:bg-cyan-500/10">
+                <label htmlFor={`rename-${session.id}`} className="sr-only">
+                  Session title
+                </label>
+                <input
+                  id={`rename-${session.id}`}
+                  value={draft}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  maxLength={48}
+                  autoFocus
+                  className="focus-glow min-w-0 flex-1 rounded-lg px-2 py-1 text-sm text-[var(--text-primary)] outline-none"
+                  style={{
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-medium)',
+                  }}
+                />
+                <button
+                  type="submit"
+                  aria-label="Save session title"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-lg text-cyan-500 transition-colors hover:bg-cyan-500/10"
+                >
                   <HugeiconsIcon icon={CheckIcon} size={13} strokeWidth={2} />
                 </button>
-                <button type="button" onClick={onCloseActions} aria-label="Cancel rename" className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]">
+                <button
+                  type="button"
+                  onClick={onCloseActions}
+                  aria-label="Cancel rename"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)]"
+                >
                   <HugeiconsIcon icon={CircleXIcon} size={13} strokeWidth={1.5} />
                 </button>
               </div>
@@ -205,14 +273,33 @@ function SessionItem({
         {/* Delete confirm */}
         <AnimatePresence>
           {confirmingId === session.id && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
               <div className="flex items-center gap-1 px-2.5 pb-1.5 text-sm">
                 <span className="text-[var(--text-tertiary)]">Delete?</span>
-                <button type="button" onClick={() => { onDelete(session.id); onCloseActions() }} aria-label="Confirm delete" className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-500">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDelete(session.id)
+                    onCloseActions()
+                  }}
+                  aria-label="Confirm delete"
+                  className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-red-500"
+                >
                   <HugeiconsIcon icon={TrashIcon} size={11} strokeWidth={1.5} />
                   Yes
                 </button>
-                <button type="button" onClick={onCloseActions} aria-label="Cancel delete" className="rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)]">
+                <button
+                  type="button"
+                  onClick={onCloseActions}
+                  aria-label="Cancel delete"
+                  className="rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)]"
+                >
                   No
                 </button>
               </div>
@@ -374,7 +461,11 @@ function SidebarContent({
                 if (sessions.length === 0) {
                   return (
                     <p className="px-1 py-2 text-sm text-[var(--text-tertiary)]">
-                      {search ? 'No conversations found.' : showArchived ? 'No archived chats.' : 'No conversations yet.'}
+                      {search
+                        ? 'No conversations found.'
+                        : showArchived
+                          ? 'No archived chats.'
+                          : 'No conversations yet.'}
                     </p>
                   )
                 }
@@ -386,7 +477,12 @@ function SidebarContent({
                       <>
                         <li className="px-1 pt-1 pb-0.5">
                           <span className="text-[10px] font-medium text-cyan-500/80 uppercase tracking-wider">
-                            <HugeiconsIcon icon={PinIcon} size={9} strokeWidth={2} className="mr-1 inline-block" />
+                            <HugeiconsIcon
+                              icon={PinIcon}
+                              size={9}
+                              strokeWidth={2}
+                              className="mr-1 inline-block"
+                            />
                             Pinned
                           </span>
                         </li>
@@ -405,13 +501,17 @@ function SidebarContent({
                             onStartRename={startRename}
                             onStartDelete={startDelete}
                             onSubmitRename={submitRename}
+                            onDraftChange={setDraft}
                             onDelete={onDeleteSession}
                             onCloseActions={closeRowActions}
                             onTogglePin={onTogglePin}
                             onToggleArchive={onToggleArchive}
                           />
                         ))}
-                        <li className="my-1" style={{ borderTop: '1px solid var(--border-subtle)' }} />
+                        <li
+                          className="my-1"
+                          style={{ borderTop: '1px solid var(--border-subtle)' }}
+                        />
                       </>
                     )}
 
@@ -438,6 +538,7 @@ function SidebarContent({
                         onStartRename={startRename}
                         onStartDelete={startDelete}
                         onSubmitRename={submitRename}
+                        onDraftChange={setDraft}
                         onDelete={onDeleteSession}
                         onCloseActions={closeRowActions}
                         onTogglePin={onTogglePin}
@@ -519,7 +620,13 @@ function SidebarContent({
           <HugeiconsIcon icon={Settings02Icon} size={14} strokeWidth={1.5} />
           <AnimatePresence>
             {!collapsed && (
-              <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: 'auto', opacity: 1 }} exit={{ width: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden whitespace-nowrap">
+              <motion.span
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 'auto', opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="overflow-hidden whitespace-nowrap"
+              >
                 Settings
               </motion.span>
             )}

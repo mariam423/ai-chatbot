@@ -89,3 +89,28 @@ test('exports the chat as Markdown and JSON downloads', async ({ page }) => {
     expect(download.suggestedFilename()).toMatch(/\.json$/)
   })
 })
+
+test('export menu offers all three formats and PDF renders the transcript', async ({ page }) => {
+  await mockEcho(page)
+  await page.goto('/')
+  await sendMessage(page, 'make me a pdf')
+  await expect(threadText(page, 'echo: make me a pdf')).toBeVisible()
+
+  const exportButton = page.getByRole('button', { name: 'Export chat' })
+  await exportButton.click()
+
+  await test.step('menu lists Markdown, JSON, and PDF (print)', async () => {
+    await expect(page.getByRole('menuitem', { name: 'Markdown (.md)' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'JSON (.json)' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'PDF (print)' })).toBeVisible()
+  })
+
+  await test.step('PDF writes the styled transcript into the hidden print iframe', async () => {
+    await page.getByRole('menuitem', { name: 'PDF (print)' }).click()
+    const frame = page.frameLocator('iframe[title="Export preview"]')
+    await expect(frame.locator('h1')).toHaveText('make me a pdf')
+    await expect(frame.locator('section.turn')).toHaveCount(2)
+    await expect(frame.locator('section.turn').first()).toContainText('You')
+    await expect(frame.locator('section.turn').nth(1)).toContainText('echo: make me a pdf')
+  })
+})
