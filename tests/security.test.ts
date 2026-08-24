@@ -1,11 +1,16 @@
 import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 import {
+  AUTH_GUARDS,
+  AUTH_RATE_LIMIT_ERROR,
   ROUTE_GUARDS,
+  checkAuthRateLimit,
+  checkCsrf,
+  checkLoginRateLimit,
+  clientIp,
+  clientIpFromHeaders,
   guardRoute,
   rateLimit,
   rateLimitResponse,
-  clientIp,
-  checkCsrf,
   sanitizeInput,
 } from '../lib/security'
 
@@ -69,6 +74,13 @@ describe('clientIp', () => {
       '1.2.3.4',
     )
     expect(clientIp(new Request('http://localhost'))).toBe('unknown')
+  })
+
+  it('clientIpFromHeaders reads the same value from raw headers (server actions)', () => {
+    const forwarded = new Headers({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' })
+    expect(clientIpFromHeaders(forwarded)).toBe('203.0.113.7')
+    expect(clientIpFromHeaders(new Headers({ 'x-real-ip': '1.2.3.4' }))).toBe('1.2.3.4')
+    expect(clientIpFromHeaders(new Headers())).toBe('unknown')
   })
 })
 
@@ -153,6 +165,63 @@ describe('ROUTE_GUARDS', () => {
     expect(ROUTE_GUARDS['stripe-webhook'].rateLimit).toMatchObject({ limit: 600 })
     // Analytics: CSRF only, no rate limit.
     expect(ROUTE_GUARDS.analytics.rateLimit).toBeUndefined()
+  })
+})
+
+describe('AUTH_GUARDS', () => {
+  it('covers every auth surface with the documented per-window caps', () => {
+    expect(Object.keys(AUTH_GUARDS).sort()).toEqual([
+      'login',
+      'register',
+      'reset-complete',
+      'reset-request',
+    ])
+    expect(AUTH_GUARDS.register).toEqual({ name: 'auth:register', limit: 5, windowMs: 60_000 })
+    expect(AUTH_GUARDS.login).toEqual({
+      name: 'auth:login',
+      limit: 20,
+      windowMs: 60_000,
+      emailLimit: 10,
+    })
+    expect(AUTH_GUARDS['reset-request']).toEqual({
+      name: 'auth:reset-request',
+      limit: 5,
+      windowMs: 60_000,
+    })
+    expect(AUTH_GUARDS['reset-complete']).toEqual({
+      name: 'auth:reset-complete',
+      limit: 10,
+      windowMs: 60_000,
+    })
+  })
+
+  it('checkAuthRateLimit allows up to the cap then blocks with the shared error', async () => {
+    const ip = '203.0.113.77'
+    for (let i = 0; i < 5; i += 1) {
+      expect(await checkAuthRateLimit('register', ip)).toEqual({ ok: true })
+    }
+    expect(await checkAuthRateLimit('register', ip)).toEqual({
+      ok: false,
+      error: AUTH_RATE_LIMIT_ERROR,
+    })
+    // A different IP keeps its own budget.
+    expect(await checkAuthRateLimit('register', '198.51.100.9')).toEqual({ ok: true })
+  })
+
+  it('checkLoginRateLimit caps by IP and independently by account', async () => {
+    // 20 IP-wide attempts pass (distinct accounts so the email caps stay at 1).
+    for (let i = 0; i < 20; i += 1) {
+      expect(await checkLoginRateLimit('203.0.113.88', `user${i}@test.dev`)).toBe(true)
+    }
+    expect(await checkLoginRateLimit('203.0.113.88', 'fresh@test.dev')).toBe(false)
+    // A different IP is still allowed…
+    expect(await checkLoginRateLimit('203.0.113.89', 'fresh@test.dev')).toBe(true)
+    // …while the per-account cap is independent of the IP: 10 tries on one
+    // account, then blocked even though the IP budget is untouched.
+    for (let i = 0; i < 10; i += 1) {
+      expect(await checkLoginRateLimit('203.0.113.90', 'victim@test.dev')).toBe(true)
+    }
+    expect(await checkLoginRateLimit('203.0.113.90', 'victim@test.dev')).toBe(false)
   })
 })
 
@@ -295,6 +364,31 @@ describe('guardRoute', () => {
       name: 'analytics',
     })
     expect(result.ok).toBe(true)
+  })
+
+  it('logs a structured security event when it blocks (A09 wiring)', async () => {
+    process.env.AUTH_DISABLED = 'true'
+    const prevNodeEnv = process.env.NODE_ENV
+    ;(process.env as { NODE_ENV?: string }).NODE_ENV = 'production'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const guard = () =>
+        guardRoute(
+          new Request('http://localhost/x', { headers: { 'x-forwarded-for': '6.6.6.6' } }),
+          { name: 'guardtest-audit', rateLimit: { limit: 1, windowMs: 60_000 } },
+        )
+      await guard()
+      await guard()
+      expect(warn).toHaveBeenCalled()
+      const raw = String(warn.mock.calls[0]![0])
+      expect(raw).toContain('rate_limited')
+      const parsed = JSON.parse(raw.slice('[security] '.length))
+      expect(parsed).toMatchObject({ event: 'rate_limited', route: 'guardtest-audit' })
+      expect(parsed.key).toContain('guardtest-audit:ip:6.6.6.6')
+    } finally {
+      ;(process.env as { NODE_ENV?: string }).NODE_ENV = prevNodeEnv
+      warn.mockRestore()
+    }
   })
 })
 

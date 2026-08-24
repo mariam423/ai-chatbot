@@ -73,4 +73,38 @@ describe('getUserSkillContext', () => {
     findUniqueMock.mockRejectedValue(new Error('db down'))
     expect(await getUserSkillContext('user-1')).toEqual({})
   })
+
+  it('decrypts an encrypted stored service-account key before parsing', async () => {
+    process.env.ENCRYPTION_KEY = 'cred-test-key'
+    try {
+      const { encryptField } = await import('../lib/field-encryption')
+      findUniqueMock.mockResolvedValue(
+        pref({ googleCalendarId: 'primary', googleServiceAccountKey: encryptField(VALID_KEY) }),
+      )
+      expect(await getUserSkillContext('user-1')).toEqual({
+        googleCalendar: {
+          calendarId: 'primary',
+          email: 'svc@example.iam.gserviceaccount.com',
+          privateKey: '-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----',
+        },
+      })
+    } finally {
+      delete process.env.ENCRYPTION_KEY
+    }
+  })
+
+  it('ignores a stored key that cannot be decrypted (wrong key)', async () => {
+    process.env.ENCRYPTION_KEY = 'encrypt-key'
+    const { encryptField } = await import('../lib/field-encryption')
+    const envelope = encryptField(VALID_KEY)
+    process.env.ENCRYPTION_KEY = 'different-key'
+    try {
+      findUniqueMock.mockResolvedValue(
+        pref({ googleCalendarId: 'primary', googleServiceAccountKey: envelope }),
+      )
+      expect(await getUserSkillContext('user-1')).toEqual({})
+    } finally {
+      delete process.env.ENCRYPTION_KEY
+    }
+  })
 })

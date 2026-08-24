@@ -12,10 +12,18 @@ vi.mock('../lib/db', () => ({
   },
 }))
 
+// The chat guard requires a session (requireSession), which lazily imports
+// next-auth; next-auth imports 'next/server', which only resolves inside
+// Next's bundler, so mock it (same as tests/security.test.ts).
+vi.mock('../lib/auth', () => ({
+  auth: vi.fn().mockResolvedValue({ user: { id: 'test-user' } }),
+}))
+
 vi.mock('../lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
 }))
 
+import { getCurrentUserId } from '../lib/auth-context'
 import { GET as getCitation } from '../app/api/citation/route'
 import {
   executeBuiltInAgentTool,
@@ -38,6 +46,8 @@ afterEach(() => {
   vi.unstubAllEnvs()
   dbMocks.chatSessionFindFirst.mockReset()
   dbMocks.documentChunkFindFirst.mockReset()
+  // Restore the anonymous default; the citation test overrides it below.
+  vi.mocked(getCurrentUserId).mockResolvedValue(null)
 })
 
 describe('built-in agent tools', () => {
@@ -104,6 +114,9 @@ describe('long-term memory', () => {
 
 describe('citation API', () => {
   it('returns the exact chunk only after session ownership succeeds', async () => {
+    // An authenticated owner so findOwnedSession runs the ownership query
+    // against the mocked DB (anonymous access would 404 without a query).
+    vi.mocked(getCurrentUserId).mockResolvedValue('test-user')
     dbMocks.chatSessionFindFirst.mockResolvedValue({ id: 'session-1' })
     dbMocks.documentChunkFindFirst.mockResolvedValue({
       content: 'The refund period is 30 days.',

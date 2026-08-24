@@ -2,6 +2,8 @@ import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
+import { checkLoginRateLimit, clientIp } from '@/lib/security'
+import { logSecurityEvent } from '@/lib/audit'
 
 /**
  * NextAuth v5 configuration.
@@ -36,23 +38,44 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) return null
 
         const email = String(credentials.email).toLowerCase().trim()
         const password = String(credentials.password)
 
+        // Abuse brake: per-IP flood cap + per-account guessing cap, checked
+        // before bcrypt (the expensive step). A throttled attempt returns
+        // null — the same generic failure as a wrong password, so nothing
+        // leaks about which limit tripped.
+        const allowed = await checkLoginRateLimit(clientIp(request), email)
+        if (!allowed) return null
+
         const user = await prisma.user.findUnique({ where: { email } })
-        if (!user?.passwordHash) return null
+        if (!user?.passwordHash) {
+          logSecurityEvent('auth_failed', { email, ip: clientIp(request), reason: 'no_account' })
+          return null
+        }
 
         const valid = await bcrypt.compare(password, user.passwordHash)
-        if (!valid) return null
+        if (!valid) {
+          logSecurityEvent('auth_failed', { email, ip: clientIp(request), reason: 'bad_password' })
+          return null
+        }
 
+        logSecurityEvent('auth_succeeded', { userId: user.id, email }, 'info')
         return { id: user.id, name: user.name, email: user.email, image: user.image }
       },
     }),
   ],
 
+  // Cookie policy (OWASP A02): @auth/core's defaults are already the secure
+  // set — httpOnly, sameSite=lax, and `secure` + the `__Secure-`/`__Host-`
+  // name prefixes derived from the request protocol (https → secure cookies;
+  // see @auth/core `useSecureCookies`). We intentionally don't override them:
+  // a hardcoded `secure` flag would break behind proxies and in local dev,
+  // where the dynamic protocol-based default is correct. HTTPS itself is
+  // enforced by the HSTS header shipped in next.config.ts (production only).
   session: { strategy: 'jwt' },
 
   pages: {

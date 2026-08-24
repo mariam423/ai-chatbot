@@ -7,7 +7,10 @@ import { getCurrentUserId } from '@/lib/auth-context'
 import { isValidSkillId } from '@/lib/skills/registry'
 import { exchangeGoogleAccessToken, parseGoogleServiceAccountKey } from '@/lib/skills/tools'
 import { ModelKeySchema } from '@/lib/models'
+import { getMaxOutputTokens } from '@/lib/llm-config'
 import { sanitizeInput } from '@/lib/security'
+import { logSecurityEvent } from '@/lib/audit'
+import { decryptField, encryptField } from '@/lib/field-encryption'
 import { getPlan, isOverDailyLimit, PLANS } from '@/lib/billing/plans'
 import {
   createBillingPortalSession as createStripePortalSession,
@@ -160,15 +163,20 @@ export async function saveChatMessages(input: {
     // Ownership: an existing session must belong to the caller (mirrors
     // findOwnedSession used by the API routes). The upsert's create path
     // handles brand-new sessions, so only pre-existing rows need the check;
-    // AUTH_DISABLED (e2e/local) deliberately skips it. Without this, any
-    // signed-in user could inject messages into a session id they do not own.
+    // AUTH_DISABLED (e2e/local) deliberately skips it. Ownership is a direct
+    // equality — including the anonymous case (null === null): an
+    // anonymous-created session stays writable by anonymous callers, while a
+    // signed-in user can never write into another user's session. Without
+    // this, any signed-in user could inject messages into a session id they
+    // do not own.
     const existing = await prisma.chatSession.findUnique({
       where: { id: sessionId },
       select: { userId: true },
     })
-    const ownsSession =
-      process.env.AUTH_DISABLED === 'true' || (userId !== null && existing?.userId === userId)
+    const ownsSession = process.env.AUTH_DISABLED === 'true' || existing?.userId === userId
     if (existing && !ownsSession) {
+      // A01: attempted cross-user write — log it (only ids, never content).
+      logSecurityEvent('ownership_violation', { sessionId, userId })
       return { ok: false, error: 'Chat session not found.' }
     }
     // Upsert with ownership: create attaches userId, update records the active
@@ -537,6 +545,11 @@ export async function getUserPreferences(): Promise<
         preferredModel: string
         temperature: number | null
         maxCompletionTokens: number | null
+        // Effective server-side completion cap when the user hasn't set a
+        // custom one — MAX_OUTPUT_TOKENS env or the 4096 default (see
+        // lib/llm-config.ts). Surfaced on the settings page so users see what
+        // the "default" max_tokens actually is.
+        defaultMaxCompletionTokens: number
       }
     }
   | { ok: false; error: string }
@@ -552,6 +565,7 @@ export async function getUserPreferences(): Promise<
     preferredModel: '',
     temperature: null,
     maxCompletionTokens: null,
+    defaultMaxCompletionTokens: getMaxOutputTokens(),
   }
   if (!userId) {
     return { ok: true, data: defaults }
@@ -563,13 +577,14 @@ export async function getUserPreferences(): Promise<
       data: {
         displayName: pref?.displayName ?? '',
         avatarUrl: pref?.avatarUrl ?? '',
-        apiKey: pref?.apiKey ?? '',
+        apiKey: decryptField(pref?.apiKey ?? ''),
         systemPromptPresets: pref?.systemPromptPresets ?? '[]',
         googleCalendarId: pref?.googleCalendarId ?? '',
-        googleServiceAccountKey: pref?.googleServiceAccountKey ?? '',
+        googleServiceAccountKey: decryptField(pref?.googleServiceAccountKey ?? ''),
         preferredModel: pref?.preferredModel ?? '',
         temperature: pref?.temperature ?? null,
         maxCompletionTokens: pref?.maxCompletionTokens ?? null,
+        defaultMaxCompletionTokens: getMaxOutputTokens(),
       },
     }
   } catch {
@@ -600,6 +615,13 @@ export async function updateUserPreferences(input: {
       return { ok: false, error: 'Invalid Google service-account key JSON.' }
     }
   }
+  // Data-at-rest encryption: apiKey and the service-account private key are
+  // secrets — store them as AES-256-GCM envelopes (see lib/field-encryption.ts).
+  // Empty strings still clear the field; the zod caps above bound the input.
+  const encryptedApiKey = data.apiKey ? encryptField(data.apiKey) : undefined
+  const encryptedServiceKey = data.googleServiceAccountKey
+    ? encryptField(data.googleServiceAccountKey)
+    : undefined
   const userId = await getCurrentUserId()
   if (!userId) return { ok: false, error: 'Not authenticated.' }
   try {
@@ -609,10 +631,10 @@ export async function updateUserPreferences(input: {
         userId,
         displayName: data.displayName ?? undefined,
         avatarUrl: data.avatarUrl ?? undefined,
-        apiKey: data.apiKey ?? undefined,
+        apiKey: encryptedApiKey,
         systemPromptPresets: data.systemPromptPresets ?? '[]',
         googleCalendarId: data.googleCalendarId ?? undefined,
-        googleServiceAccountKey: data.googleServiceAccountKey ?? undefined,
+        googleServiceAccountKey: encryptedServiceKey,
         preferredModel: data.preferredModel ?? undefined,
         temperature: data.temperature ?? undefined,
         maxCompletionTokens: data.maxCompletionTokens ?? undefined,
@@ -620,7 +642,7 @@ export async function updateUserPreferences(input: {
       update: {
         ...(data.displayName !== undefined && { displayName: data.displayName || null }),
         ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl || null }),
-        ...(data.apiKey !== undefined && { apiKey: data.apiKey || null }),
+        ...(data.apiKey !== undefined && { apiKey: encryptedApiKey ?? null }),
         ...(data.systemPromptPresets !== undefined && {
           systemPromptPresets: data.systemPromptPresets,
         }),
@@ -628,7 +650,7 @@ export async function updateUserPreferences(input: {
           googleCalendarId: data.googleCalendarId || null,
         }),
         ...(data.googleServiceAccountKey !== undefined && {
-          googleServiceAccountKey: data.googleServiceAccountKey || null,
+          googleServiceAccountKey: encryptedServiceKey ?? null,
         }),
         ...(data.preferredModel !== undefined && {
           preferredModel: data.preferredModel || null,
@@ -661,7 +683,7 @@ export async function testGoogleCalendarConnection(): Promise<
   } catch {
     return { ok: false, error: 'Could not load preferences.' }
   }
-  const key = pref?.googleServiceAccountKey
+  const key = decryptField(pref?.googleServiceAccountKey ?? '')
   const calendarId = pref?.googleCalendarId
   if (!key || !calendarId) {
     return { ok: false, error: 'No Google Calendar credentials saved yet.' }

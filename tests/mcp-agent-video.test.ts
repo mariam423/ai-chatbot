@@ -3,6 +3,13 @@ import { MAX_AGENT_STEPS, runAgent, type AgentInputMessage } from '../lib/agent'
 import { toOpenAITools, type McpTool } from '../lib/mcp-client'
 import { VideoFrameSchema } from '../lib/types'
 
+// The SSRF guard (lib/ssrf.ts) resolves configured endpoints before fetching.
+// The fake `mcp.example.com` host won't resolve offline, so stub DNS to a
+// public address — the guard stays active, only resolution is deterministic.
+vi.mock('node:dns/promises', () => ({
+  lookup: vi.fn().mockResolvedValue([{ address: '93.184.216.34', family: 4 }]),
+}))
+
 const tool: McpTool = {
   serverId: 'demo',
   name: 'lookup',

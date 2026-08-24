@@ -1,5 +1,13 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// The SSRF guard (lib/ssrf.ts) resolves configured endpoints before fetching.
+// The fake `*.example.com` hosts won't resolve offline, so stub DNS to a
+// public address — the guard stays active, only resolution is deterministic.
+vi.mock('node:dns/promises', () => ({
+  lookup: vi.fn().mockResolvedValue([{ address: '93.184.216.34', family: 4 }]),
+}))
+
 import { runAgent } from '../lib/agent'
 import {
   SKILLS,
@@ -26,6 +34,13 @@ import { POST } from '../app/api/chat/route'
 // next-auth can't run in vitest, so fall through to anonymous access.
 vi.mock('@/lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
+}))
+
+// The chat guard requires a session (requireSession), which lazily imports
+// next-auth; next-auth imports 'next/server', which only resolves inside
+// Next's bundler, so mock it (same as tests/security.test.ts).
+vi.mock('@/lib/auth', () => ({
+  auth: vi.fn().mockResolvedValue({ user: { id: 'test-user' } }),
 }))
 
 afterEach(() => {

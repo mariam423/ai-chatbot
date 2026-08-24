@@ -97,13 +97,17 @@ function TemperatureControl({
 function MaxTokensControl({
   value,
   onChange,
+  defaultValue,
 }: {
   value: number | null
   onChange: (next: number | null) => void
+  /** Effective server-side cap applied when the user leaves this unset. */
+  defaultValue: number | null
 }) {
   const result = useMemo(() => MaxCompletionTokensSchema.safeParse(value), [value])
-  // null means "provider default" — a valid state, not an out-of-range value.
+  // null means "server default" — a valid state, not an out-of-range value.
   const invalid = value !== null && !result.success
+  const unset = value === null
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
@@ -116,7 +120,11 @@ function MaxTokensControl({
         <span
           className={`font-mono text-xs ${invalid ? 'text-red-500' : 'text-[var(--text-secondary)]'}`}
         >
-          {value === null ? 'default' : value.toLocaleString()}
+          {unset
+            ? defaultValue !== null
+              ? `${defaultValue.toLocaleString()} (server default)`
+              : 'default'
+            : value.toLocaleString()}
         </span>
       </div>
       <input
@@ -134,6 +142,12 @@ function MaxTokensControl({
         <span>256</span>
         <span>16,384</span>
       </div>
+      {unset && defaultValue !== null && (
+        <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+          When unset, each reply is capped at {defaultValue.toLocaleString()} tokens server-side
+          (configured via MAX_OUTPUT_TOKENS).
+        </p>
+      )}
       {invalid && (
         <p role="alert" className="mt-1 text-[11px] text-red-500">
           Max tokens must be a whole number between 256 and 16,384.
@@ -177,6 +191,7 @@ export default function SettingsPage() {
   const [preferredModel, setPreferredModel] = useState('')
   const [temperature, setTemperature] = useState<number | null>(null)
   const [maxCompletionTokens, setMaxCompletionTokens] = useState<number | null>(null)
+  const [defaultMaxCompletionTokens, setDefaultMaxCompletionTokens] = useState<number | null>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -205,6 +220,7 @@ export default function SettingsPage() {
       setPreferredModel(result.data.preferredModel)
       setTemperature(result.data.temperature)
       setMaxCompletionTokens(result.data.maxCompletionTokens)
+      setDefaultMaxCompletionTokens(result.data.defaultMaxCompletionTokens)
       try {
         setPresets(JSON.parse(result.data.systemPromptPresets) as SystemPromptPreset[])
       } catch {
@@ -510,7 +526,11 @@ export default function SettingsPage() {
             <TemperatureControl value={temperature} onChange={setTemperature} />
 
             {/* Max completion tokens slider with real-time Zod validation */}
-            <MaxTokensControl value={maxCompletionTokens} onChange={setMaxCompletionTokens} />
+            <MaxTokensControl
+              value={maxCompletionTokens}
+              onChange={setMaxCompletionTokens}
+              defaultValue={defaultMaxCompletionTokens}
+            />
           </div>
         </motion.section>
 

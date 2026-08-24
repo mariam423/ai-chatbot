@@ -1,9 +1,11 @@
 'use server'
 
 import { createHash, randomUUID } from 'node:crypto'
+import { headers } from 'next/headers'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
+import { checkAuthRateLimit, clientIpFromHeaders } from '@/lib/security'
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(100),
@@ -19,6 +21,11 @@ export async function registerUser(input: {
   email: string
   password: string
 }): Promise<{ ok: true } | { ok: false; error: string; issues?: Array<{ message: string }> }> {
+  // Abuse brake: registration is unauthenticated and pays for a cost-12
+  // bcrypt hash + a DB row, so cap it per IP before any work.
+  const throttled = await checkAuthRateLimit('register', clientIpFromHeaders(await headers()))
+  if (!throttled.ok) return throttled
+
   const parsed = RegisterSchema.safeParse(input)
   if (!parsed.success) {
     return {
@@ -34,7 +41,13 @@ export async function registerUser(input: {
   try {
     const existing = await prisma.user.findUnique({ where: { email: normalisedEmail } })
     if (existing) {
-      return { ok: false, error: 'An account with this email already exists.' }
+      // Generic message (OWASP A07): never reveal whether an email is already
+      // registered — that would turn signup into an account-enumeration oracle.
+      return {
+        ok: false,
+        error:
+          'Could not create the account. Check your details, or sign in if you already have an account.',
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 12)
@@ -72,6 +85,12 @@ const RESET_TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
 export async function requestPasswordReset(input: {
   email: string
 }): Promise<{ ok: true } | { ok: false; error: string; issues?: Array<{ message: string }> }> {
+  // Abuse brake: each call writes a token row (and will eventually send an
+  // email), so cap per IP. Keyed by IP only — an email-keyed limit would let
+  // an attacker burn a victim's reset quota.
+  const throttled = await checkAuthRateLimit('reset-request', clientIpFromHeaders(await headers()))
+  if (!throttled.ok) return throttled
+
   const parsed = RequestResetSchema.safeParse(input)
   if (!parsed.success) {
     return {
@@ -114,6 +133,10 @@ export async function resetPassword(input: {
   token: string
   password: string
 }): Promise<{ ok: true } | { ok: false; error: string; issues?: Array<{ message: string }> }> {
+  // Abuse brake: token-consumption surface, capped per IP.
+  const throttled = await checkAuthRateLimit('reset-complete', clientIpFromHeaders(await headers()))
+  if (!throttled.ok) return throttled
+
   const parsed = ResetPasswordSchema.safeParse(input)
   if (!parsed.success) {
     return {

@@ -4,6 +4,13 @@ vi.mock('../lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
 }))
 
+// The chat guard requires a session (requireSession), which lazily imports
+// next-auth; next-auth imports 'next/server', which only resolves inside
+// Next's bundler, so mock it (same as tests/security.test.ts).
+vi.mock('../lib/auth', () => ({
+  auth: vi.fn().mockResolvedValue({ user: { id: 'test-user' } }),
+}))
+
 vi.mock('../lib/rag', () => ({
   getSessionRagContext: vi
     .fn()

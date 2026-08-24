@@ -43,6 +43,12 @@ test('settings page renders all sections with saved defaults', async ({ page }) 
     await expect(page.locator('#settings-temperature')).toHaveValue('0.7')
     await expect(page.locator('#settings-max-tokens')).toHaveValue('2048')
   })
+
+  await test.step('the effective max_tokens default is surfaced (4096 server default)', async () => {
+    // getUserPreferences returns the env-derived server default (MAX_OUTPUT_TOKENS
+    // unset in e2e → the conservative 4096), so the unset readout spells it out.
+    await expect(page.getByText('4,096 (server default)')).toBeVisible()
+  })
 })
 
 test('editing profile fields and tuning sliders updates the form live', async ({ page }) => {

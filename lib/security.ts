@@ -15,18 +15,28 @@
 
 import { NextResponse } from 'next/server'
 import { rateLimit, rateLimitResponse, type RateLimitStore } from './rate-limit'
+import { logSecurityEvent } from './audit'
 
 // Re-exported so existing `@/lib/security` imports keep working.
 export { rateLimit, rateLimitResponse, type RateLimitStore }
 
-/** Client IP from the request (honoring X-Forwarded-For set by proxies). */
-export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')
+/**
+ * Client IP from raw headers (honoring X-Forwarded-For set by proxies).
+ * Shared by the API routes (which have a `Request`) and the server actions
+ * (which only have `next/headers`), so both throttle on the same value.
+ */
+export function clientIpFromHeaders(headers: Headers): string {
+  const forwarded = headers.get('x-forwarded-for')
   if (forwarded) {
     const first = forwarded.split(',')[0]?.trim()
     if (first) return first
   }
-  return request.headers.get('x-real-ip') ?? 'unknown'
+  return headers.get('x-real-ip') ?? 'unknown'
+}
+
+/** Client IP from a `Request` — convenience for the API routes. */
+export function clientIp(request: Request): string {
+  return clientIpFromHeaders(request.headers)
 }
 
 /* ------------------------------------------------------------------ */
@@ -55,6 +65,94 @@ export function checkCsrf(request: Request): NextResponse | null {
   const allowed = new URL(allowedOrigin).origin
   if (candidate === allowed) return null
   return NextResponse.json({ error: 'Cross-site request blocked.' }, { status: 403 })
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth guardrails (server actions + the credentials provider)         */
+/* ------------------------------------------------------------------ */
+
+/** Keys of the throttled auth surfaces — the lookup handles for `AUTH_GUARDS`. */
+export type AuthGuardKey = 'register' | 'login' | 'reset-request' | 'reset-complete'
+
+/**
+ * Per-window abuse limits for the auth entry points, mirroring the
+ * `ROUTE_GUARDS` philosophy: every auth surface's cap is defined and
+ * reviewable here instead of inline at each call site. The API routes are
+ * guarded via `guardRoute`; these four are server actions / the NextAuth
+ * credentials provider, which have no `Request`-level guard, so they use
+ * `checkAuthRateLimit` / `checkLoginRateLimit` instead.
+ *
+ * - `register` — bcrypt cost-12 hashing + DB row creation, unauthenticated
+ * - `login` — brute-force surface; `emailLimit` caps attempts per account
+ *   (both are enforced in the credentials `authorize`)
+ * - `reset-request` — writes a token row per call (+ future email sends)
+ * - `reset-complete` — token-consumption surface
+ *
+ * Buckets are keyed by client IP (plus the account email for login) and go
+ * through the shared Redis-capable store, so limits survive restarts and
+ * hold across instances. Tests/security.test.ts pins this map so the caps
+ * can't drift from the docs.
+ */
+export const AUTH_GUARDS: Record<
+  AuthGuardKey,
+  { name: string; limit: number; windowMs: number; emailLimit?: number }
+> = {
+  register: { name: 'auth:register', limit: 5, windowMs: 60_000 },
+  login: { name: 'auth:login', limit: 20, windowMs: 60_000, emailLimit: 10 },
+  'reset-request': { name: 'auth:reset-request', limit: 5, windowMs: 60_000 },
+  'reset-complete': { name: 'auth:reset-complete', limit: 10, windowMs: 60_000 },
+}
+
+/** The throttled error shared by all auth server actions. */
+export const AUTH_RATE_LIMIT_ERROR = 'Too many attempts. Please wait a minute and try again.'
+
+/**
+ * Throttle an auth server action by client IP (register, password reset).
+ * Returns the standard `{ ok: false; error }` shape the actions already use,
+ * so callers short-circuit before any DB or bcrypt work.
+ */
+export async function checkAuthRateLimit(
+  guard: AuthGuardKey,
+  ip: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { name, limit, windowMs } = AUTH_GUARDS[guard]
+  const result = await rateLimit(`${name}:ip:${ip}`, { limit, windowMs })
+  if (!result.ok) {
+    logSecurityEvent('auth_throttled', { guard, ip, retryAfterSeconds: result.retryAfterSeconds })
+  }
+  return result.ok ? { ok: true } : { ok: false, error: AUTH_RATE_LIMIT_ERROR }
+}
+
+/**
+ * Throttle a login attempt: per-IP cap (broad flooding) and a tighter
+ * per-account cap (targeted password guessing). Runs before bcrypt so a
+ * flood can't burn CPU. Returns false when either cap is exceeded — the
+ * credentials provider turns that into a generic auth failure (no leak of
+ * which limit tripped).
+ */
+export async function checkLoginRateLimit(ip: string, email: string): Promise<boolean> {
+  const { name, limit, windowMs, emailLimit = 10 } = AUTH_GUARDS.login
+  const byIp = await rateLimit(`${name}:ip:${ip}`, { limit, windowMs })
+  if (!byIp.ok) {
+    logSecurityEvent('auth_throttled', {
+      guard: 'login',
+      scope: 'ip',
+      ip,
+      retryAfterSeconds: byIp.retryAfterSeconds,
+    })
+    return false
+  }
+  const byEmail = await rateLimit(`${name}:email:${email}`, { limit: emailLimit, windowMs })
+  if (!byEmail.ok) {
+    logSecurityEvent('auth_throttled', {
+      guard: 'login',
+      scope: 'email',
+      email,
+      retryAfterSeconds: byEmail.retryAfterSeconds,
+    })
+    return false
+  }
+  return true
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,13 +268,23 @@ export async function guardRoute(
 
   if (csrf) {
     const csrfResponse = checkCsrf(request)
-    if (csrfResponse) return { ok: false, response: csrfResponse }
+    if (csrfResponse) {
+      logSecurityEvent('csrf_blocked', {
+        route: name,
+        ip: clientIp(request),
+        origin: request.headers.get('origin') ?? request.headers.get('referer') ?? null,
+      })
+      return { ok: false, response: csrfResponse }
+    }
   }
 
   let userId = ''
   if (session) {
     const sessionResult = await requireSession()
-    if (sessionResult.response) return { ok: false, response: sessionResult.response }
+    if (sessionResult.response) {
+      logSecurityEvent('unauthorized', { route: name, ip: clientIp(request) })
+      return { ok: false, response: sessionResult.response }
+    }
     userId = sessionResult.userId
   }
 
@@ -192,7 +300,14 @@ export async function guardRoute(
       limit: rawLimit,
       windowMs: rateLimitOptions.windowMs ?? 60_000,
     })
-    if (!limited.ok) return { ok: false, response: rateLimitResponse(limited.retryAfterSeconds) }
+    if (!limited.ok) {
+      logSecurityEvent('rate_limited', {
+        route: name,
+        key: rateKey,
+        retryAfterSeconds: limited.retryAfterSeconds,
+      })
+      return { ok: false, response: rateLimitResponse(limited.retryAfterSeconds) }
+    }
   }
 
   return { ok: true, userId }

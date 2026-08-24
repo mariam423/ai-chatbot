@@ -566,6 +566,26 @@ describe('user preferences (calendar credentials)', () => {
         maxCompletionTokens: 2048,
       },
     })
+    // The effective server default rides along so the settings UI can show it.
+    expect(loaded).toMatchObject({ ok: true, data: { defaultMaxCompletionTokens: 4096 } })
+  })
+
+  it('surfaces the effective server default max tokens (env-overridable)', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    process.env.MAX_OUTPUT_TOKENS = '8192'
+    try {
+      expect(await prefsActions.getUserPreferences()).toMatchObject({
+        ok: true,
+        data: { defaultMaxCompletionTokens: 8192 },
+      })
+    } finally {
+      delete process.env.MAX_OUTPUT_TOKENS
+    }
+    // Unset env falls back to the built-in conservative default.
+    expect(await prefsActions.getUserPreferences()).toMatchObject({
+      ok: true,
+      data: { defaultMaxCompletionTokens: 4096 },
+    })
   })
 
   it('rejects invalid model tuning values via the zod schema', async () => {
@@ -786,5 +806,105 @@ describe('saveChatMessages session ownership', () => {
       else process.env.AUTH_DISABLED = original
       vi.mocked(getCurrentUserId).mockResolvedValue(null)
     }
+  })
+})
+
+describe('data-at-rest field encryption (ENCRYPTION_KEY)', () => {
+  let encActions: typeof import('../app/actions')
+  // parseGoogleServiceAccountKey only requires non-empty client_email/private_key.
+  const ENC_VALID_KEY = JSON.stringify({
+    client_email: 'svc@example.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----',
+  })
+
+  beforeAll(async () => {
+    encActions = await import('../app/actions')
+    // user_preferences has an FK to users — ensure the encryption test user.
+    const { prisma } = await import('../lib/db')
+    await prisma.user.upsert({
+      where: { id: 'user-enc' },
+      create: { id: 'user-enc', email: 'enc@example.com' },
+      update: {},
+    })
+  })
+
+  afterEach(async () => {
+    delete process.env.ENCRYPTION_KEY
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    const { prisma } = await import('../lib/db')
+    await prisma.userPreference.deleteMany()
+  })
+
+  it('encrypts apiKey and the service-account key at rest, and decrypts on read', async () => {
+    process.env.ENCRYPTION_KEY = 'test-encryption-key'
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-enc')
+    await encActions.updateUserPreferences({
+      apiKey: 'sk-or-secret-123',
+      googleCalendarId: 'primary',
+      googleServiceAccountKey: ENC_VALID_KEY,
+    })
+
+    // The DB row must not contain the plaintext — only v1 envelopes.
+    const { prisma } = await import('../lib/db')
+    const stored = await prisma.userPreference.findUnique({ where: { userId: 'user-enc' } })
+    expect(stored?.apiKey).toMatch(/^v1:/)
+    expect(stored?.apiKey).not.toContain('sk-or-secret-123')
+    expect(stored?.googleServiceAccountKey).toMatch(/^v1:/)
+    expect(stored?.googleServiceAccountKey).not.toContain('PRIVATE KEY')
+
+    // Reads return the plaintext to the caller.
+    const loaded = await encActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) {
+      expect(loaded.data.apiKey).toBe('sk-or-secret-123')
+      expect(loaded.data.googleServiceAccountKey).toBe(ENC_VALID_KEY)
+    }
+  })
+
+  it('passes legacy plaintext rows through (pre-encryption data)', async () => {
+    process.env.ENCRYPTION_KEY = 'test-encryption-key'
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-enc')
+    // Simulate a row written before encryption existed.
+    const { prisma } = await import('../lib/db')
+    await prisma.userPreference.upsert({
+      where: { userId: 'user-enc' },
+      create: {
+        userId: 'user-enc',
+        apiKey: 'sk-legacy-456',
+        googleCalendarId: 'primary',
+        googleServiceAccountKey: ENC_VALID_KEY,
+      },
+      update: {},
+    })
+    const loaded = await encActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) {
+      expect(loaded.data.apiKey).toBe('sk-legacy-456')
+      expect(loaded.data.googleServiceAccountKey).toBe(ENC_VALID_KEY)
+    }
+  })
+
+  it('degrades gracefully when an encrypted row cannot be decrypted (rotated key)', async () => {
+    process.env.ENCRYPTION_KEY = 'first-key'
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-enc')
+    await encActions.updateUserPreferences({
+      apiKey: 'sk-rotated',
+      googleCalendarId: 'primary',
+      googleServiceAccountKey: ENC_VALID_KEY,
+    })
+
+    // Rotate the key — the envelopes are now undecryptable.
+    process.env.ENCRYPTION_KEY = 'second-key'
+    const loaded = await encActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) {
+      expect(loaded.data.apiKey).toBe('')
+      expect(loaded.data.googleServiceAccountKey).toBe('')
+    }
+    // The calendar connection test degrades to 'no credentials' too.
+    expect(await encActions.testGoogleCalendarConnection()).toEqual({
+      ok: false,
+      error: 'No Google Calendar credentials saved yet.',
+    })
   })
 })

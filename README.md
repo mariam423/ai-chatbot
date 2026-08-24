@@ -101,6 +101,18 @@ AUTH_SECRET=your-secret
 AUTH_TRUST_HOST=true
 ```
 
+### Data-at-rest encryption (recommended in production)
+
+Sensitive `UserPreference` fields — the user's API key and the Google
+service-account private key used by `schedule_block` — are encrypted at rest
+with AES-256-GCM when an `ENCRYPTION_KEY` is configured:
+
+```env
+ENCRYPTION_KEY=your-long-random-secret
+```
+
+Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. Any string works (sha256-derived to a 256-bit key), but **set it once and keep it stable** — rotating it makes previously encrypted values undecryptable (they degrade to empty, not garbage). Without a key, sensitive fields are stored in plaintext with a one-time server warning (local dev). Legacy plaintext rows keep working after the key is introduced.
+
 For local development or automated browser tests without authentication, you can enable the explicit bypass mode:
 
 ```env
@@ -149,6 +161,20 @@ Conversation history is compressed before each upstream request. The system prom
 MAX_HISTORY_MESSAGES=20
 MAX_CONTEXT_TOKENS=8000
 ```
+
+### Completion length (cost control)
+
+Every upstream request sends an explicit `max_tokens` cap so the provider never falls back to its own maximum (OpenRouter's is often 65536) — providers pre-authorize cost against `max_tokens`, so a huge default can reject a low-credit key with `402 Insufficient Balance` even for a short reply:
+
+```env
+MAX_OUTPUT_TOKENS=4096
+```
+
+Defaults to 4096. The per-user **Max Completion Tokens** slider in Settings overrides it when set.
+
+This cap is applied at every token-billed call site: the streaming chat route and the agent tool-planning calls. It is deliberately **not** sent to `/audio/transcriptions` — the OpenAI-compatible STT API has no `max_tokens` parameter (whisper is billed by audio duration, and strict providers reject unknown fields with a 400).
+
+The settings page (**Model & Generation → Max Completion Tokens**) shows the effective default (`4,096 (server default)`) so users can see what applies before they override it with the slider.
 
 ## Feature Walkthrough
 
@@ -297,12 +323,23 @@ Every API route runs through a fixed-window rate limiter (60-second windows that
 | `/api/skills`          | 600              | client IP                        | — (fixed)               |
 | `/api/webhooks/stripe` | 600              | client IP                        | — (fixed)               |
 
+The auth entry points (server actions / the credentials provider) are throttled too, through the same Redis-capable store, keyed by client IP:
+
+| Auth surface                   | Cap (per minute)          | Scope                     |
+| ------------------------------ | ------------------------- | ------------------------- |
+| Registration (`registerUser`)  | 5                         | client IP                 |
+| Login (`credentials` provider) | 20 per IP, 10 per account | client IP + account email |
+| Password reset request         | 5                         | client IP                 |
+| Password reset completion      | 10                        | client IP                 |
+
+Login caps are checked **before** the bcrypt comparison; registration and reset throttles fire **before** any DB/bcrypt work. A throttled login returns the same generic failure as a wrong password (no leak of which limit tripped). These caps live in the `AUTH_GUARDS` map in `lib/security.ts` — the auth counterpart to the `ROUTE_GUARDS` table above.
+
 Operational notes:
 
 - An unset override variable falls back to the default in the table — the cap is never silently disabled. (The `defaultLimit` is part of the guard config; see `lib/security.ts`.)
 - `/api/chat` buckets by the signed-in user id when authenticated and falls back to the client IP for anonymous traffic (e.g. `AUTH_DISABLED` mode).
 - The webhook cap is a generous flood brake — signature verification (`STRIPE_WEBHOOK_SECRET`) is the real auth, and Stripe delivers bursts and retries with backoff.
-- The client IP is read from the first `X-Forwarded-For` entry, then `X-Real-IP`, then `unknown` — put a trusted proxy in front of the app if you need real client IPs.
+- The client IP is read from the first `X-Forwarded-For` entry, then `X-Real-IP`, then `unknown` — put a trusted proxy in front of the app if you need real client IPs. Server actions read the same headers via `next/headers` (`clientIpFromHeaders`), so the same trust model applies.
 
 ### Redis-backed limits (multi-instance)
 
@@ -322,10 +359,33 @@ REDIS_URL=rediss://default:password@host:6379
 - API credentials remain on the server.
 - Uploads, media data, document chunks, citations, MCP calls, and tool arguments are validated and bounded.
 - RAG retrieval and citation lookup are scoped to the current session and authenticated user.
-- Document content and long-term memory are treated as untrusted context, not instructions.
-- Arbitrary server-side code execution is not supported.
+- Document content and long-term memory are treated as untrusted context, not instructions — the system prompt explicitly says to ignore instructions found inside them (prompt-injection boundary).
+- Arbitrary server-side code execution is not supported (the arithmetic tool is a whitelisted expression subset).
 - MCP credentials are read only from server-side environment configuration.
 - Video binaries and request-scoped image/audio attachments are not persisted.
+
+### Security headers (production builds)
+
+The app ships `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` on every response, plus — on production builds — a Content-Security-Policy (`default-src 'self'`, `script-src 'self' 'unsafe-inline'` for the inline bootstrap scripts, `frame-ancestors 'none'`, `object-src 'none'`) and HSTS (`Strict-Transport-Security`, 1 year). The e2e suite runs the production build, so the CSP is exercised on every CI run. See `next.config.ts`.
+
+### SSRF guard
+
+Outbound fetches to operator-configured endpoints — web search (`WEB_SEARCH_URL`), MCP servers (`MCP_SERVERS_JSON`), `diagram_render` (`DIAGRAM_RENDER_URL`), and `weather_lookup` (`WEATHER_API_URL`) — are validated by `lib/ssrf.ts` before connecting: http(s) only, and the destination must not be a private, loopback, link-local, or reserved IP (IPv4 + IPv6, including IPv4-mapped forms). Hostnames are resolved and rejected if **any** address is blocked (DNS-rebinding defense). The LLM base URL is deliberately exempt so self-hosted local models (e.g. Ollama) keep working.
+
+### Data-at-rest encryption
+
+`UserPreference.apiKey` and `UserPreference.googleServiceAccountKey` (a private key) are stored as AES-256-GCM envelopes (`v1:<iv>:<tag>:<ct>`) keyed by `ENCRYPTION_KEY` — see the environment setup above. Reads decrypt transparently; pre-encryption plaintext rows pass through; undecryptable rows (rotated key, tampering) degrade to empty rather than surfacing ciphertext, and log a structured `decryption_failed` event.
+
+### Security audit logging
+
+`lib/audit.ts` emits structured one-line JSON security events to the server console: CSRF blocks, unauthorized access, rate-limit trips, auth throttles, ownership violations, webhook signature failures (always, outside tests), and successful logins (opt-in via `SECURITY_AUDIT_LOG=true`). Events carry only ids, IPs, and status codes — never bodies, headers, or secrets.
+
+### Auth hardening
+
+- Registration and password-reset server actions are rate-limited per IP; login is capped per IP **and** per account (see the Rate limiting table above).
+- Registration returns a generic error when an email is already registered — signup can't be used to enumerate accounts. Login and reset failures are generic too; a throttled login is indistinguishable from a wrong password.
+- Passwords are bcrypt-hashed (cost 12, min 8 chars); reset tokens are stored SHA-256-hashed and single-use with a 1-hour TTL. NextAuth cookies use the protocol-derived secure defaults (`httpOnly`, `sameSite=lax`, `__Secure-`/`__Host-` prefixes over https).
+- CI runs `npm audit --audit-level=high` on every PR (the repo pins a patched `deepmerge-ts` via `overrides` to keep the audit clean on Prisma 7).
 
 ## Documentation
 

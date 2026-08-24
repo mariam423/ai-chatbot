@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../app/api/chat/route'
+import { DEFAULT_MAX_OUTPUT_TOKENS } from '../lib/llm-config'
 
 // The route resolves the current user for per-user skill credentials;
 // next-auth can't run in vitest, so fall through to anonymous access.
 vi.mock('@/lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
+}))
+
+// The chat guard requires a session (ROUTE_GUARDS.chat → requireSession),
+// which lazily imports next-auth. next-auth imports 'next/server', which only
+// resolves inside Next's bundler — it can't be loaded raw in vitest — so mock
+// it the same way tests/security.test.ts does.
+vi.mock('@/lib/auth', () => ({
+  auth: vi.fn().mockResolvedValue({ user: { id: 'test-user' } }),
 }))
 
 afterEach(() => {
@@ -193,6 +202,34 @@ describe('POST /api/chat', () => {
     expect(url).toBe('https://custom-router.example.com/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
     expect(payload.model).toBe('deepseek/deepseek-v4')
+  })
+
+  it('always sends an explicit max_tokens default to avoid provider pre-auth 402s', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    // No client maxTokens → the conservative default is sent.
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    let payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      max_tokens?: number
+    }
+    expect(payload.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
+
+    // MAX_OUTPUT_TOKENS env override applies when set.
+    vi.stubEnv('MAX_OUTPUT_TOKENS', '1024')
+    fetchMock.mockClear()
+    await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { max_tokens?: number }
+    expect(payload.max_tokens).toBe(1024)
   })
 
   it('forwards validated temperature and maxTokens tuning to the provider body', async () => {

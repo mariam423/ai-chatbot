@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { decryptField } from '@/lib/field-encryption'
 import { parseGoogleServiceAccountKey, type SkillToolContext } from '@/lib/skills/tools'
 
 /**
@@ -14,7 +15,9 @@ export async function getUserSkillContext(userId: string | null): Promise<SkillT
   if (!userId) return {}
   try {
     const pref = await prisma.userPreference.findUnique({ where: { userId } })
-    const key = pref?.googleServiceAccountKey
+    // The service-account private key is stored encrypted at rest (AES-256-GCM
+    // envelope); legacy plaintext rows pass through decryptField unchanged.
+    const key = decryptField(pref?.googleServiceAccountKey ?? '')
     const calendarId = pref?.googleCalendarId
     if (!key || !calendarId) return {}
     const parsed = parseGoogleServiceAccountKey(key)
