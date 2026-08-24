@@ -9,6 +9,7 @@ import type { Element } from 'hast'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
 import { isSvgDataUrl } from '@/lib/svg-data-url'
+import { extractCodeText } from '@/lib/markdown-code'
 import CitationDrawer from './citation-drawer'
 import DiagramCard from './diagram-card'
 
@@ -153,7 +154,11 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
       },
       code({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) {
         const match = /language-(\w+)/.exec(className ?? '')
-        const text = String(children ?? '')
+        // rehype-highlight turns fenced-code children into hljs <span> trees,
+        // so String(children) would render "[object Object]". extractCodeText
+        // walks the tree and returns the raw source (trailing newline
+        // stripped) for both display and the copy button.
+        const text = extractCodeText(children)
         if (!match) {
           return (
             <code className={className} {...props}>

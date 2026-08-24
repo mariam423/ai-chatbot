@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { POST } from '../app/api/upload/route'
-import { chunkDocumentText, extractDocumentText, getDocumentExtension } from '../lib/documents'
+import {
+  chunkDocumentText,
+  extractDocumentText,
+  getDocumentExtension,
+  MAX_DOCUMENT_BYTES,
+} from '../lib/documents'
 import { createEmbedding, EMBEDDING_DIMENSION } from '../lib/rag'
 
 function bytes(value: string): Uint8Array {
@@ -66,5 +71,19 @@ describe('POST /api/upload boundary', () => {
     )
     expect(response.status).toBe(400)
     expect((await response.json()).error).toContain('Only PDF')
+  })
+
+  it('rejects a document over the 20 MB limit with a 413', async () => {
+    const form = new FormData()
+    form.set('sessionId', 'session-1')
+    form.set(
+      'file',
+      new File([new Uint8Array(MAX_DOCUMENT_BYTES + 1)], 'huge.csv', { type: 'text/csv' }),
+    )
+    const response = await POST(
+      new Request('http://localhost/api/upload', { method: 'POST', body: form }),
+    )
+    expect(response.status).toBe(413)
+    expect((await response.json()).error).toContain('20 MB')
   })
 })

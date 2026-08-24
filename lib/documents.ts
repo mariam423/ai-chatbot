@@ -1,6 +1,6 @@
 import { inflateSync } from 'node:zlib'
 
-export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+export const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 export const MAX_EXTRACTED_TEXT_LENGTH = 1_000_000
 export const MAX_DOCUMENT_CHUNKS = 500
 export const CHUNK_SIZE = 1_600
@@ -82,7 +82,7 @@ function pdfStreamBytes(pdf: Uint8Array): Array<{ bytes: Uint8Array; compressed:
 /** Extract text without trusting the file's declared MIME type or executing it. */
 export function extractDocumentText(name: string, mimeType: string, bytes: Uint8Array): string {
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_DOCUMENT_BYTES) {
-    throw new Error('Document is empty or exceeds the 10 MB limit.')
+    throw new Error('Document is empty or exceeds the 20 MB limit.')
   }
   const extension = getDocumentExtension(name)
   if (!extension) throw new Error('Only PDF, TXT, MD, and CSV files are supported.')

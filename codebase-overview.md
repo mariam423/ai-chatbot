@@ -52,9 +52,9 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   applies. The chat empty state fetches it to advertise clickable capability
   chips. Guarded by a per-IP rate limit (no CSRF — read-only GET).
 - **`app/api/upload/route.ts`** — Node-runtime document API. `POST` accepts
-  PDF/TXT/MD/CSV multipart uploads, validates ownership and limits, extracts
-  text, chunks and embeds it, and stores metadata. `GET` lists session
-  documents; `DELETE` removes a document and its chunks.
+  PDF/TXT/MD/CSV multipart uploads up to 20 MB, validates ownership and
+  limits, extracts text, chunks and embeds it, and stores metadata. `GET`
+  lists session documents; `DELETE` removes a document and its chunks.
 - **`app/actions.ts`** — Server Actions for session/message persistence,
   sidebar listing, rename/pin/archive, preferences, prompt presets, and
   long-term memory records. Inputs are Zod-validated and results use `{ ok }`
@@ -84,8 +84,9 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`components/file-upload.tsx`** — PDF/TXT/MD/CSV attachment picker with
   compact removable badges and processing errors.
 - **`components/media-upload.tsx`** — MP4/WebM picker that previews sampled
-  keyframes, plus bounded JPEG/PNG and MP3/WAV attachments for the current
-  vision/audio request. Original media is not persisted.
+  keyframes, plus JPEG/PNG/WEBP/GIF and MP3/WAV attachments for the current
+  vision/audio request (20 MB caps; images over 5 MB are auto-compressed
+  through a canvas — `lib/media-compress.ts`). Original media is not persisted.
 - **`components/citation-drawer.tsx`** — Interactive RAG citation badge and
   drawer UI. It loads the exact matched chunk and source metadata through the
   citation API when a `[Document: ..., section N]` citation is selected.

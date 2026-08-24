@@ -46,9 +46,9 @@ export async function POST(request: Request) {
   if (!guard.ok) return guard.response
 
   // Reject oversized multipart bodies before formData() buffers them (the
-  // 10 MB file cap is enforced after parsing; this is the fast pre-check).
+  // 20 MB file cap is enforced after parsing; this is the fast pre-check).
   const declaredLength = Number(request.headers.get('content-length'))
-  if (Number.isFinite(declaredLength) && declaredLength > 15 * 1024 * 1024) {
+  if (Number.isFinite(declaredLength) && declaredLength > 25 * 1024 * 1024) {
     return errorResponse('Upload too large.', 413)
   }
 
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) return errorResponse('A document file is required.')
   if (file.size === 0) return errorResponse('The document is empty.')
   if (file.size > MAX_DOCUMENT_BYTES)
-    return errorResponse('The document exceeds the 10 MB limit.', 413)
+    return errorResponse('The document exceeds the 20 MB limit.', 413)
 
   const extension = getDocumentExtension(file.name)
   if (!extension) return errorResponse('Only PDF, TXT, MD, and CSV files are supported.')

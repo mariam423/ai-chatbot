@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_AUDIO_DATA_URL_LENGTH, MAX_IMAGE_DATA_URL_LENGTH } from '@/lib/media-compress'
 
 /**
  * A message in the chat thread (client state). The Zod schema is the single
@@ -50,8 +51,11 @@ export type VideoFrame = z.infer<typeof VideoFrameSchema>
 /** Optional still-image attachment sent only with the current vision request. */
 export const ImageDataUrlSchema = z
   .string()
-  .regex(/^data:image\/(?:jpeg|jpg|png);base64,/, 'Image must be a base64 JPEG or PNG data URL.')
-  .max(1_200_000)
+  .regex(
+    /^data:image\/(?:jpeg|jpg|png|webp|gif);base64,/,
+    'Image must be a base64 JPEG, PNG, WEBP, or GIF data URL.',
+  )
+  .max(MAX_IMAGE_DATA_URL_LENGTH)
 
 /** Optional audio attachment sent only with the current request. */
 export const AudioDataUrlSchema = z
@@ -60,7 +64,7 @@ export const AudioDataUrlSchema = z
     /^data:audio\/(?:mpeg|mp3|wav|x-wav);base64,/,
     'Audio must be a base64 MP3 or WAV data URL.',
   )
-  .max(2_000_000)
+  .max(MAX_AUDIO_DATA_URL_LENGTH)
 
 export type ImageDataUrl = z.infer<typeof ImageDataUrlSchema>
 export type AudioDataUrl = z.infer<typeof AudioDataUrlSchema>

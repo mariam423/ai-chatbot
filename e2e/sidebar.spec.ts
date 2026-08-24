@@ -1,13 +1,30 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mockStream, sseBody } from './helpers'
 
 // Headless Chromium denies navigator.clipboard by default; grant the
 // permissions so the copy button can flip to its "Code copied" state.
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
 
-async function sendMessage(page: import('@playwright/test').Page, text: string): Promise<void> {
+async function sendMessage(page: Page, text: string): Promise<void> {
   await page.getByLabel('Message').fill(text)
   await page.getByRole('button', { name: 'Send' }).click()
+}
+
+/**
+ * Type into the session search box with REAL keystrokes. Playwright's fill()
+ * sets the DOM value directly and does not fire React's onChange on this
+ * type="search" input (verified: the debounced search never runs, leaving the
+ * list unfiltered), whereas typed input does. Select-all + type keeps each
+ * step replacing the previous term, and Backspace clears.
+ */
+async function typeSearch(page: Page, input: Locator, text: string): Promise<void> {
+  await input.focus()
+  await page.keyboard.press('ControlOrMeta+a')
+  if (text === '') {
+    await page.keyboard.press('Backspace')
+  } else {
+    await input.pressSequentially(text)
+  }
 }
 
 test('sidebar lists the conversation and New Chat resets the thread', async ({
@@ -265,27 +282,27 @@ test('searches conversations and resets on clear', async ({ page, isMobile }) =>
   const searchInput = sidebar.getByRole('searchbox', { name: 'Search conversations' })
 
   await test.step('typing a unique term filters to exactly that session', async () => {
-    await searchInput.fill(uniqueTitle)
+    await typeSearch(page, searchInput, uniqueTitle)
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeVisible()
     // Unique title → exactly one match (no Show-more li for a 1-result page).
     await expect(sidebar.locator('li')).toHaveCount(1)
   })
 
   await test.step('search is case-insensitive', async () => {
-    await searchInput.fill(uniqueTitle.toLowerCase())
+    await typeSearch(page, searchInput, uniqueTitle.toLowerCase())
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeVisible()
     await expect(sidebar.locator('li')).toHaveCount(1)
   })
 
   await test.step('a search with no matches shows the no-results state', async () => {
-    await searchInput.fill('zzz-no-such-session')
+    await typeSearch(page, searchInput, 'zzz-no-such-session')
     await expect(sidebar.getByText('No conversations found.')).toBeVisible()
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeHidden()
     await expect(sidebar.locator('li')).toHaveCount(0)
   })
 
   await test.step('clearing the search restores the list', async () => {
-    await searchInput.fill('')
+    await typeSearch(page, searchInput, '')
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeVisible()
   })
 })
