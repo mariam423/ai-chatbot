@@ -9,6 +9,7 @@ import {
   GitBranchIcon,
 } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearChatSession,
@@ -30,6 +31,7 @@ import {
 import { detectStructuredOutputKind, renderStructuredResponse } from '@/lib/structured-output'
 import type { VideoFrame } from '@/lib/video'
 import type { ModelKey } from '@/lib/models'
+import { EVENTS, useAnalytics } from '@/lib/use-analytics'
 import {
   BUILTIN_PRESETS,
   type ChatMessage,
@@ -44,7 +46,19 @@ import MessageBubble from './message-bubble'
 import StreamingSkeleton from './streaming-skeleton'
 import FileUpload from './file-upload'
 import MediaUpload from './media-upload'
-import AudioInput from './audio-input'
+// The mic's MediaRecorder/Web-Speech logic is heavy — lazy-load it so it
+// ships as a separate chunk only loaded when the composer renders.
+const AudioInput = dynamic(() => import('./audio-input'), {
+  ssr: false,
+  loading: () => (
+    <div
+      aria-hidden
+      className="flex size-9 items-center justify-center rounded-full text-[var(--text-tertiary)]"
+    >
+      <HugeiconsIcon icon={AiSparklesIcon} size={16} strokeWidth={1.5} />
+    </div>
+  ),
+})
 import ChatExport from './chat-export'
 
 interface ChatProps {
@@ -52,6 +66,9 @@ interface ChatProps {
   modelKey: ModelKey
   /** Per-session skill override; null = default catalog. */
   enabledSkills: string[] | null
+  /** Generation tuning from user settings; null = provider defaults. */
+  temperature?: number | null
+  maxCompletionTokens?: number | null
   onSessionChange: (id: string | null) => void
   onConversationChanged: () => void
 }
@@ -69,9 +86,13 @@ export default function Chat({
   sessionId,
   modelKey,
   enabledSkills,
+  temperature = null,
+  maxCompletionTokens = null,
   onSessionChange,
   onConversationChanged,
 }: ChatProps) {
+  // Analytics events are fire-and-forget and never block the send path.
+  const { track } = useAnalytics()
   const [thread, setThread] = useState<ThreadState>(EMPTY_THREAD)
   // Imperative mirror of `thread`, kept current so async persistence and the
   // fork-on-edit flow read the latest state without stale render closures.
@@ -113,9 +134,7 @@ export default function Chat({
       if (prev.active < 0 || prev.active >= prev.branches.length) return
       commitThread({
         ...prev,
-        branches: prev.branches.map((branch, i) =>
-          i === prev.active ? updater(branch) : branch,
-        ),
+        branches: prev.branches.map((branch, i) => (i === prev.active ? updater(branch) : branch)),
       })
     },
     [commitThread],
@@ -255,6 +274,7 @@ export default function Chat({
     setError(null)
     setRetryMessage(content)
     setIsStreaming(true)
+    track(EVENTS.messageSent, { model: modelKey, branch: String(thread.active) })
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -286,6 +306,8 @@ export default function Chat({
           ...(sessionId ? { sessionId } : {}),
           ...(enabledSkills !== null ? { enabledSkills } : {}),
           model: modelKey,
+          ...(temperature !== null ? { temperature } : {}),
+          ...(maxCompletionTokens !== null ? { maxTokens: maxCompletionTokens } : {}),
           ...(structuredOutput ? { structuredOutput } : {}),
           ...(videoFrames.length > 0 ? { videoFrames } : {}),
           ...(imageDataUrl ? { imageDataUrl } : {}),
@@ -370,6 +392,7 @@ export default function Chat({
     let sid = sessionId
     if (!sid) {
       sid = newId()
+      track(EVENTS.sessionCreated)
       // Write the session id to localStorage synchronously so a fast reload
       // right after send still finds it (the DB save is async and may not have
       // landed by the time the user navigates away). BUT don't publish it to

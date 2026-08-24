@@ -3,7 +3,7 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { CopyIcon, CheckIcon, CodeIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import type { Element } from 'hast'
 import rehypeHighlight from 'rehype-highlight'
@@ -120,61 +120,70 @@ function markdownUrlTransform(url: string, key: string, node: Element): string {
  * is escaped and displayed literally - the NFR-3 security property holds.
  */
 export default function Markdown({ content, sessionId = null }: MarkdownProps) {
+  // The components map must keep a stable identity across renders: with
+  // react-markdown's default `passKeys`, an inline object would change every
+  // element type's identity on each re-render and force React to remount the
+  // whole tree — including DiagramCard, resetting its viewer state. Memoize it
+  // so only a sessionId change recreates it.
+  const components = useMemo(
+    () => ({
+      pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+      a({ href, children, ...props }: React.ComponentPropsWithoutRef<'a'>) {
+        if (href?.startsWith('citation:')) {
+          const separator = href.lastIndexOf(':')
+          const encodedName = href.slice('citation:'.length, separator)
+          const section = href.slice(separator + 1)
+          try {
+            return (
+              <CitationDrawer
+                sessionId={sessionId}
+                documentName={decodeURIComponent(encodedName)}
+                section={section}
+              />
+            )
+          } catch {
+            return <span>{children}</span>
+          }
+        }
+        return (
+          <a href={href} {...props}>
+            {children}
+          </a>
+        )
+      },
+      code({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) {
+        const match = /language-(\w+)/.exec(className ?? '')
+        const text = String(children ?? '')
+        if (!match) {
+          return (
+            <code className={className} {...props}>
+              {text}
+            </code>
+          )
+        }
+        return <CodeBlock language={match[1]!} code={text} />
+      },
+      img({ src, alt, ...props }: React.ComponentPropsWithoutRef<'img'>) {
+        // Provider-rendered diagrams (SVG data URLs from diagram_render)
+        // render in a card with copy/export controls; other images stay plain.
+        if (typeof src === 'string' && isSvgDataUrl(src)) {
+          return <DiagramCard src={src} alt={alt} />
+        }
+        return (
+          <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
+        )
+      },
+    }),
+    [sessionId],
+  )
+
   return (
     <div className="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         urlTransform={markdownUrlTransform}
-        components={{
-          pre: ({ children }) => <>{children}</>,
-          a({ href, children, ...props }) {
-            if (href?.startsWith('citation:')) {
-              const separator = href.lastIndexOf(':')
-              const encodedName = href.slice('citation:'.length, separator)
-              const section = href.slice(separator + 1)
-              try {
-                return (
-                  <CitationDrawer
-                    sessionId={sessionId}
-                    documentName={decodeURIComponent(encodedName)}
-                    section={section}
-                  />
-                )
-              } catch {
-                return <span>{children}</span>
-              }
-            }
-            return (
-              <a href={href} {...props}>
-                {children}
-              </a>
-            )
-          },
-          code({ className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className ?? '')
-            const text = String(children ?? '')
-            if (!match) {
-              return (
-                <code className={className} {...props}>
-                  {text}
-                </code>
-              )
-            }
-            return <CodeBlock language={match[1]!} code={text} />
-          },
-          img({ src, alt, ...props }) {
-            // Provider-rendered diagrams (SVG data URLs from diagram_render)
-            // render in a card with copy/export controls; other images stay
-            // plain.
-            if (typeof src === 'string' && isSvgDataUrl(src)) {
-              return <DiagramCard src={src} alt={alt} />
-            }
-            return (
-              <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
-            )
-          },
-        }}
+        components={components}
       >
         {linkifyCitations(content)}
       </ReactMarkdown>

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
+import { findOwnedSession } from '@/lib/session-access'
 
 export const EMBEDDING_DIMENSION = 128
 export const MAX_RAG_CHUNKS = 6
@@ -51,11 +52,7 @@ export async function retrieveDocumentChunks(
   query: string,
   userId: string | null = null,
 ): Promise<RetrievedDocumentChunk[]> {
-  if (process.env.AUTH_DISABLED !== 'true' && !userId) return []
-  const session = await prisma.chatSession.findFirst({
-    where: { id: sessionId, ...(userId ? { userId } : {}) },
-    select: { id: true },
-  })
+  const session = await findOwnedSession(sessionId, userId)
   if (!session) return []
 
   const rows = await prisma.documentChunk.findMany({

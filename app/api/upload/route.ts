@@ -8,6 +8,9 @@ import {
   MAX_DOCUMENT_BYTES,
 } from '@/lib/documents'
 import { createEmbedding } from '@/lib/rag'
+import { errorResponse } from '@/lib/http'
+import { findOwnedSession } from '@/lib/session-access'
+import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,10 +25,6 @@ const DeleteSchema = z.object({
   sessionId: SessionIdSchema,
   documentId: z.string().trim().min(1).max(100),
 })
-
-function errorResponse(error: string, status = 400) {
-  return NextResponse.json({ error }, { status })
-}
 
 function isAllowedMime(
   extension: NonNullable<ReturnType<typeof getDocumentExtension>>,
@@ -42,17 +41,10 @@ function isAllowedMime(
   )
 }
 
-async function ownedSession(sessionId: string) {
-  const { getCurrentUserId } = await import('@/lib/auth-context')
-  const userId = await getCurrentUserId()
-  if (process.env.AUTH_DISABLED !== 'true' && !userId) return null
-  return prisma.chatSession.findFirst({
-    where: { id: sessionId, ...(userId ? { userId } : {}) },
-    select: { id: true },
-  })
-}
-
 export async function POST(request: Request) {
+  const guard = await guardRoute(request, ROUTE_GUARDS.upload)
+  if (!guard.ok) return guard.response
+
   let formData: FormData
   try {
     formData = await request.formData()
@@ -76,7 +68,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const session = await ownedSession(metadata.data.sessionId)
+    const session = await findOwnedSession(metadata.data.sessionId)
     if (!session) return errorResponse('Chat session not found.', 404)
 
     const bytes = new Uint8Array(await file.arrayBuffer())
@@ -115,7 +107,7 @@ export async function GET(request: Request) {
   if (!parsed.success) return errorResponse('A valid chat session is required.')
 
   try {
-    const session = await ownedSession(parsed.data)
+    const session = await findOwnedSession(parsed.data)
     if (!session) return errorResponse('Chat session not found.', 404)
     const documents = await prisma.document.findMany({
       where: { sessionId: session.id },
@@ -139,7 +131,7 @@ export async function DELETE(request: Request) {
   if (!parsed.success) return errorResponse('A valid session and document are required.')
 
   try {
-    const session = await ownedSession(parsed.data.sessionId)
+    const session = await findOwnedSession(parsed.data.sessionId)
     if (!session) return errorResponse('Chat session not found.', 404)
     await prisma.document.deleteMany({
       where: { id: parsed.data.documentId, sessionId: session.id },

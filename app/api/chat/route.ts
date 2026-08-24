@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
+import { errorResponse } from '@/lib/http'
+import { getLlmConfig } from '@/lib/llm-config'
 import { hasBuiltInToolIntent, runAgent, type AgentInputMessage } from '@/lib/agent'
 import { listMcpTools } from '@/lib/mcp-client'
 import {
@@ -10,6 +12,7 @@ import {
 import { listSkillTools } from '@/lib/skills/tools'
 import { DEFAULT_MAX_CONTEXT_TOKENS, estimateTokens, truncateHistory } from '@/lib/context'
 import { resolveModel, ModelKeySchema } from '@/lib/models'
+import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 import { getSessionRagContext } from '@/lib/rag'
 import {
   detectStructuredOutputKind,
@@ -35,6 +38,11 @@ const ChatRequestSchema = z.object({
   systemPrompt: z.string().max(2_000).optional(),
   sessionId: z.string().trim().min(1).max(100).optional(),
   model: ModelKeySchema.optional(),
+  // Optional per-user generation tuning (settings → Model & Generation).
+  // Validated against the same bounds as the preferences action so only
+  // well-formed values reach the provider.
+  temperature: z.number().min(0).max(1).optional(),
+  maxTokens: z.number().int().min(1).max(32768).optional(),
   structuredOutput: StructuredOutputKindSchema.optional(),
   // Per-session skill override; unknown ids are filtered by the registry.
   enabledSkills: z.array(z.string().trim().min(1).max(64)).max(8).optional(),
@@ -44,16 +52,20 @@ const ChatRequestSchema = z.object({
 })
 
 export async function POST(request: Request) {
-  // OPENROUTER_API_KEY is the preferred var for OpenRouter; OPENAI_API_KEY
-  // remains supported for other OpenAI-compatible endpoints.
-  const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY
+  // Security guardrails (shared lib/security.ts): reject cross-site requests,
+  // require a session, and rate-limit LLM calls per user (falling back to
+  // per-IP) — the chat endpoint is the main cost surface, so all checks run
+  // before any work.
+  const guard = await guardRoute(request, ROUTE_GUARDS.chat)
+  if (!guard.ok) return guard.response
+
+  // Shared provider config: OPENROUTER_API_KEY preferred, OPENAI_API_KEY
+  // supported for other OpenAI-compatible endpoints (see lib/llm-config.ts).
+  const { apiKey, baseUrl } = getLlmConfig()
   if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          'Server is not configured with an LLM API key (OPENROUTER_API_KEY or OPENAI_API_KEY).',
-      },
-      { status: 500 },
+    return errorResponse(
+      'Server is not configured with an LLM API key (OPENROUTER_API_KEY or OPENAI_API_KEY).',
+      500,
     )
   }
 
@@ -61,7 +73,7 @@ export async function POST(request: Request) {
   try {
     body = await request.json()
   } catch {
-    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+    return errorResponse('Invalid request body.')
   }
 
   const parsed = ChatRequestSchema.safeParse(body)
@@ -95,6 +107,16 @@ export async function POST(request: Request) {
   const skillInstructions = hasToolIntent ? getSkillSystemInstructions(enabledSkillIds) : ''
   const { getCurrentUserId } = await import('@/lib/auth-context')
   const userId = await getCurrentUserId()
+  // SaaS cost control: signed-in users are capped at their plan's daily LLM
+  // request limit (Free tier) or unlimited (Pro). Enforced before any RAG or
+  // provider work so an over-limit request fails fast.
+  if (userId) {
+    const { checkAndRecordUsage } = await import('@/lib/billing/usage')
+    const usage = await checkAndRecordUsage(userId)
+    if (!usage.ok) {
+      return errorResponse(usage.error, 429)
+    }
+  }
   let ragContext = ''
   let memoryContext = ''
   if (parsed.data.sessionId) {
@@ -188,14 +210,8 @@ export async function POST(request: Request) {
     modelMessages[lastUserIndex] = { role: 'user', content }
   }
 
-  // Default to OpenRouter when the OpenRouter key is configured, otherwise
-  // keep the OpenAI defaults. The model selector resolves stable UI keys here.
-  const usesOpenRouter = Boolean(process.env.OPENROUTER_API_KEY)
-  const baseUrl = (
-    process.env.OPENROUTER_BASE_URL ??
-    process.env.OPENAI_BASE_URL ??
-    (usesOpenRouter ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1')
-  ).replace(/\/+$/, '')
+  // The model selector resolves stable UI keys here; base URL + key come from
+  // the shared provider config above.
   const model = resolveModel(parsed.data.model)
 
   // OpenRouter uses X-Title for app attribution (optional, OpenRouter only).
@@ -233,6 +249,8 @@ export async function POST(request: Request) {
         model,
         stream: true,
         messages: [{ role: 'system', content: systemPrompt }, ...messagesForModel],
+        ...(parsed.data.temperature !== undefined ? { temperature: parsed.data.temperature } : {}),
+        ...(parsed.data.maxTokens !== undefined ? { max_tokens: parsed.data.maxTokens } : {}),
         ...(structuredOutput
           ? {
               response_format: {
@@ -249,7 +267,7 @@ export async function POST(request: Request) {
       signal: request.signal,
     })
   } catch {
-    return NextResponse.json({ error: 'Could not reach the LLM API.' }, { status: 502 })
+    return errorResponse('Could not reach the LLM API.', 502)
   }
 
   if (!upstream.ok || !upstream.body) {

@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   clearChatSession,
   getSessionSkills,
+  getUserPreferences,
   listChatSessions,
   renameChatSession,
   togglePinSession,
@@ -44,6 +45,10 @@ export default function ChatApp() {
   const [showArchived, setShowArchived] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelKey>(DEFAULT_MODEL_KEY)
+  // Per-user generation tuning from Settings (Model & Generation). Applied to
+  // every chat request; null = provider defaults.
+  const [temperature, setTemperature] = useState<number | null>(null)
+  const [maxCompletionTokens, setMaxCompletionTokens] = useState<number | null>(null)
   // Per-session skill override. null = use the full catalog (defaults).
   const [enabledSkills, setEnabledSkills] = useState<string[] | null>(null)
   // Override chosen before a session existed; applied + persisted the moment a
@@ -91,12 +96,28 @@ export default function ChatApp() {
   useEffect(() => {
     setSessionIdState(getSessionId())
     setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+    let storedModelKey: ModelKey | null = null
     try {
       const storedModel = ModelKeySchema.safeParse(localStorage.getItem('chat.model'))
-      if (storedModel.success) setSelectedModel(storedModel.data)
+      if (storedModel.success) storedModelKey = storedModel.data
     } catch {
       // Best-effort.
     }
+    // Load preferences: a locally stored model choice wins; otherwise the
+    // user's preferred default model applies. Generation tuning always rides
+    // along.
+    void getUserPreferences().then((result) => {
+      if (!result.ok) return
+      const preferred = result.data.preferredModel
+      const preferredKey = ModelKeySchema.safeParse(preferred)
+      if (storedModelKey !== null) {
+        setSelectedModel(storedModelKey)
+      } else if (preferredKey.success) {
+        setSelectedModel(preferredKey.data)
+      }
+      setTemperature(result.data.temperature)
+      setMaxCompletionTokens(result.data.maxCompletionTokens)
+    })
     void refreshSessions()
     setReady(true)
   }, [])
@@ -439,6 +460,8 @@ export default function ChatApp() {
             sessionId={sessionId}
             modelKey={selectedModel}
             enabledSkills={enabledSkills}
+            temperature={temperature}
+            maxCompletionTokens={maxCompletionTokens}
             onSessionChange={handleSessionChange}
             onConversationChanged={refreshSessions}
           />

@@ -141,9 +141,9 @@ describe('conversation persistence server actions', () => {
       branches: [original, fork],
       active: 0,
     })
-    expect(
-      await actions.setActiveBranch({ sessionId: 'sess-switch', active: 1 }),
-    ).toEqual({ ok: true })
+    expect(await actions.setActiveBranch({ sessionId: 'sess-switch', active: 1 })).toEqual({
+      ok: true,
+    })
 
     const loaded = await actions.getChatSession('sess-switch')
     expect(loaded).toEqual({
@@ -177,10 +177,7 @@ describe('conversation persistence server actions', () => {
   it('updates a message in place when content changes', async () => {
     const thread = threadFor('sess-c')
     await actions.saveChatMessages({ sessionId: 'sess-c', branches: [thread] })
-    const edited: ChatMessage[] = [
-      ...thread.slice(0, 2),
-      { ...thread[2]!, content: 'Are you ok?' },
-    ]
+    const edited: ChatMessage[] = [...thread.slice(0, 2), { ...thread[2]!, content: 'Are you ok?' }]
     await actions.saveChatMessages({ sessionId: 'sess-c', branches: [edited] })
 
     const loaded = await actions.getChatSession('sess-c')
@@ -540,7 +537,7 @@ describe('user preferences (calendar credentials)', () => {
     })
   })
 
-  it('round-trips profile, presets, and calendar credentials', async () => {
+  it('round-trips profile, presets, calendar credentials, and model tuning', async () => {
     vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
     expect(
       await prefsActions.updateUserPreferences({
@@ -549,6 +546,9 @@ describe('user preferences (calendar credentials)', () => {
         systemPromptPresets: '[{"id":"p1","name":"Expert","prompt":"Be expert"}]',
         googleCalendarId: 'primary',
         googleServiceAccountKey: VALID_KEY,
+        preferredModel: 'qwen-3-6',
+        temperature: 0.7,
+        maxCompletionTokens: 2048,
       }),
     ).toEqual({ ok: true })
 
@@ -561,8 +561,59 @@ describe('user preferences (calendar credentials)', () => {
         apiKey: 'sk-or-123',
         googleCalendarId: 'primary',
         googleServiceAccountKey: VALID_KEY,
+        preferredModel: 'qwen-3-6',
+        temperature: 0.7,
+        maxCompletionTokens: 2048,
       },
     })
+  })
+
+  it('rejects invalid model tuning values via the zod schema', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    expect(
+      await prefsActions.updateUserPreferences({ temperature: 1.5 } as Parameters<
+        typeof prefsActions.updateUserPreferences
+      >[0]),
+    ).toEqual({ ok: false, error: 'Invalid preferences.' })
+    expect(
+      await prefsActions.updateUserPreferences({ maxCompletionTokens: -5 } as Parameters<
+        typeof prefsActions.updateUserPreferences
+      >[0]),
+    ).toEqual({ ok: false, error: 'Invalid preferences.' })
+    expect(await prefsActions.updateUserPreferences({ preferredModel: 'not-a-model' })).toEqual({
+      ok: false,
+      error: 'Invalid preferences.',
+    })
+  })
+
+  it('clears model tuning with explicit null/defaults', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    await prefsActions.updateUserPreferences({
+      preferredModel: 'kimi-k3',
+      temperature: 0.2,
+      maxCompletionTokens: 1024,
+    })
+    expect(
+      await prefsActions.updateUserPreferences({
+        preferredModel: '',
+        temperature: 0,
+        maxCompletionTokens: 256,
+      }),
+    ).toEqual({ ok: true })
+    const loaded = await prefsActions.getUserPreferences()
+    expect(loaded.ok).toBe(true)
+    const data = (
+      loaded as {
+        data: {
+          preferredModel: string
+          temperature: number | null
+          maxCompletionTokens: number | null
+        }
+      }
+    ).data
+    expect(data.preferredModel).toBe('')
+    expect(data.temperature).toBe(0)
+    expect(data.maxCompletionTokens).toBe(256)
   })
 
   it('rejects a malformed service-account key before persisting anything', async () => {

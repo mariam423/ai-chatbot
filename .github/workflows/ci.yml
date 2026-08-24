@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint, Prettier, typecheck
+        run: npm run lint
+      - name: Unit & integration tests
+        run: npm test
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The e2e suite runs with auth disabled (chat requests are mocked, so no
+      # LLM key is needed). Provide the minimal env the production server and
+      # NextAuth require, then create the SQLite DB from the committed
+      # migrations. .env is gitignored, so write it here.
+      # STRIPE_WEBHOOK_SECRET enables the webhook route for e2e — the
+      # webhook-rate-limit spec signs events with exactly this value.
+      - name: Configure environment
+        run: |
+          echo "DATABASE_URL=\"file:./prisma/dev.db\"" > .env
+          echo "AUTH_DISABLED=true" >> .env
+          echo "AUTH_TRUST_HOST=true" >> .env
+          echo "AUTH_SECRET=${{ runner.os }}-ci-secret" >> .env
+          echo "STRIPE_WEBHOOK_SECRET=whsec_e2e_testing" >> .env
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+      - name: Install Playwright browsers
+        uses: playwright-community/install-browsers@main
+        with:
+          with-deps: true
+      - name: Run E2E suite (builds + starts the production app)
+        run: npm run test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

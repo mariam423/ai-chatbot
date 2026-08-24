@@ -28,6 +28,9 @@ function pref(overrides: Partial<UserPreference> = {}): UserPreference {
     systemPromptPresets: '[]',
     googleCalendarId: null,
     googleServiceAccountKey: null,
+    preferredModel: null,
+    temperature: null,
+    maxCompletionTokens: null,
     ...overrides,
   }
 }

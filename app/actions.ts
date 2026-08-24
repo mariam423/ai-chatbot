@@ -6,6 +6,12 @@ import { prisma } from '@/lib/db'
 import { getCurrentUserId } from '@/lib/auth-context'
 import { isValidSkillId } from '@/lib/skills/registry'
 import { exchangeGoogleAccessToken, parseGoogleServiceAccountKey } from '@/lib/skills/tools'
+import { ModelKeySchema } from '@/lib/models'
+import { getPlan, isOverDailyLimit, PLANS } from '@/lib/billing/plans'
+import {
+  createBillingPortalSession as createStripePortalSession,
+  createCheckoutSession as createStripeCheckoutSession,
+} from '@/lib/billing/stripe'
 import { ChatMessageSchema, type ChatMessage, type ChatSessionSummary } from '@/lib/types'
 
 /**
@@ -484,6 +490,12 @@ const UserPreferencesSchema = z.object({
   // pasted service-account JSON; empty string clears it.
   googleCalendarId: z.string().trim().max(200).optional().or(z.literal('')),
   googleServiceAccountKey: z.string().max(8000).optional().or(z.literal('')),
+  // Preferred default model (a lib/models.ts UI key; '' = provider default).
+  preferredModel: ModelKeySchema.optional().or(z.literal('')),
+  // Generation tuning applied to chat requests. Temperature is 0.0–1.0;
+  // maxCompletionTokens caps the model's completion length.
+  temperature: z.number().min(0).max(1).optional(),
+  maxCompletionTokens: z.number().int().min(1).max(32768).optional(),
 })
 
 const CALENDAR_LOOKUP_URL = 'https://www.googleapis.com/calendar/v3/calendars'
@@ -499,23 +511,27 @@ export async function getUserPreferences(): Promise<
         systemPromptPresets: string
         googleCalendarId: string
         googleServiceAccountKey: string
+        preferredModel: string
+        temperature: number | null
+        maxCompletionTokens: number | null
       }
     }
   | { ok: false; error: string }
 > {
   const userId = await getCurrentUserId()
+  const defaults = {
+    displayName: '',
+    avatarUrl: '',
+    apiKey: '',
+    systemPromptPresets: '[]',
+    googleCalendarId: '',
+    googleServiceAccountKey: '',
+    preferredModel: '',
+    temperature: null,
+    maxCompletionTokens: null,
+  }
   if (!userId) {
-    return {
-      ok: true,
-      data: {
-        displayName: '',
-        avatarUrl: '',
-        apiKey: '',
-        systemPromptPresets: '[]',
-        googleCalendarId: '',
-        googleServiceAccountKey: '',
-      },
-    }
+    return { ok: true, data: defaults }
   }
   try {
     const pref = await prisma.userPreference.findUnique({ where: { userId } })
@@ -528,6 +544,9 @@ export async function getUserPreferences(): Promise<
         systemPromptPresets: pref?.systemPromptPresets ?? '[]',
         googleCalendarId: pref?.googleCalendarId ?? '',
         googleServiceAccountKey: pref?.googleServiceAccountKey ?? '',
+        preferredModel: pref?.preferredModel ?? '',
+        temperature: pref?.temperature ?? null,
+        maxCompletionTokens: pref?.maxCompletionTokens ?? null,
       },
     }
   } catch {
@@ -543,6 +562,9 @@ export async function updateUserPreferences(input: {
   systemPromptPresets?: string
   googleCalendarId?: string
   googleServiceAccountKey?: string
+  preferredModel?: string
+  temperature?: number
+  maxCompletionTokens?: number
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = UserPreferencesSchema.safeParse(input)
   if (!parsed.success) {
@@ -568,6 +590,9 @@ export async function updateUserPreferences(input: {
         systemPromptPresets: data.systemPromptPresets ?? '[]',
         googleCalendarId: data.googleCalendarId ?? undefined,
         googleServiceAccountKey: data.googleServiceAccountKey ?? undefined,
+        preferredModel: data.preferredModel ?? undefined,
+        temperature: data.temperature ?? undefined,
+        maxCompletionTokens: data.maxCompletionTokens ?? undefined,
       },
       update: {
         ...(data.displayName !== undefined && { displayName: data.displayName || null }),
@@ -581,6 +606,13 @@ export async function updateUserPreferences(input: {
         }),
         ...(data.googleServiceAccountKey !== undefined && {
           googleServiceAccountKey: data.googleServiceAccountKey || null,
+        }),
+        ...(data.preferredModel !== undefined && {
+          preferredModel: data.preferredModel || null,
+        }),
+        ...(data.temperature !== undefined && { temperature: data.temperature }),
+        ...(data.maxCompletionTokens !== undefined && {
+          maxCompletionTokens: data.maxCompletionTokens,
         }),
       },
     })
@@ -644,5 +676,109 @@ export async function testGoogleCalendarConnection(): Promise<
       ok: false,
       error: error instanceof Error ? error.message : 'Could not reach Google Calendar.',
     }
+  }
+}
+
+/**
+ * Current billing status for the signed-in user: their plan, the plan's
+ * daily request limit, how many requests they've used today, and whether
+ * Stripe is configured (so the UI can hide billing when it isn't).
+ */
+export async function getBillingStatus(): Promise<
+  | {
+      ok: true
+      data: {
+        plan: string
+        planLabel: string
+        dailyLimit: number | null
+        usedToday: number
+        overLimit: boolean
+        stripeConfigured: boolean
+      }
+    }
+  | { ok: false; error: string }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) {
+    return {
+      ok: true,
+      data: {
+        plan: 'free',
+        planLabel: PLANS.free.label,
+        dailyLimit: PLANS.free.dailyChatRequests,
+        usedToday: 0,
+        overLimit: false,
+        stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO),
+      },
+    }
+  }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    const today = new Date().toISOString().slice(0, 10)
+    const usedToday = user?.usageDate === today ? user.usageCount : 0
+    const plan = getPlan(user?.plan)
+    return {
+      ok: true,
+      data: {
+        plan: plan.key,
+        planLabel: plan.label,
+        dailyLimit: plan.dailyChatRequests,
+        usedToday,
+        overLimit: isOverDailyLimit(user?.plan, usedToday),
+        stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO),
+      },
+    }
+  } catch {
+    return { ok: false, error: 'Could not load billing status.' }
+  }
+}
+
+/** Start Stripe checkout for the Pro plan. Redirect the client to `data.url`. */
+export async function upgradeToPro(): Promise<
+  | { ok: true; url: string; notConfigured?: boolean }
+  | { ok: false; error: string; notConfigured?: boolean }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'You must be signed in to upgrade.' }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  const result = await createStripeCheckoutSession({
+    customerId: user?.stripeCustomerId ?? null,
+    userId,
+    email: user?.email ?? '',
+  })
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.error ?? 'Could not start checkout.',
+      notConfigured: result.notConfigured,
+    }
+  }
+  return { ok: true, url: result.data!.url, notConfigured: result.notConfigured }
+}
+
+/** Open the Stripe billing portal so the user can manage/cancel their plan. */
+export async function openBillingPortal(): Promise<
+  | { ok: true; url: string; notConfigured?: boolean }
+  | { ok: false; error: string; notConfigured?: boolean }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'You must be signed in to manage billing.' }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    const customerId = user?.stripeCustomerId
+    if (!customerId) {
+      return { ok: false, error: 'No Stripe customer on file. Upgrade to Pro first.' }
+    }
+    const result = await createStripePortalSession({ customerId })
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: result.error ?? 'Could not open billing portal.',
+        notConfigured: result.notConfigured,
+      }
+    }
+    return { ok: true, url: result.data!.url, notConfigured: result.notConfigured }
+  } catch {
+    return { ok: false, error: 'Could not load billing details.' }
   }
 }

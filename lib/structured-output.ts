@@ -9,7 +9,7 @@ const CitationSchema = z.object({
   quote: z.string().max(2_000),
 })
 
-const ChartPointSchema = z.object({
+export const ChartPointSchema = z.object({
   timestamp: z.string().min(1).max(200),
   value: z.number().finite(),
 })

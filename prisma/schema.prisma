@@ -16,12 +16,21 @@ model User {
   image         String?
   passwordHash  String?
   emailVerified DateTime?
-  createdAt     DateTime  @default(now())
-  accounts      Account[]
-  sessions      Session[]
-  preference    UserPreference?
-  passwordResetTokens PasswordResetToken[]
-  memoryRecords      MemoryRecord[]
+  // SaaS plan: "free" | "pro". Set via the Stripe billing webhook when the
+  // user completes checkout / updates their subscription (see lib/billing).
+  plan                    String   @default("free")
+  stripeCustomerId        String?
+  stripeSubscriptionId    String?
+  // Daily LLM usage counter — the free tier caps requests per day; the Pro
+  // tier is unlimited (see lib/billing/plans.ts + the /api/chat route).
+  usageCount              Int      @default(0)
+  usageDate               String?
+  createdAt               DateTime @default(now())
+  accounts                Account[]
+  sessions                Session[]
+  preference              UserPreference?
+  passwordResetTokens     PasswordResetToken[]
+  memoryRecords           MemoryRecord[]
 
   @@map("users")
 }
@@ -140,8 +149,10 @@ model DocumentChunk {
 }
 
 /// Per-user preferences: display name, avatar URL, personal API key,
-/// custom system prompt presets stored as JSON, and the Google Calendar
-/// service-account key (JSON) used by the schedule_block skill tool.
+/// custom system prompt presets stored as JSON, the Google Calendar
+/// service-account key (JSON) used by the schedule_block skill tool, the
+/// preferred default model (UI model key, see lib/models.ts), and generation
+/// tuning (temperature + max completion tokens) applied to chat requests.
 model UserPreference {
   id                        String  @id @default(cuid())
   userId                    String  @unique
@@ -151,6 +162,10 @@ model UserPreference {
   systemPromptPresets       String  @default("[]")
   googleCalendarId          String?
   googleServiceAccountKey   String?
+  // UI model key from lib/models.ts (e.g. "qwen-3-6"); null = provider default.
+  preferredModel            String?
+  temperature               Float?
+  maxCompletionTokens       Int?
   user                      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")

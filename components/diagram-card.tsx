@@ -10,6 +10,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { decodeSvgDataUrl, svgFilename } from '@/lib/svg-data-url'
 import DiagramViewer from './diagram-viewer'
 
@@ -211,9 +212,19 @@ export default function DiagramCard({ src, alt }: DiagramCardProps) {
         />
       </div>
 
-      <AnimatePresence>
-        {viewerOpen && <DiagramViewer src={src} alt={alt} onClose={closeViewer} />}
-      </AnimatePresence>
+      {/* Rendered through a portal: .vt-chat-shell sets view-transition-name,
+          which makes <main> a containing block for fixed descendants, so a
+          plain fixed overlay would be trapped inside the chat area and never
+          cover the sidebar. Portaling to <body> keeps the viewer truly
+          full-screen; AnimatePresence stays mounted inside the portal so the
+          exit animation still plays (React tree, not DOM, drives it). */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {viewerOpen && <DiagramViewer src={src} alt={alt} onClose={closeViewer} />}
+          </AnimatePresence>,
+          document.body,
+        )}
     </figure>
   )
 }

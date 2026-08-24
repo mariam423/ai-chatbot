@@ -57,8 +57,11 @@ test.describe('accessibility', () => {
     await expect(firstSession).toHaveAttribute('aria-current', 'page')
 
     const collapseToggle = sidebar.getByRole('button', { name: 'Collapse sidebar' })
+    // The Archive toggle sits between the search box and the session list in
+    // DOM/tab order, so the first session is reached AFTER it.
+    const archiveToggle = sidebar.getByRole('button', { name: 'Archive' })
 
-    await test.step('Tab walks skip link → collapse toggle → New Chat → search → first session', async () => {
+    await test.step('Tab walks skip link → collapse toggle → New Chat → search → archive → first session', async () => {
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(skipLink)
       await page.keyboard.press('Tab')
@@ -68,10 +71,14 @@ test.describe('accessibility', () => {
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(searchInput)
       await page.keyboard.press('Tab')
+      await expectVisibleFocusRing(archiveToggle)
+      await page.keyboard.press('Tab')
       await expectVisibleFocusRing(firstSession)
     })
 
-    await test.step('Shift+Tab walks back up the sidebar', async () => {
+    await test.step('Shift+Tab walks back up the sidebar (archive → search → …)', async () => {
+      await page.keyboard.press('Shift+Tab')
+      await expect(archiveToggle).toBeFocused()
       await page.keyboard.press('Shift+Tab')
       await expect(searchInput).toBeFocused()
       await page.keyboard.press('Shift+Tab')
