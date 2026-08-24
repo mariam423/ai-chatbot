@@ -37,6 +37,11 @@ export default function ChatApp() {
   const { data: session } = useSession()
   const [sessionId, setSessionIdState] = useState<string | null>(null)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
+  // Bumped whenever the user starts a new chat (or deletes the active session)
+  // while `sessionId` is already null — Chat's [sessionId] restore effect won't
+  // re-run in that case, so the reset signal tells it to clear the thread
+  // explicitly and invalidate any in-flight persist/restore work.
+  const [resetNonce, setResetNonce] = useState(0)
   const [ready, setReady] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -131,6 +136,9 @@ export default function ChatApp() {
       clearSessionId()
       clearThread()
       pendingSkillsRef.current = null
+      // New chat while no session is active: Chat's [sessionId] restore effect
+      // won't re-run (the id didn't change), so signal it to reset the thread.
+      setResetNonce((nonce) => nonce + 1)
     }
     // Start blank; the skill-load effect below fetches the real override.
     setEnabledSkills(null)
@@ -458,6 +466,7 @@ export default function ChatApp() {
         {ready && (
           <Chat
             sessionId={sessionId}
+            resetNonce={resetNonce}
             modelKey={selectedModel}
             enabledSkills={enabledSkills}
             temperature={temperature}

@@ -32,9 +32,23 @@ export const dynamic = 'force-dynamic'
 
 const SYSTEM_PROMPT = 'You are a helpful assistant.'
 
+/**
+ * Hard cap on the raw request body, checked before buffering: the per-field
+ * zod caps bound the parsed payload (history + media), this rejects an
+ * oversized body up front so `request.json()` never buffers something huge.
+ */
+const MAX_CHAT_BODY_BYTES = 25 * 1024 * 1024
+
+// Bounded wire message for the route: the shared ChatWireMessageSchema caps
+// shape, this adds a content ceiling so a client cannot push an unbounded
+// message into memory / the upstream request.
+const ChatRequestMessageSchema = ChatWireMessageSchema.extend({
+  content: z.string().max(50_000),
+})
+
 /** Request body schema for text, model, RAG, structured output, and vision input. */
 const ChatRequestSchema = z.object({
-  messages: z.array(ChatWireMessageSchema).min(1),
+  messages: z.array(ChatRequestMessageSchema).min(1).max(200),
   systemPrompt: z.string().max(2_000).optional(),
   sessionId: z.string().trim().min(1).max(100).optional(),
   model: ModelKeySchema.optional(),
@@ -67,6 +81,11 @@ export async function POST(request: Request) {
       'Server is not configured with an LLM API key (OPENROUTER_API_KEY or OPENAI_API_KEY).',
       500,
     )
+  }
+
+  const declaredLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_CHAT_BODY_BYTES) {
+    return errorResponse('Request body too large.', 413)
   }
 
   let body: unknown

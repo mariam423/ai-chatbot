@@ -34,6 +34,9 @@
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
+  },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.3.0",
     "@hugeicons/react": "^1.1.10",

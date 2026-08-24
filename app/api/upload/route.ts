@@ -45,6 +45,13 @@ export async function POST(request: Request) {
   const guard = await guardRoute(request, ROUTE_GUARDS.upload)
   if (!guard.ok) return guard.response
 
+  // Reject oversized multipart bodies before formData() buffers them (the
+  // 10 MB file cap is enforced after parsing; this is the fast pre-check).
+  const declaredLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > 15 * 1024 * 1024) {
+    return errorResponse('Upload too large.', 413)
+  }
+
   let formData: FormData
   try {
     formData = await request.formData()
@@ -121,6 +128,12 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  // State-changing endpoint: same CSRF + rate-limit guard as POST (cross-
+  // origin browser DELETEs are already blocked by the absent CORS headers;
+  // this is the defense-in-depth + shared-bucket consistency layer).
+  const guard = await guardRoute(request, ROUTE_GUARDS.upload)
+  if (!guard.ok) return guard.response
+
   let body: unknown
   try {
     body = await request.json()
