@@ -1,7 +1,23 @@
 import type { Metadata } from 'next'
+import { Inter, Space_Grotesk } from 'next/font/google'
 import SessionProvider from '@/components/session-provider'
 import { JSON_LD } from '@/lib/seo'
 import './globals.css'
+
+// Premium typography (Cyber Emerald & Obsidian Gold design system): Inter for
+// UI/body text, Space Grotesk for headings. Self-hosted at build time via
+// next/font — no runtime network dependency.
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+})
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-space-grotesk',
+  display: 'swap',
+})
 
 const APP_NAME = process.env.APP_NAME ?? 'Chatbot'
 const APP_DESCRIPTION =
@@ -51,7 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
         />
       </head>
-      <body>
+      <body className={`${inter.variable} ${spaceGrotesk.variable}`}>
         <SessionProvider>
           <a href="#main" className="skip-link">
             Skip to content

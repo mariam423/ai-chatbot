@@ -524,7 +524,7 @@ export default function Chat({
                     icon={GitBranchIcon}
                     size={11}
                     strokeWidth={1.5}
-                    className={active ? 'text-cyan-500' : 'text-[var(--text-muted)]'}
+                    className={active ? 'text-emerald-500' : 'text-[var(--text-muted)]'}
                   />
                   v{i + 1}
                   <span className="text-[10px] text-[var(--text-tertiary)]">
@@ -551,7 +551,7 @@ export default function Chat({
                 icon={RefreshIcon}
                 size={20}
                 strokeWidth={1.5}
-                className="text-cyan-400"
+                className="text-emerald-400"
               />
             </div>
             <p className="text-center text-sm font-medium text-[var(--text-secondary)]">
@@ -650,7 +650,7 @@ export default function Chat({
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                <span className="inline-block size-1.5 animate-pulse rounded-full bg-cyan-400" />
+                <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400" />
                 <span>Generating...</span>
               </div>
               <motion.button
@@ -732,7 +732,7 @@ export default function Chat({
                 icon={AiSparklesIcon}
                 size={16}
                 strokeWidth={1.5}
-                className={systemPrompt ? 'text-cyan-500' : ''}
+                className={systemPrompt ? 'text-emerald-500' : ''}
               />
               <span className="hidden max-w-[100px] truncate sm:inline">{activePresetName}</span>
             </motion.button>
@@ -771,7 +771,7 @@ export default function Chat({
                     <span className="size-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
                     <span className="truncate font-medium">Default</span>
                     {!systemPrompt && (
-                      <span className="ml-auto text-[10px] text-cyan-500">Active</span>
+                      <span className="ml-auto text-[10px] text-emerald-500">Active</span>
                     )}
                   </button>
                   {/* Built-in presets */}
@@ -792,10 +792,10 @@ export default function Chat({
                             : 'var(--text-secondary)',
                       }}
                     >
-                      <span className="size-1.5 shrink-0 rounded-full bg-cyan-500" />
+                      <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
                       <span className="truncate font-medium">{preset.name}</span>
                       {systemPrompt === preset.prompt && (
-                        <span className="ml-auto text-[10px] text-cyan-500">Active</span>
+                        <span className="ml-auto text-[10px] text-emerald-500">Active</span>
                       )}
                     </button>
                   ))}
@@ -826,10 +826,10 @@ export default function Chat({
                                 : 'var(--text-secondary)',
                           }}
                         >
-                          <span className="size-1.5 shrink-0 rounded-full bg-cyan-400" />
+                          <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" />
                           <span className="truncate font-medium">{preset.name}</span>
                           {systemPrompt === preset.prompt && (
-                            <span className="ml-auto text-[10px] text-cyan-500">Active</span>
+                            <span className="ml-auto text-[10px] text-emerald-500">Active</span>
                           )}
                         </button>
                       ))}
@@ -895,13 +895,14 @@ export default function Chat({
               whileHover={
                 reducedMotion
                   ? undefined
-                  : { scale: 1.02, boxShadow: '0 0 20px rgba(6,182,212),0.25)' }
+                  : { scale: 1.02, boxShadow: '0 0 20px rgba(16,185,129,0.35)' }
               }
               whileTap={reducedMotion ? undefined : { scale: 0.98 }}
               className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-950 transition-all disabled:cursor-not-allowed disabled:opacity-30"
               style={{
-                background: 'linear-gradient(to right, #06b6d4, #0891b2)',
-                boxShadow: '0 4px 14px 0 rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+                background: 'linear-gradient(to right, #10b981, #0d9488)',
+                boxShadow:
+                  '0 4px 14px 0 rgba(16,185,129,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
               }}
             >
               <HugeiconsIcon icon={SendIcon} size={16} strokeWidth={1.5} />

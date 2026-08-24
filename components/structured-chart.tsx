@@ -36,7 +36,7 @@ export default function StructuredChart({ points }: { points: ChartPoint[] }) {
               color: 'var(--text-primary)',
             }}
           />
-          <Line type="monotone" dataKey="value" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
+          <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
         </LineChart>
       </ResponsiveContainer>
     </div>

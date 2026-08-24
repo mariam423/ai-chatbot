@@ -13,6 +13,28 @@ Conversation data, uploaded document metadata, extracted chunks, and serialized
 vector embeddings are persisted in SQLite. The app is authenticated by default;
 `AUTH_DISABLED=true` enables the anonymous test/local-development mode.
 
+## Design system
+
+- **Palette: "Cyber Emerald & Obsidian Gold"** — `app/globals.css` owns the full
+  token set: green-tinged obsidian surfaces (dark) / warm paper (light) with an
+  emerald primary accent (`--accent`), a reserved gold (`--gold`) used only for
+  the brand mark and pinned/highlight states, emerald focus rings, and a dark
+  emerald-tinted code syntax theme (`.code-block .hljs` overrides the imported
+  github-dark-dimmed theme — code blocks stay dark in both app themes). Light
+  and dark are the same tokens under `:root` / `.dark`; components consume them
+  via `var(--...)` inline styles or Tailwind `emerald-*` classes (the old
+  cyan-* classes were fully replaced).
+- **Typography** — Inter for body/UI text and Space Grotesk for headings,
+  self-hosted at build time via `next/font` in `app/layout.tsx`
+  (`--font-inter` / `--font-space-grotesk`); headings across the app inherit
+  the display face via a global `h1–h4` rule.
+- **Motion** — Framer Motion micro-interactions: message-bubble entrances,
+  the sliding sidebar active indicator (`layoutId="sidebar-active-indicator"`
+  springs between sessions), hover/tap scaling, and the streaming pulse bar —
+  all gated on `prefers-reduced-motion`.
+- **Visual regression** — `e2e/visual.spec.ts` snapshots encode the palette;
+  regenerate with `--update-snapshots` after any intentional visual change.
+
 ## Application components
 
 - **`app/api/chat/route.ts`** — Validated chat endpoint. It accepts text

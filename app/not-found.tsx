@@ -17,7 +17,7 @@ export default function NotFound() {
           icon={SearchCircleIcon}
           size={20}
           strokeWidth={1.5}
-          className="text-cyan-400"
+          className="text-emerald-400"
         />
       </div>
       <p className="font-mono text-xs font-semibold tracking-widest text-[var(--text-muted)] uppercase">
@@ -30,7 +30,7 @@ export default function NotFound() {
       <Link
         href="/"
         className="mt-5 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-950 transition-opacity hover:opacity-90"
-        style={{ background: 'linear-gradient(to right, #06b6d4, #0891b2)' }}
+        style={{ background: 'linear-gradient(to right, #10b981, #0d9488)' }}
       >
         Back to chat
       </Link>

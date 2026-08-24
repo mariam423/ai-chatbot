@@ -40,7 +40,7 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
     .map((message) => {
       const label = roleLabel[message.role] ?? message.role
       const side = message.role === 'user' ? 'right' : 'left'
-      const roleColor = message.role === 'user' ? '#0e7490' : '#0b7285'
+      const roleColor = message.role === 'user' ? '#0f766e' : '#047857'
       return `
         <section class="turn ${side}">
           <div class="role" style="color:${roleColor}">${label}</div>
@@ -77,7 +77,7 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
         border-radius: 0.75rem; padding: 0.75rem 1rem; margin: 0;
         font-family: inherit; font-size: 0.875rem; line-height: 1.55;
       }
-      .turn.left pre { background: #ecfeff; border-color: #cffafe; }
+      .turn.left pre { background: #ecfdf5; border-color: #d1fae5; }
     </style>
   </head>
   <body>

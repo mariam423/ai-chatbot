@@ -377,7 +377,7 @@ export default function CommandPalette({
                           strokeWidth={1.5}
                           className={
                             session.id === activeSessionId
-                              ? 'text-cyan-500'
+                              ? 'text-emerald-500'
                               : 'text-[var(--text-muted)]'
                           }
                         />
@@ -387,7 +387,7 @@ export default function CommandPalette({
                             icon={PinIcon}
                             size={10}
                             strokeWidth={1.5}
-                            className="shrink-0 text-cyan-500"
+                            className="shrink-0 text-emerald-500"
                           />
                         )}
                         {session.archived && (

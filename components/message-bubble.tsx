@@ -93,7 +93,7 @@ export default function MessageBubble({
               <button
                 type="submit"
                 aria-label="Save edit"
-                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-cyan-500 transition-colors hover:bg-cyan-500/10"
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-500/10"
               >
                 <HugeiconsIcon icon={CheckIcon} size={14} strokeWidth={2} />
               </button>
@@ -134,14 +134,14 @@ export default function MessageBubble({
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
     >
       <div
-        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/10 border border-cyan-500/20"
-        style={{ boxShadow: '0 2px 10px rgba(6,182,212,0.3)' }}
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20"
+        style={{ boxShadow: '0 2px 10px rgba(16,185,129,0.3)' }}
       >
         <HugeiconsIcon
           icon={BotMessageSquareIcon}
           size={13}
           strokeWidth={1.5}
-          className="text-cyan-400"
+          className="text-emerald-400"
         />
       </div>
       <div
@@ -157,13 +157,13 @@ export default function MessageBubble({
       >
         {message.content === '' ? (
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block size-1.5 animate-pulse rounded-full bg-cyan-400" />
+            <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400" />
             <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-cyan-400"
+              className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
               style={{ animationDelay: '0.15s' }}
             />
             <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-cyan-400"
+              className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
               style={{ animationDelay: '0.3s' }}
             />
           </span>

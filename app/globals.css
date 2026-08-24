@@ -3,35 +3,53 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ─── Theme Variables ─── */
+/* ─── Theme Variables ─────────────────────────────────────────────────────────
+   Palette: "Cyber Emerald & Obsidian Gold" — deep green-tinged obsidian
+   surfaces, emerald primary accent with soft glows, and a warm gold reserved
+   for brand marks and pinned/highlight states. Every color is a token here so
+   a future palette shift stays a variables-only change.
+   ────────────────────────────────────────────────────────────────────────── */
 :root {
-  /* Surfaces */
-  --bg-deep: #f8f9fc;
+  /* Typography (next/font variables land on <body> via layout.tsx) */
+  --font-sans:
+    var(--font-inter), 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-display:
+    var(--font-space-grotesk), 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* Surfaces — warm paper light theme */
+  --bg-deep: #f5f7f4;
   --bg-card: #ffffff;
-  --bg-surface: #f1f3f9;
-  --bg-elevated: #ebedf5;
-  --bg-input: rgba(0, 0, 0, 0.03);
-  --bg-input-hover: rgba(0, 0, 0, 0.05);
+  --bg-surface: #edf1ec;
+  --bg-elevated: #e4e9e2;
+  --bg-input: rgba(0, 0, 0, 0.035);
+  --bg-input-hover: rgba(0, 0, 0, 0.06);
 
   /* Text */
-  --text-primary: #18181b;
-  --text-secondary: #52525b;
-  --text-tertiary: #a1a1aa;
-  --text-muted: #d4d4d8;
+  --text-primary: #1a201c;
+  --text-secondary: #4a554e;
+  --text-tertiary: #7c877f;
+  --text-muted: #adb5ae;
 
   /* Borders */
-  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-subtle: rgba(0, 0, 0, 0.07);
   --border-medium: rgba(0, 0, 0, 0.1);
-  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-strong: rgba(0, 0, 0, 0.16);
 
-  /* Accent */
-  --accent: #0891b2;
-  --accent-soft: rgba(8, 145, 178, 0.08);
-  --accent-medium: rgba(8, 145, 178, 0.15);
-  --accent-glow: rgba(8, 145, 178, 0.2);
+  /* Accent — emerald */
+  --accent: #059669;
+  --accent-soft: rgba(5, 150, 105, 0.08);
+  --accent-medium: rgba(5, 150, 105, 0.14);
+  --accent-glow: rgba(5, 150, 105, 0.18);
+
+  /* Gold — reserved for brand + pinned/highlight states */
+  --gold: #a16207;
+  --gold-soft: rgba(161, 98, 7, 0.1);
+  --gold-border: rgba(161, 98, 7, 0.26);
+  --gold-glow: rgba(161, 98, 7, 0.18);
 
   /* Glass */
-  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(0, 0, 0, 0.06);
   --glass-border-hover: rgba(0, 0, 0, 0.1);
   --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
@@ -41,25 +59,25 @@
   --sidebar-border: rgba(0, 0, 0, 0.06);
 
   /* Markdown */
-  --md-text: #3f3f46;
-  --md-heading: #18181b;
-  --md-link: #0891b2;
-  --md-link-hover: #0e7490;
-  --md-code-bg: rgba(8, 145, 178, 0.06);
-  --md-code-border: rgba(8, 145, 178, 0.12);
-  --md-blockquote: #71717a;
+  --md-text: #414a43;
+  --md-heading: #161b17;
+  --md-link: #047857;
+  --md-link-hover: #065f46;
+  --md-code-bg: rgba(5, 150, 105, 0.07);
+  --md-code-border: rgba(5, 150, 105, 0.14);
+  --md-blockquote: #6b756d;
   --md-table-header: rgba(0, 0, 0, 0.04);
   --md-table-border: rgba(0, 0, 0, 0.08);
 
-  /* Code blocks */
-  --code-bg: #0f172a;
-  --code-header-bg: #0b1220;
-  --code-border: #1e293b;
-  --code-text: #cbd5e1;
+  /* Code blocks — obsidian in BOTH themes (premium dark code surface) */
+  --code-bg: #0b100e;
+  --code-header-bg: #0d1410;
+  --code-border: #1b2b21;
+  --code-text: #d8e2db;
 
   /* Skeleton */
   --skeleton-bg: rgba(0, 0, 0, 0.06);
-  --skeleton-shimmer: rgba(8, 145, 178, 0.05);
+  --skeleton-shimmer: rgba(5, 150, 105, 0.05);
 
   /* Status */
   --error-bg: rgba(239, 68, 68, 0.06);
@@ -67,87 +85,91 @@
   --error-text: #dc2626;
 
   /* Overlay */
-  --overlay: rgba(0, 0, 0, 0.4);
+  --overlay: rgba(0, 0, 0, 0.45);
 
   /* Focus ring */
-  --focus-ring: rgba(6, 182, 212, 0.45);
-  --focus-ring-soft: rgba(6, 182, 212, 0.12);
+  --focus-ring: rgba(5, 150, 105, 0.45);
+  --focus-ring-soft: rgba(5, 150, 105, 0.12);
 }
 
 .dark {
-  --bg-deep: #0d1117;
-  --bg-card: #10161b;
-  --bg-surface: #151c22;
-  --bg-elevated: #1a232b;
-  --bg-input: rgba(255, 255, 255, 0.04);
-  --bg-input-hover: rgba(255, 255, 255, 0.07);
+  /* Surfaces — obsidian, green-tinged near-black */
+  --bg-deep: #0a0f0d;
+  --bg-card: #0e1512;
+  --bg-surface: #131b17;
+  --bg-elevated: #18221b;
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-input-hover: rgba(255, 255, 255, 0.08);
 
-  --text-primary: #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --text-tertiary: #71717a;
-  --text-muted: #52525b;
+  --text-primary: #e9efeb;
+  --text-secondary: #a3b3aa;
+  --text-tertiary: #6e8075;
+  --text-muted: #46554c;
 
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-medium: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-medium: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-  --accent: #22d3ee;
-  --accent-soft: rgba(34, 211, 238, 0.08);
-  --accent-medium: rgba(34, 211, 238, 0.15);
-  --accent-glow: rgba(6, 182, 212, 0.2);
+  --accent: #34d399;
+  --accent-soft: rgba(52, 211, 153, 0.08);
+  --accent-medium: rgba(52, 211, 153, 0.16);
+  --accent-glow: rgba(52, 211, 153, 0.22);
 
-  --glass-bg: rgba(17, 24, 39, 0.4);
-  --glass-border: rgba(255, 255, 255, 0.05);
-  --glass-border-hover: rgba(255, 255, 255, 0.12);
-  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --gold: #e8c15a;
+  --gold-soft: rgba(232, 193, 90, 0.12);
+  --gold-border: rgba(232, 193, 90, 0.28);
+  --gold-glow: rgba(232, 193, 90, 0.18);
 
-  --sidebar-bg: rgba(17, 24, 39, 0.4);
+  --glass-bg: rgba(13, 19, 16, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-border-hover: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+  --sidebar-bg: rgba(9, 14, 12, 0.65);
   --sidebar-border: rgba(255, 255, 255, 0.05);
 
-  --md-text: #d4d4d8;
-  --md-heading: #fafafa;
-  --md-link: #22d3ee;
-  --md-link-hover: #67e8f9;
-  --md-code-bg: rgba(34, 211, 238, 0.08);
-  --md-code-border: rgba(34, 211, 238, 0.14);
-  --md-blockquote: #71717a;
+  --md-text: #cfd9d2;
+  --md-heading: #f3f7f4;
+  --md-link: #34d399;
+  --md-link-hover: #6ee7b7;
+  --md-code-bg: rgba(52, 211, 153, 0.08);
+  --md-code-border: rgba(52, 211, 153, 0.16);
+  --md-blockquote: #6e8075;
   --md-table-header: rgba(255, 255, 255, 0.04);
-  --md-table-border: rgba(255, 255, 255, 0.06);
+  --md-table-border: rgba(255, 255, 255, 0.07);
 
-  --code-bg: #0f172a;
-  --code-header-bg: #0b1220;
-  --code-border: #1e293b;
-  --code-text: #cbd5e1;
+  --skeleton-bg: rgba(30, 45, 36, 0.7);
+  --skeleton-shimmer: rgba(52, 211, 153, 0.07);
 
-  --skeleton-bg: rgba(28, 38, 56, 0.7);
-  --skeleton-shimmer: rgba(34, 211, 238, 0.06);
-
-  --error-bg: rgba(239, 68, 68, 0.08);
-  --error-border: rgba(239, 68, 68, 0.2);
+  --error-bg: rgba(248, 113, 113, 0.08);
+  --error-border: rgba(248, 113, 113, 0.22);
   --error-text: #fca5a5;
 
-  --overlay: rgba(0, 0, 0, 0.6);
+  --overlay: rgba(0, 0, 0, 0.62);
 
-  --focus-ring: rgba(34, 211, 238, 0.45);
-  --focus-ring-soft: rgba(34, 211, 238, 0.12);
+  --focus-ring: rgba(52, 211, 153, 0.5);
+  --focus-ring-soft: rgba(52, 211, 153, 0.14);
 }
 
 /* ─── Body ─── */
 body {
-  font-family:
-    'Inter',
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
   @apply antialiased;
   background-color: var(--bg-deep);
   color: var(--text-primary);
   font-feature-settings: 'ss01', 'ss02', 'cv01';
+  letter-spacing: -0.011em;
+}
+
+/* Display type — Space Grotesk for headings across the app (markdown headings
+   included), giving the UI a distinct editorial voice instead of the generic
+   rounded-UI look. */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 /* ─── Autofill ─── */
@@ -176,7 +198,7 @@ select:-webkit-autofill:focus {
   outline-offset: 2px;
 }
 
-/* ─── Cyan glow focus ring utility ─── */
+/* ─── Emerald glow focus ring utility ─── */
 .focus-glow {
   transition:
     box-shadow 0.2s ease,
@@ -226,7 +248,7 @@ select:-webkit-autofill:focus {
   z-index: 50;
   transform: translateY(-200%);
   transition: transform 150ms ease-in-out;
-  @apply rounded-xl bg-cyan-600 px-4 py-2 text-sm font-medium text-white;
+  @apply rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white;
 }
 .skip-link:focus {
   transform: translateY(0);
@@ -357,6 +379,7 @@ select:-webkit-autofill:focus {
 .markdown a {
   @apply font-medium underline underline-offset-2;
   color: var(--md-link);
+  text-decoration-color: var(--accent-medium);
 }
 .markdown a:hover {
   color: var(--md-link-hover);
@@ -402,6 +425,68 @@ select:-webkit-autofill:focus {
 }
 .code-block pre {
   color: var(--code-text);
+}
+
+/* ─── Code syntax theme (emerald-tinted, obsidian surface) ───
+   Code blocks are always dark, so a single override covers both app themes.
+   Overrides the github-dark-dimmed import with the Cyber Emerald palette. */
+.code-block .hljs {
+  color: var(--code-text);
+  background: transparent;
+}
+.code-block .hljs-comment,
+.code-block .hljs-quote {
+  color: #5d7a66;
+  font-style: italic;
+}
+.code-block .hljs-keyword,
+.code-block .hljs-selector-tag,
+.code-block .hljs-literal,
+.code-block .hljs-doctag {
+  color: #7ee0b0;
+}
+.code-block .hljs-string,
+.code-block .hljs-regexp,
+.code-block .hljs-addition {
+  color: #c9e6a4;
+}
+.code-block .hljs-number,
+.code-block .hljs-symbol,
+.code-block .hljs-bullet {
+  color: #f2d68e;
+}
+.code-block .hljs-title,
+.code-block .hljs-section {
+  color: #f0c674;
+}
+.code-block .hljs-type,
+.code-block .hljs-class .hljs-title,
+.code-block .hljs-attribute {
+  color: #7fd7b0;
+}
+.code-block .hljs-built_in,
+.code-block .hljs-builtin-name,
+.code-block .hljs-variable,
+.code-block .hljs-template-variable {
+  color: #a3d977;
+}
+.code-block .hljs-meta,
+.code-block .hljs-selector-attr,
+.code-block .hljs-selector-pseudo {
+  color: #6e8075;
+}
+.code-block .hljs-deletion {
+  color: #ef9a9a;
+}
+.code-block .hljs-link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.code-block .hljs-strong {
+  font-weight: 700;
+}
+.code-block .hljs-emphasis {
+  font-style: italic;
 }
 
 /* ─── View Transitions ─── */

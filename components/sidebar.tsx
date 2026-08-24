@@ -111,6 +111,7 @@ function SessionItem({
   onToggleArchive,
 }: SessionItemProps) {
   const active = session.id === activeSessionId
+  const reducedMotion = useReducedMotion()
 
   function submitRenameLocal(e: FormEvent) {
     onSubmitRename(e, session.id)
@@ -141,9 +142,17 @@ function SessionItem({
               border: active ? '1px solid var(--accent-medium)' : '1px solid transparent',
             }}
           >
+            {/* Active indicator — a shared layoutId slides the glowing bar
+                between sessions as the active one changes (micro-interaction
+                for the sidebar's active state). Reduced-motion collapses the
+                spring to an instant swap. */}
             {active && (
-              <div
-                className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-cyan-500"
+              <motion.div
+                layoutId="sidebar-active-indicator"
+                transition={
+                  reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 38 }
+                }
+                className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-emerald-500"
                 style={{ boxShadow: '0 0 8px var(--accent-glow)' }}
               />
             )}
@@ -151,7 +160,7 @@ function SessionItem({
               icon={ChatIcon}
               size={13}
               strokeWidth={1.5}
-              className={`mt-0.5 shrink-0 ${active ? 'text-cyan-500' : 'text-[var(--text-muted)]'}`}
+              className={`mt-0.5 shrink-0 ${active ? 'text-emerald-500' : 'text-[var(--text-muted)]'}`}
             />
             <span className="min-w-0">
               <span className="block truncate">{session.title}</span>
@@ -253,7 +262,7 @@ function SessionItem({
                 <button
                   type="submit"
                   aria-label="Save session title"
-                  className="flex size-6 shrink-0 items-center justify-center rounded-lg text-cyan-500 transition-colors hover:bg-cyan-500/10"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-lg text-emerald-500 transition-colors hover:bg-emerald-500/10"
                 >
                   <HugeiconsIcon icon={CheckIcon} size={13} strokeWidth={2} />
                 </button>
@@ -382,8 +391,8 @@ function SidebarContent({
             collapsed ? 'px-0' : ''
           }`}
           style={{
-            background: 'linear-gradient(to right, #06b6d4, #0891b2)',
-            boxShadow: '0 4px 14px 0 rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+            background: 'linear-gradient(to right, #10b981, #0d9488)',
+            boxShadow: '0 4px 14px 0 rgba(16,185,129,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           }}
           title={collapsed ? 'New Chat' : undefined}
         >
@@ -476,7 +485,7 @@ function SidebarContent({
                     {hasPinned && (
                       <>
                         <li className="px-1 pt-1 pb-0.5">
-                          <span className="text-[10px] font-medium text-cyan-500/80 uppercase tracking-wider">
+                          <span className="text-[10px] font-medium text-[var(--gold)] uppercase tracking-wider">
                             <HugeiconsIcon
                               icon={PinIcon}
                               size={9}
@@ -594,7 +603,7 @@ function SidebarContent({
                       icon={ChatIcon}
                       size={14}
                       strokeWidth={1.5}
-                      className={active ? 'text-cyan-500' : 'text-[var(--text-muted)]'}
+                      className={active ? 'text-emerald-500' : 'text-[var(--text-muted)]'}
                     />
                   </motion.button>
                 </li>

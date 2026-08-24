@@ -61,9 +61,9 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
                   icon={CheckIcon}
                   size={12}
                   strokeWidth={2}
-                  className="text-cyan-400"
+                  className="text-emerald-400"
                 />
-                <span className="text-cyan-400">Copied</span>
+                <span className="text-emerald-400">Copied</span>
               </motion.div>
             ) : (
               <motion.div

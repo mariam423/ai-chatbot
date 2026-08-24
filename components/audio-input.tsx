@@ -78,9 +78,9 @@ interface AudioInputProps {
  * Animated waveform/equalizer for the active voice-composer states.
  *
  * Micro-interaction modes (see micro-interaction-spec):
- *  - recording: lively cyan bars, each with its own stable peak/delay so the
+ *  - recording: lively emerald bars, each with its own stable peak/delay so the
  *    group reads as an organic, voice-reactive waveform; a live red dot.
- *  - transcribing: softer, slower cyan bars signalling "processing" rather
+ *  - transcribing: softer, slower emerald bars signalling "processing" rather
  *    than "capturing"; an amber dot.
  * Bar parameters are derived deterministically from the index and memoized so
  * the pattern stays stable across re-renders. Respects reduced-motion by
@@ -107,7 +107,7 @@ function WaveformBars({
       }),
     [transcribing],
   )
-  const barColor = transcribing ? 'bg-cyan-300' : 'bg-cyan-500'
+  const barColor = transcribing ? 'bg-emerald-300' : 'bg-emerald-500'
 
   return (
     <span aria-hidden="true" className="flex items-end gap-[3px]">
