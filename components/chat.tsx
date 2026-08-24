@@ -63,6 +63,8 @@ import ChatExport from './chat-export'
 
 interface ChatProps {
   sessionId: string | null
+  /** Bumped by the shell on New Chat / delete-active while sessionId is null. */
+  resetNonce?: number
   modelKey: ModelKey
   /** Per-session skill override; null = default catalog. */
   enabledSkills: string[] | null
@@ -84,6 +86,7 @@ const EMPTY_THREAD: ThreadState = { branches: [[]], active: 0 }
 
 export default function Chat({
   sessionId,
+  resetNonce = 0,
   modelKey,
   enabledSkills,
   temperature = null,
@@ -169,6 +172,25 @@ export default function Chat({
       cancelled = true
     }
   }, [sessionId])
+
+  // External clear (sidebar New Chat / delete-active while sessionId is null):
+  // the [sessionId] restore effect above only re-runs when the id CHANGES, so
+  // clearing a still-unsigned first conversation would otherwise leave the old
+  // thread on screen. Bump the generation too so any in-flight save/restore
+  // from the previous conversation abandons its work instead of resurrecting
+  // the cleared thread (slow saves resolving after a clear were the bug).
+  const resetNonceRef = useRef(resetNonce)
+  useEffect(() => {
+    if (resetNonce === resetNonceRef.current) return
+    resetNonceRef.current = resetNonce
+    threadGenRef.current += 1
+    abortRef.current?.abort()
+    commitThread(EMPTY_THREAD)
+    setError(null)
+    setRetryMessage(null)
+    setInput('')
+    setSystemPrompt(null)
+  }, [resetNonce, commitThread])
 
   useEffect(() => {
     scrollToBottom()
@@ -401,13 +423,20 @@ export default function Chat({
       // onSessionChange only once the save commits.
       setSessionId(sid)
     }
+    // Nothing to persist (e.g. the stream was aborted by a mid-flight New
+    // Chat and the thread was reset) — don't create a junk empty session.
+    if (state.branches.every((branch) => branch.length === 0)) return
+    const genAtSave = threadGenRef.current
     const result = await saveChatMessages({
       sessionId: sid,
       branches: state.branches,
       active: state.active,
       ...(enabledSkills !== null ? { enabledSkills } : {}),
     })
-    if (result.ok && !sessionId) onSessionChange(sid)
+    // Publish the new session id only if the conversation wasn't cleared or
+    // replaced while the save was in flight — a slow save resolving after
+    // New Chat would otherwise resurrect the just-cleared thread.
+    if (result.ok && !sessionId && genAtSave === threadGenRef.current) onSessionChange(sid)
     if (result.ok) onConversationChanged()
   }
 

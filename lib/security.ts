@@ -66,8 +66,10 @@ export function checkCsrf(request: Request): NextResponse | null {
  * SQLite/Postgres text comparisons) from user-supplied strings. Never used
  * as a substitute for schema validation — it just normalizes the surface.
  */ export function sanitizeInput(value: string, maxLength = 2_000): string {
+  // Strip control chars EXCEPT whitespace (\t \n \r): newlines are legitimate
+  // markdown content (fenced code blocks, lists) and must survive persistence.
   return value
-    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
     .trim()
     .slice(0, maxLength)
 }

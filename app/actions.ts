@@ -7,6 +7,7 @@ import { getCurrentUserId } from '@/lib/auth-context'
 import { isValidSkillId } from '@/lib/skills/registry'
 import { exchangeGoogleAccessToken, parseGoogleServiceAccountKey } from '@/lib/skills/tools'
 import { ModelKeySchema } from '@/lib/models'
+import { sanitizeInput } from '@/lib/security'
 import { getPlan, isOverDailyLimit, PLANS } from '@/lib/billing/plans'
 import {
   createBillingPortalSession as createStripePortalSession,
@@ -24,13 +25,21 @@ import { ChatMessageSchema, type ChatMessage, type ChatSessionSummary } from '@/
 
 const SessionIdSchema = z.string().min(1).max(100)
 
+// Bounded variant of ChatMessageSchema for the persistence boundary: ids and
+// content are capped so a client cannot push an unbounded payload into the DB
+// (the shared ChatMessageSchema stays uncapped for localStorage compat).
+const PersistedChatMessageSchema = ChatMessageSchema.extend({
+  id: z.string().min(1).max(200),
+  content: z.string().max(50_000),
+})
+
 const SaveMessagesInputSchema = z
   .object({
     sessionId: z.string().min(1).max(100),
     // Every branch of the conversation, so forked threads persist. A branch may
     // be empty (a fork created before any message is sent on it), but at least
-    // one non-empty branch must exist.
-    branches: z.array(z.array(ChatMessageSchema)).min(1),
+    // one non-empty branch must exist. Caps keep the payload bounded.
+    branches: z.array(z.array(PersistedChatMessageSchema).max(1000)).min(1).max(64),
     // Index of the currently active branch (defaults to 0).
     active: z.number().int().min(0).max(64).optional(),
     // Optional per-session skill override, applied when the session is created.
@@ -148,6 +157,20 @@ export async function saveChatMessages(input: {
   }
   const userId = await getCurrentUserId()
   try {
+    // Ownership: an existing session must belong to the caller (mirrors
+    // findOwnedSession used by the API routes). The upsert's create path
+    // handles brand-new sessions, so only pre-existing rows need the check;
+    // AUTH_DISABLED (e2e/local) deliberately skips it. Without this, any
+    // signed-in user could inject messages into a session id they do not own.
+    const existing = await prisma.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { userId: true },
+    })
+    const ownsSession =
+      process.env.AUTH_DISABLED === 'true' || (userId !== null && existing?.userId === userId)
+    if (existing && !ownsSession) {
+      return { ok: false, error: 'Chat session not found.' }
+    }
     // Upsert with ownership: create attaches userId, update records the active
     // branch (when provided) without clobbering other session metadata.
     await prisma.chatSession.upsert({
@@ -177,14 +200,14 @@ export async function saveChatMessages(input: {
           create: {
             sessionId,
             role: message.role,
-            content: message.content,
+            content: sanitizeInput(message.content, 50_000),
             position,
             branchId: String(branchIndex),
             id: message.id,
           },
           update: {
             role: message.role,
-            content: message.content,
+            content: sanitizeInput(message.content, 50_000),
             position,
           },
         }),

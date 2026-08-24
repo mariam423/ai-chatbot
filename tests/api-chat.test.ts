@@ -53,6 +53,16 @@ describe('POST /api/chat', () => {
     }
   })
 
+  it('rejects oversized message bodies (bounded zod caps)', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key')
+    // More than 200 messages in one request.
+    const tooMany = Array.from({ length: 201 }, () => ({ role: 'user', content: 'x' }))
+    expect((await POST(chatRequest(tooMany))).status).toBe(400)
+    // A single message over the 50k content cap.
+    const tooLong = [{ role: 'user', content: 'x'.repeat(50_001) }]
+    expect((await POST(chatRequest(tooLong))).status).toBe(400)
+  })
+
   it('rejects messages with invalid roles or content types (zod)', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'test-key')
     const bad = [

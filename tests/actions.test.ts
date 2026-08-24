@@ -721,3 +721,70 @@ describe('user preferences (calendar credentials)', () => {
     expect((result as { error: string }).error).toContain('Calendar access check failed (403)')
   })
 })
+
+describe('saveChatMessages session ownership', () => {
+  afterEach(() => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    delete process.env.AUTH_DISABLED
+  })
+
+  it('rejects saving to a session owned by another user', async () => {
+    // Engage the ownership check (the suite otherwise runs anonymous).
+    const original = process.env.AUTH_DISABLED
+    delete process.env.AUTH_DISABLED
+    try {
+      // user-a creates the session and writes a message.
+      vi.mocked(getCurrentUserId).mockResolvedValue('user-a')
+      await actions.saveChatMessages({
+        sessionId: 'ownership-sess',
+        branches: [[{ id: 'own-msg-1', role: 'user', content: "alice's message" }]],
+      })
+
+      // user-b must NOT be able to inject messages into that session.
+      vi.mocked(getCurrentUserId).mockResolvedValue('user-b')
+      const result = await actions.saveChatMessages({
+        sessionId: 'ownership-sess',
+        branches: [[{ id: 'own-msg-2', role: 'user', content: "bob's injection" }]],
+      })
+      expect(result).toEqual({ ok: false, error: 'Chat session not found.' })
+
+      // The victim's message is untouched and still readable by its owner.
+      vi.mocked(getCurrentUserId).mockResolvedValue('user-a')
+      const load = await actions.getChatSession('ownership-sess')
+      expect(load.ok).toBe(true)
+      if (load.ok) {
+        expect(load.branches[0]?.map((message) => message.content)).toEqual(["alice's message"])
+      }
+    } finally {
+      if (original === undefined) delete process.env.AUTH_DISABLED
+      else process.env.AUTH_DISABLED = original
+      vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    }
+  })
+
+  it('rejects oversized persistence payloads (zod caps)', async () => {
+    const original = process.env.AUTH_DISABLED
+    delete process.env.AUTH_DISABLED
+    try {
+      vi.mocked(getCurrentUserId).mockResolvedValue('user-c')
+      const tooManyBranches = Array.from({ length: 65 }, (_, index) => [
+        { id: `own-branch-${index}`, role: 'user' as const, content: 'x' },
+      ])
+      const branchResult = await actions.saveChatMessages({
+        sessionId: 'cap-branches',
+        branches: tooManyBranches,
+      })
+      expect(branchResult).toMatchObject({ ok: false })
+
+      const tooLongContent = await actions.saveChatMessages({
+        sessionId: 'cap-content',
+        branches: [[{ id: 'own-msg-3', role: 'user', content: 'x'.repeat(50_001) }]],
+      })
+      expect(tooLongContent).toMatchObject({ ok: false })
+    } finally {
+      if (original === undefined) delete process.env.AUTH_DISABLED
+      else process.env.AUTH_DISABLED = original
+      vi.mocked(getCurrentUserId).mockResolvedValue(null)
+    }
+  })
+})

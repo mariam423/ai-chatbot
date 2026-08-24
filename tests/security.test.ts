@@ -100,6 +100,12 @@ describe('sanitizeInput', () => {
     expect(sanitizeInput('  hello\u0000world  ')).toBe('helloworld')
   })
 
+  it('preserves whitespace newlines and tabs', () => {
+    expect(sanitizeInput('Here is code:\n```js\nconst x = 1;\n```')).toBe(
+      'Here is code:\n```js\nconst x = 1;\n```',
+    )
+  })
+
   it('caps the length', () => {
     expect(sanitizeInput('a'.repeat(100), 10)).toBe('a'.repeat(10))
   })

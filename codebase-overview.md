@@ -106,7 +106,8 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   calls carry no Origin).
 - **`lib/security.ts`** — Shared guardrails: `checkCsrf`
   (Origin/Referer vs `NEXT_PUBLIC_APP_URL`; absent Origin allowed for
-  non-browser traffic), `sanitizeInput`, `requireSession` (lazy `auth()`
+  non-browser traffic), `sanitizeInput` (control-char strip preserving
+  `\t\n\r` — newlines are legitimate markdown/code-block content), `requireSession` (lazy `auth()`
   import keeps the module vitest-safe; `AUTH_DISABLED` bypasses), and
   `guardRoute` — a one-call composition (CSRF → optional session → rate
   limit) used by every API route. Each route's config lives in the exported
