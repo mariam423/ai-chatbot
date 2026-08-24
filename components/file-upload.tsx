@@ -135,9 +135,7 @@ export default function FileUpload({
         >
           <HugeiconsIcon icon={PaperclipIcon} size={18} strokeWidth={1.5} />
         </button>
-        <div className="flex min-w-0 flex-1 items-end gap-2">
-          {children}
-        </div>
+        <div className="flex min-w-0 flex-1 items-end gap-2">{children}</div>
         {(busy || error) && (
           <p
             role={error ? 'alert' : undefined}

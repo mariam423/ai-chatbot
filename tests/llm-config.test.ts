@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getLlmConfig } from '../lib/llm-config'
+import { getLlmConfig, getMaxOutputTokens } from '../lib/llm-config'
 
 // The shell/dev environment may export real provider values (OPENROUTER_*),
 // so every test stubs the full env surface it cares about.
@@ -56,5 +56,24 @@ describe('getLlmConfig', () => {
       baseUrl: 'https://ollama.local/v1',
       usesOpenRouter: false,
     })
+  })
+})
+
+describe('getMaxOutputTokens', () => {
+  it('defaults to a conservative 4096 when MAX_OUTPUT_TOKENS is unset', () => {
+    vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
+    expect(getMaxOutputTokens()).toBe(4096)
+  })
+
+  it('honors a valid MAX_OUTPUT_TOKENS override', () => {
+    vi.stubEnv('MAX_OUTPUT_TOKENS', '1024')
+    expect(getMaxOutputTokens()).toBe(1024)
+  })
+
+  it('falls back to the default for an invalid MAX_OUTPUT_TOKENS', () => {
+    for (const bad of ['0', '-5', 'abc', '4.5']) {
+      vi.stubEnv('MAX_OUTPUT_TOKENS', bad)
+      expect(getMaxOutputTokens(), bad).toBe(4096)
+    }
   })
 })

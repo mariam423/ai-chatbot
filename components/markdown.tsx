@@ -169,9 +169,7 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
         if (typeof src === 'string' && isSvgDataUrl(src)) {
           return <DiagramCard src={src} alt={alt} />
         }
-        return (
-          <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
-        )
+        return <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
       },
     }),
     [sessionId],

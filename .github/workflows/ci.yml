@@ -20,6 +20,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Dependency integrity (OWASP A08): fail the build on high/critical
+      # vulnerabilities. The repo pins a patched deepmerge-ts via `overrides`
+      # to keep `npm audit` clean while staying on Prisma 7.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
       - name: Lint, Prettier, typecheck
         run: npm run lint
       - name: Unit & integration tests

@@ -115,7 +115,21 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   (signed-in user for chat, IP otherwise), session/CSRF flags, and the
   limit (literal or env-var name + `defaultLimit`). The return is a
   discriminated union: `{ ok: true, userId }` or `{ ok: false, response }`.
+  The auth counterpart is the `AUTH_GUARDS` map (register 5/min,
+  login 20/min per-IP + 10/min per-account, reset-request 5/min,
+  reset-complete 10/min) applied by `checkAuthRateLimit` (server actions)
+  and `checkLoginRateLimit` (the credentials provider), both keyed through
+  the shared rate-limit store via `clientIpFromHeaders` — server actions
+  have no `Request`, so the IP comes from `next/headers`.
   It re-exports `rateLimit`/`rateLimitResponse` from `lib/rate-limit.ts`.
+- **`app/actions/auth.ts` + `lib/auth.ts` (credentials)** — Auth throttles:
+  `registerUser`, `requestPasswordReset`, and `resetPassword` call
+  `checkAuthRateLimit` first (per-IP, before any DB/bcrypt work; reset-request
+  is IP-only so an attacker can't burn a victim's reset quota). The
+  credentials `authorize` calls `checkLoginRateLimit(clientIp(request), email)`
+  before the bcrypt compare — a throttled attempt returns null (the same
+  generic failure as a wrong password), and the per-account cap stops targeted
+  guessing while the per-IP cap stops floods.
 - **`lib/rate-limit.ts`** — The shared rate-limit store behind
   `guardRoute`. A fixed-window counter (slides forward on expiry) behind a
   narrow `RateLimitStore` interface: `MemoryRateLimitStore` (per-process
@@ -153,7 +167,40 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   contains a chart. `chat.tsx` lazy-loads `AudioInput` (media-recorder
   logic) via `next/dynamic` with an icon fallback.
 - **`next.config.ts`** — Long-lived immutable `Cache-Control` headers for
-  static image/font assets (`public, max-age=31536000, immutable`).
+  static image/font assets (`public, max-age=31536000, immutable`) plus the
+  security-header set (OWASP A05): `X-Frame-Options: DENY`, nosniff,
+  `Referrer-Policy`, `Permissions-Policy`, and — on production builds only —
+  a CSP (`default-src 'self'`, `script-src 'self' 'unsafe-inline'` for the
+  inline theme/RSC-flight scripts, `frame-ancestors 'none'`, `object-src
+'none'`, `frame-src 'self'` for the srcdoc export iframe) and HSTS
+  (`max-age=31536000; includeSubDomains`). The e2e suite runs the production
+  build, so the real CSP is exercised on every run.
+- **`lib/audit.ts`** — Structured security audit logging (OWASP A09):
+  `logSecurityEvent` emits one-line JSON events for denials (CSRF blocks,
+  401s, rate-limit trips, auth throttles, ownership violations, webhook
+  signature failures) and opt-in info events (successful logins via
+  `SECURITY_AUDIT_LOG=true`). No-op under NODE_ENV=test. Never logs bodies,
+  headers, or secrets — only ids, IPs, and status codes.
+- **`lib/ssrf.ts`** — SSRF guard (OWASP A10): `assertSafeUrl` whitelists
+  http(s), blocks private/loopback/link-local/reserved IPs (IPv4 + IPv6,
+  incl. IPv4-mapped and dotted-quad forms), and rejects hostnames whose DNS
+  resolves to any blocked address (rebinding defense). Applied to web search,
+  MCP server URLs, `diagram_render`, and `weather_lookup`; deliberately not
+  applied to the LLM base URL (self-hosted local models are legitimate).
+- **`lib/field-encryption.ts`** — Data-at-rest encryption for sensitive
+  preference fields: AES-256-GCM with a `v1:<iv>:<tag>:<ct>` versioned
+  envelope, keyed by the `ENCRYPTION_KEY` env var (sha256-derived to 32
+  bytes). `encryptField` writes the envelope (plaintext passthrough with a
+  one-time warning when the key is unset — local dev); `decryptField` passes
+  legacy plaintext rows through unchanged, and an encrypted row that fails
+  GCM verification (rotated key, tampering, key missing) degrades to `''`
+  with a structured `decryption_failed` audit event instead of surfacing
+  ciphertext or throwing. Applied to `UserPreference.apiKey` and
+  `UserPreference.googleServiceAccountKey` (the Google service-account
+  private key consumed by `schedule_block`): `app/actions.ts` encrypts on
+  write and decrypts in `getUserPreferences`/`testGoogleCalendarConnection`;
+  `lib/skills/credentials.ts` decrypts before parsing into the skill-tool
+  context.
 - **`components/diagram-card.tsx`** + **`lib/svg-data-url.ts`** — When a reply
   embeds an SVG data URL (the `diagram_render` tool's `imageUrl`), the Markdown
   `img` override routes it into a diagram card rendered via `<img>` (data URLs
@@ -181,6 +228,13 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   `updateSessionSkills`), loads it back via `getSessionSkills` on session
   switch, and the override is sent with each `/api/chat` request as
   `enabledSkills`. "Use all" clears the override back to defaults.
+- **Auth hardening (OWASP A07/A02)** — `registerUser` returns a generic
+  error when the email is taken (no account-enumeration oracle); login and
+  password-reset failures are already generic. The NextAuth cookie policy is
+  left to `@auth/core`'s protocol-derived defaults (httpOnly, sameSite=lax,
+  `secure` + `__Secure-`/`__Host-` prefixes over https) and documented in
+  `lib/auth.ts`; HTTPS is enforced by the HSTS header in `next.config.ts`.
+  Rate-limited logins return the same generic failure as a wrong password.
 - **`app/actions.ts` (session skills)** — `getSessionSkills`/`updateSessionSkills`
   read and write the session's comma-separated `enabledSkills` override, and
   `saveChatMessages` accepts an optional `enabledSkills` list applied when the

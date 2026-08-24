@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { assertSafeUrl } from '@/lib/ssrf'
 
 const MAX_TOOL_RESPONSE_LENGTH = 64_000
 const MCP_TIMEOUT_MS = 12_000
@@ -106,6 +107,14 @@ async function requestRpc(
 }
 
 async function openSession(config: z.infer<typeof McpServerSchema>): Promise<McpSession> {
+  // SSRF guard (OWASP A10): the URL is operator config, but an unsafe entry
+  // (private/loopback IP, non-http scheme, unresolvable host) is rejected
+  // before any connection. listMcpTools treats this as an unavailable server
+  // (skipped via allSettled); callMcpTool surfaces it as a tool error.
+  const safe = await assertSafeUrl(config.url)
+  if (!safe.ok) {
+    throw new Error(`MCP server ${config.id} rejected: ${safe.reason}`)
+  }
   const session: McpSession = { config }
   await requestRpc(
     session,

@@ -19,6 +19,7 @@ import {
   type SkillTool,
   type SkillToolContext,
 } from '@/lib/skills/tools'
+import { getMaxOutputTokens } from '@/lib/llm-config'
 
 export const MAX_AGENT_STEPS = 4
 const ToolCallSchema = z.object({
@@ -116,6 +117,10 @@ async function complete(
     body: JSON.stringify({
       model: options.model,
       stream: false,
+      // Explicit completion cap on the planning calls too — the provider
+      // pre-authorizes cost against max_tokens, so without it OpenRouter's
+      // 65536 model default can 402 a low-credit key on a tiny tool step.
+      max_tokens: getMaxOutputTokens(),
       messages: [{ role: 'system', content: options.systemPrompt }, ...messages],
       ...(tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
     }),

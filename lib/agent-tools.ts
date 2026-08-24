@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { assertSafeUrl } from '@/lib/ssrf'
 
 const MAX_TOOL_TEXT = 8_000
 const TOOL_TIMEOUT_MS = 8_000
@@ -118,6 +119,10 @@ async function webSearch(args: Record<string, unknown>): Promise<unknown> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS)
   try {
+    // SSRF guard (OWASP A10): refuse to POST to a private/loopback destination
+    // even when an operator misconfigures WEB_SEARCH_URL.
+    const safe = await assertSafeUrl(endpoint)
+    if (!safe.ok) throw new Error(`Search provider rejected: ${safe.reason}`)
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },

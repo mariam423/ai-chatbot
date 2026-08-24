@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { createSign } from 'node:crypto'
 import type { AgentToolResult } from '@/lib/agent-tools'
 import type { OpenAITool } from '@/lib/mcp-client'
+import { assertSafeUrl } from '@/lib/ssrf'
 import {
   CodeAnalyzeSchema,
   DiagramRenderSchema,
@@ -102,6 +103,10 @@ async function renderDiagram(
 ): Promise<Record<string, unknown>> {
   const baseUrl = (process.env.DIAGRAM_RENDER_URL ?? 'https://kroki.io').replace(/\/+$/, '')
   const apiKey = process.env.DIAGRAM_RENDER_API_KEY
+  // SSRF guard (OWASP A10): DIAGRAM_RENDER_URL is operator config, but an
+  // unsafe destination is refused (the executor falls back to the preview).
+  const safe = await assertSafeUrl(baseUrl)
+  if (!safe.ok) throw new Error(`Diagram provider rejected: ${safe.reason}`)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS)
   try {
@@ -194,6 +199,9 @@ async function lookupWeather(location: string, units: 'metric' | 'imperial'): Pr
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS)
   try {
+    // SSRF guard (OWASP A10): refuse to POST to a private/loopback destination.
+    const safe = await assertSafeUrl(endpoint)
+    if (!safe.ok) throw new Error(`Weather provider rejected: ${safe.reason}`)
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
+import { guardRoute, ROUTE_GUARDS, clientIp } from '@/lib/security'
+import { logSecurityEvent } from '@/lib/audit'
 import { verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { parsePlanKey } from '@/lib/billing/plans'
 
@@ -38,6 +39,12 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('stripe-signature')
   if (!verifyStripeWebhookSignature(rawBody, signature)) {
+    // A08/A09: an unverifiable webhook is integrity-relevant — log the event
+    // (ip + signature presence only, never the body or the signature value).
+    logSecurityEvent('webhook_invalid_signature', {
+      ip: clientIp(request),
+      signaturePresent: signature !== null,
+    })
     return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
   }
 
