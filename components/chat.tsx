@@ -43,6 +43,7 @@ import {
 
 import { MAX_INPUT_LENGTH, isValidMessageInput } from '@/lib/validation'
 import MessageBubble from './message-bubble'
+import LoadingBadge from './loading-badge'
 import StreamingSkeleton from './streaming-skeleton'
 import FileUpload from './file-upload'
 import MediaUpload from './media-upload'
@@ -603,6 +604,11 @@ export default function Chat({
         {isStreaming && messages.length > 0 && messages[messages.length - 1]!.content === '' && (
           <StreamingSkeleton />
         )}
+
+        {/* Glowing loading badge — appears below the dynamic response block
+            while the reply is pending/streaming and exits cleanly on
+            completion or error (AnimatePresence plays the exit animation). */}
+        <AnimatePresence>{isStreaming && messages.length > 0 && <LoadingBadge />}</AnimatePresence>
 
         <AnimatePresence>
           {error && (

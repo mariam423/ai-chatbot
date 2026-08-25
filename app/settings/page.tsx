@@ -631,8 +631,10 @@ export default function SettingsPage() {
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">API Key</h2>
           </div>
           <p className="mb-3 text-xs text-[var(--text-tertiary)]">
-            Provide your own OpenRouter API key to use your personal quota instead of the shared
-            key.
+            Provide your own provider API key to use your personal quota instead of the shared key.
+            OpenRouter (<span className="font-mono">sk-or-…</span>), Gemini (
+            <span className="font-mono">AIza…</span>), and OpenAI (<span className="font-mono">sk-…</span>
+            ) keys are detected automatically. Stored encrypted at rest.
           </p>
           <div className="relative">
             <label htmlFor="settings-apikey" className="sr-only">
@@ -643,7 +645,7 @@ export default function SettingsPage() {
               type={showApiKey ? 'text' : 'password'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-or-..."
+              placeholder="sk-or-... or AIza..."
               className="focus-glow w-full rounded-xl px-3 py-2.5 pr-20 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
               style={{ background: 'var(--bg-input)', border: '1px solid var(--border-medium)' }}
             />

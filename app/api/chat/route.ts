@@ -73,16 +73,6 @@ export async function POST(request: Request) {
   const guard = await guardRoute(request, ROUTE_GUARDS.chat)
   if (!guard.ok) return guard.response
 
-  // Shared provider config: OPENROUTER_API_KEY preferred, OPENAI_API_KEY
-  // supported for other OpenAI-compatible endpoints (see lib/llm-config.ts).
-  const { apiKey, baseUrl } = getLlmConfig()
-  if (!apiKey) {
-    return errorResponse(
-      'Server is not configured with an LLM API key (OPENROUTER_API_KEY or OPENAI_API_KEY).',
-      500,
-    )
-  }
-
   const declaredLength = Number(request.headers.get('content-length'))
   if (Number.isFinite(declaredLength) && declaredLength > MAX_CHAT_BODY_BYTES) {
     return errorResponse('Request body too large.', 413)
@@ -145,10 +135,24 @@ export async function POST(request: Request) {
     void memory.rememberFromMessage(question, parsed.data.sessionId)
     void memory.rememberConversationSummary(messages, parsed.data.sessionId)
   }
-  // Per-user provider credentials (e.g. a Google service-account key pasted in
-  // Settings) resolve to the skill-tool context used by the agent loop.
-  const { getUserSkillContext } = await import('@/lib/skills/credentials')
+  // Per-user provider credentials resolve from Settings: a Google
+  // service-account key becomes the skill-tool context used by the agent loop,
+  // and a personal LLM API key (OpenRouter/Gemini/OpenAI) overrides the
+  // server env key for this request.
+  const { getUserSkillContext, getUserApiKey } = await import('@/lib/skills/credentials')
   const skillContext = await getUserSkillContext(userId)
+  const userApiKey = await getUserApiKey(userId)
+
+  // Shared provider config: a per-user key (detected by prefix) wins; otherwise
+  // OPENROUTER_API_KEY → GEMINI_API_KEY → OPENAI_API_KEY (see lib/llm-config.ts).
+  const llm = getLlmConfig(userApiKey)
+  const { apiKey, baseUrl, provider } = llm
+  if (!apiKey) {
+    return errorResponse(
+      'Server is not configured with an LLM API key (OPENROUTER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY).',
+      500,
+    )
+  }
 
   const videoFrames = parsed.data.videoFrames ?? []
   const imageDataUrl = parsed.data.imageDataUrl
@@ -230,8 +234,9 @@ export async function POST(request: Request) {
   }
 
   // The model selector resolves stable UI keys here; base URL + key come from
-  // the shared provider config above.
-  const model = resolveModel(parsed.data.model)
+  // the shared provider config above, and the provider picks the right model id
+  // (OpenRouter namespaced id vs Google's plain name on the direct endpoint).
+  const model = resolveModel(parsed.data.model, provider)
 
   // OpenRouter uses X-Title for app attribution (optional, OpenRouter only).
   const appTitle = process.env.OPENROUTER_APP_NAME
