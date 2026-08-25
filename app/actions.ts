@@ -123,6 +123,8 @@ export async function getChatSession(sessionId: string): Promise<
         id: message.id,
         role: message.role as ChatMessage['role'],
         content: message.content,
+        ...(message.model ? { model: message.model } : {}),
+        ...(message.modelOverridden !== null ? { modelOverridden: message.modelOverridden } : {}),
       })
     }
     // Rebuild the full array (including empty branches) so the active index
@@ -212,11 +214,15 @@ export async function saveChatMessages(input: {
             position,
             branchId: String(branchIndex),
             id: message.id,
+            model: message.model ?? null,
+            modelOverridden: message.modelOverridden ?? null,
           },
           update: {
             role: message.role,
             content: sanitizeInput(message.content, 50_000),
             position,
+            model: message.model ?? null,
+            modelOverridden: message.modelOverridden ?? null,
           },
         }),
       ),
@@ -278,12 +284,16 @@ export async function listChatSessions(input?: {
         updated_at: Date | string
         pinned: number | boolean
         archived: number | boolean
+        last_model: string | null
       }>
     >`
       SELECT cs.id, cs.title, cs.pinned, cs.archived,
         (SELECT m2.content FROM chat_messages m2 WHERE m2.sessionId = cs.id
            ORDER BY m2.position ASC LIMIT 1) AS first_content,
         (SELECT COUNT(*) FROM chat_messages m3 WHERE m3.sessionId = cs.id) AS message_count,
+        (SELECT m4.model FROM chat_messages m4 WHERE m4.sessionId = cs.id
+           AND m4.role = 'assistant' AND m4.model IS NOT NULL
+           ORDER BY m4.position DESC LIMIT 1) AS last_model,
         cs.updatedAt AS updated_at
       FROM chat_sessions cs
       WHERE cs.archived = ${archived ? 1 : 0}
@@ -305,6 +315,7 @@ export async function listChatSessions(input?: {
         messageCount: Number(row.message_count),
         pinned: Boolean(row.pinned),
         archived: Boolean(row.archived),
+        lastModel: row.last_model ?? null,
       })),
     }
   } catch {
@@ -527,6 +538,8 @@ const UserPreferencesSchema = z.object({
   // maxCompletionTokens caps the model's completion length.
   temperature: z.number().min(0).max(1).optional(),
   maxCompletionTokens: z.number().int().min(1).max(32768).optional(),
+  // Per-message "via <model>" captions in the thread (default: shown).
+  showModelCaptions: z.boolean().optional(),
 })
 
 const CALENDAR_LOOKUP_URL = 'https://www.googleapis.com/calendar/v3/calendars'
@@ -545,8 +558,10 @@ export async function getUserPreferences(): Promise<
         preferredModel: string
         temperature: number | null
         maxCompletionTokens: number | null
+        // Per-message "via <model>" captions in the thread.
+        showModelCaptions: boolean
         // Effective server-side completion cap when the user hasn't set a
-        // custom one — MAX_OUTPUT_TOKENS env or the 4096 default (see
+        // custom one — MAX_OUTPUT_TOKENS env or the 200 default (see
         // lib/llm-config.ts). Surfaced on the settings page so users see what
         // the "default" max_tokens actually is.
         defaultMaxCompletionTokens: number
@@ -565,6 +580,7 @@ export async function getUserPreferences(): Promise<
     preferredModel: '',
     temperature: null,
     maxCompletionTokens: null,
+    showModelCaptions: true,
     defaultMaxCompletionTokens: getMaxOutputTokens(),
   }
   if (!userId) {
@@ -584,6 +600,8 @@ export async function getUserPreferences(): Promise<
         preferredModel: pref?.preferredModel ?? '',
         temperature: pref?.temperature ?? null,
         maxCompletionTokens: pref?.maxCompletionTokens ?? null,
+        // Null (legacy rows / not set) means "shown" — matches the column default.
+        showModelCaptions: pref?.showModelCaptions ?? true,
         defaultMaxCompletionTokens: getMaxOutputTokens(),
       },
     }
@@ -603,6 +621,7 @@ export async function updateUserPreferences(input: {
   preferredModel?: string
   temperature?: number
   maxCompletionTokens?: number
+  showModelCaptions?: boolean
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = UserPreferencesSchema.safeParse(input)
   if (!parsed.success) {
@@ -638,6 +657,7 @@ export async function updateUserPreferences(input: {
         preferredModel: data.preferredModel ?? undefined,
         temperature: data.temperature ?? undefined,
         maxCompletionTokens: data.maxCompletionTokens ?? undefined,
+        showModelCaptions: data.showModelCaptions ?? true,
       },
       update: {
         ...(data.displayName !== undefined && { displayName: data.displayName || null }),
@@ -658,6 +678,9 @@ export async function updateUserPreferences(input: {
         ...(data.temperature !== undefined && { temperature: data.temperature }),
         ...(data.maxCompletionTokens !== undefined && {
           maxCompletionTokens: data.maxCompletionTokens,
+        }),
+        ...(data.showModelCaptions !== undefined && {
+          showModelCaptions: data.showModelCaptions,
         }),
       },
     })

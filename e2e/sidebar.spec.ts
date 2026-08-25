@@ -34,21 +34,53 @@ test('sidebar lists the conversation and New Chat resets the thread', async ({
   // The sidebar is desktop-only (hidden below md).
   test.skip(isMobile)
 
-  await mockStream(page, ['Sidebar reply'])
+  // The route's real X-Served-Model header — the reply is stamped with the
+  // model that served it, and the sidebar must surface it for the session.
+  await page.route('**/api/chat', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      headers: { 'x-served-model': 'gpt-4o-mini' },
+      body: sseBody(['Sidebar reply']),
+    }),
+  )
 
   await page.goto('/')
   await sendMessage(page, 'Sidebar question')
 
-  await expect(page.locator('main').getByText('Sidebar reply')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('Sidebar reply')).toBeVisible()
 
   await test.step('the new conversation appears in the sidebar', async () => {
     const sidebar = page.getByRole('complementary', { name: 'Conversations' })
     await expect(sidebar).toContainText('Sidebar question')
   })
 
+  await test.step("the sidebar shows which model served the session's last reply", async () => {
+    const sidebar = page.getByRole('complementary', { name: 'Conversations' })
+    // Persisted from the assistant message's model stamp, under the title.
+    // Scope to this conversation's row — the sidebar list is shared with other
+    // parallel tests, so an unqualified query would hit multiple models.
+    // Newest row first — repeated runs accumulate same-titled sessions.
+    const row = sidebar.locator('button', { hasText: 'Sidebar question' }).first()
+    await expect(row.getByTestId('session-model')).toContainText('via gpt-4o-mini')
+  })
+
+  await test.step('the header shows the conversation metadata with the served model', async () => {
+    // The active session's title + last model render under the brand.
+    await expect(page.getByTestId('conversation-meta')).toContainText('Sidebar question')
+    await expect(page.getByTestId('conversation-model')).toContainText('via gpt-4o-mini')
+  })
+
   await test.step('New Chat resets to the empty state', async () => {
     await page.getByRole('button', { name: 'New Chat' }).click()
     await expect(page.getByText(/Ask me anything/)).toBeVisible()
+  })
+
+  await test.step('the command palette session rows carry the model too', async () => {
+    await page.keyboard.press('ControlOrMeta+k')
+    const row = page.locator('[data-index]', { hasText: 'Sidebar question' }).first()
+    await expect(row).toContainText('via gpt-4o-mini')
+    await page.keyboard.press('Escape')
   })
 })
 
@@ -146,11 +178,11 @@ test('regenerates the last assistant reply', async ({ page }) => {
 
   await page.goto('/')
   await sendMessage(page, 'Regenerate me')
-  await expect(page.locator('main').getByText('reply 1')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('reply 1')).toBeVisible()
 
   await page.getByRole('button', { name: 'Regenerate response' }).click()
-  await expect(page.locator('main').getByText('reply 2')).toBeVisible()
-  await expect(page.locator('main').getByText('reply 1')).toBeHidden()
+  await expect(page.getByTestId('message-list').getByText('reply 2')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('reply 1')).toBeHidden()
 })
 
 test('mobile drawer lists sessions and switches threads', async ({ page, isMobile }) => {
@@ -160,7 +192,7 @@ test('mobile drawer lists sessions and switches threads', async ({ page, isMobil
 
   await page.goto('/')
   await sendMessage(page, 'Drawer question')
-  await expect(page.locator('main').getByText('Drawer reply')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('Drawer reply')).toBeVisible()
 
   const trigger = page.getByRole('button', { name: 'Open conversation list' })
   const dialog = page.getByRole('dialog', { name: 'Conversations' })
@@ -175,7 +207,7 @@ test('mobile drawer lists sessions and switches threads', async ({ page, isMobil
   await test.step('New Chat resets the thread and closes the drawer', async () => {
     await dialog.getByRole('button', { name: 'New Chat' }).click()
     await expect(dialog).toBeHidden()
-    await expect(page.locator('main').getByText(/Ask me anything/)).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText(/Ask me anything/)).toBeVisible()
   })
 
   await test.step('selecting a conversation switches the thread and closes the drawer', async () => {
@@ -187,7 +219,7 @@ test('mobile drawer lists sessions and switches threads', async ({ page, isMobil
       .first()
       .click()
     await expect(dialog).toBeHidden()
-    await expect(page.locator('main').getByText('Drawer reply')).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText('Drawer reply')).toBeVisible()
   })
 
   await test.step('Escape closes the drawer', async () => {
@@ -204,7 +236,7 @@ test('renames and deletes a session from the sidebar', async ({ page, isMobile }
   await mockStream(page, ['Rename reply'])
   await page.goto('/')
   await sendMessage(page, 'Rename me')
-  await expect(page.locator('main').getByText('Rename reply')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('Rename reply')).toBeVisible()
 
   const sidebar = page.getByRole('complementary', { name: 'Conversations' })
   // Unique title so the shared DB (sessions accumulate across runs) can't collide.
@@ -237,7 +269,7 @@ test('renames and deletes a session from the sidebar', async ({ page, isMobile }
     await sidebar.getByRole('button', { name: 'Confirm delete' }).click()
     await expect(sidebar.getByRole('button', { name: new RegExp(renamedTitle) })).toHaveCount(0)
     // Deleting the ACTIVE session resets the thread.
-    await expect(page.locator('main').getByText(/Ask me anything/)).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText(/Ask me anything/)).toBeVisible()
   })
 })
 
@@ -247,7 +279,7 @@ test('renames a session from the mobile drawer', async ({ page, isMobile }) => {
   await mockStream(page, ['Drawer rename reply'])
   await page.goto('/')
   await sendMessage(page, 'Drawer rename')
-  await expect(page.locator('main').getByText('Drawer rename reply')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('Drawer rename reply')).toBeVisible()
 
   const dialog = page.getByRole('dialog', { name: 'Conversations' })
   const renamedTitle = `Renamed ${Date.now()}`
@@ -276,7 +308,7 @@ test('searches conversations and resets on clear', async ({ page, isMobile }) =>
   await mockStream(page, ['Search reply'])
   await page.goto('/')
   await sendMessage(page, uniqueTitle)
-  await expect(page.locator('main').getByText('Search reply')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('Search reply')).toBeVisible()
 
   const sidebar = page.getByRole('complementary', { name: 'Conversations' })
   const searchInput = sidebar.getByRole('searchbox', { name: 'Search conversations' })
@@ -391,7 +423,7 @@ test('renders markdown code blocks with a language badge and copy button', async
   await page.goto('/')
   await sendMessage(page, 'Show code')
 
-  await expect(page.locator('main').getByText('Here is code:')).toBeVisible()
+  await expect(page.getByTestId('message-list').getByText('Here is code:')).toBeVisible()
   await expect(page.getByText('js')).toBeVisible()
   const copy = page.getByRole('button', { name: 'Copy code' })
   await expect(copy).toBeVisible()

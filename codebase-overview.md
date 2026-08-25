@@ -101,7 +101,10 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   (`lib/export-chat.ts` also holds the Node-testable pure `chatToMarkdown`/
   `chatToJson`/`exportFileName` helpers) or JSON via a generated Blob, and
   renders a styled self-contained transcript into a hidden iframe for the
-  browser's native **Print → Save-as-PDF** flow (no PDF dependency).
+  browser's native **Print → Save-as-PDF** flow (no PDF dependency). All
+  three formats carry each assistant reply's served model (`*via <model>*`
+  in Markdown, a `model`/`modelOverridden` field in JSON, a small line in
+  the PDF), so shared conversations keep the model provenance.
 - **`components/audio-input.tsx`** — A mic button in the composer. Engine
   selection is `pickVoiceEngine`: the browser Web Speech `SpeechRecognition`
   API when available (Chrome/Edge, no network), otherwise a MediaRecorder
@@ -329,7 +332,7 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   session, memory, and prompt-preset types.
 - **`lib/storage.ts`** — Versioned localStorage fallback for chat messages,
   extended for branching. The payload is version 2 and stores a `ThreadState`
-  (`{ version: 2, branches, active }`) — a list of linear branches plus the
+  (`{ version: 3, branches, active }`, messages may carry the served `model`) — a list of linear branches plus the
   active index. `loadThread`/`saveThread` remain as active-branch
   conveniences; v1 and pre-versioning payloads auto-migrate to a single
   branch.

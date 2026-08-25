@@ -44,10 +44,18 @@ test('settings page renders all sections with saved defaults', async ({ page }) 
     await expect(page.locator('#settings-max-tokens')).toHaveValue('2048')
   })
 
-  await test.step('the effective max_tokens default is surfaced (4096 server default)', async () => {
+  await test.step('the effective max_tokens default is surfaced (200 server default)', async () => {
     // getUserPreferences returns the env-derived server default (MAX_OUTPUT_TOKENS
-    // unset in e2e → the conservative 4096), so the unset readout spells it out.
-    await expect(page.getByText('4,096 (server default)')).toBeVisible()
+    // unset in e2e → the conservative 200), so the unset readout spells it out.
+    await expect(page.getByText('200 (server default)')).toBeVisible()
+  })
+
+  await test.step('model captions toggle renders in the on state (server default)', async () => {
+    // AUTH_DISABLED → getUserPreferences returns the defaults, where
+    // showModelCaptions is true (the column default / legacy-row fallback).
+    const toggle = page.getByRole('switch', { name: 'Show model captions' })
+    await expect(toggle).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
   })
 })
 
@@ -74,6 +82,21 @@ test('editing profile fields and tuning sliders updates the form live', async ({
   await test.step('max tokens slider updates its live readout', async () => {
     await setRangeValue(page.locator('#settings-max-tokens'), '4096')
     await expect(page.getByText('4,096')).toBeVisible()
+  })
+})
+
+test('the model captions toggle flips and its state survives the failed save', async ({ page }) => {
+  await page.goto('/settings')
+  const toggle = page.getByRole('switch', { name: 'Show model captions' })
+
+  await test.step('toggling off updates the switch state live', async () => {
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
+  await test.step('toggling back on restores it (client-side state, no server write in AUTH_DISABLED)', async () => {
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
   })
 })
 

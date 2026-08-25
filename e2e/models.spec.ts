@@ -44,7 +44,7 @@ test('switching the header model persists locally and is sent with the next requ
     // the theme toggle via a /mode/ name regex, and session titles appear in
     // the drawer list, so a matching title would break that test.
     await sendMessage(page, 'Which AI am I using?')
-    await expect(page.locator('main').getByText('ok')).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText('ok')).toBeVisible()
     expect(captured.length).toBeGreaterThan(0)
     expect(captured.at(-1)!.model).toBe('qwen-3-6')
   })

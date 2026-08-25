@@ -32,6 +32,12 @@ export default defineConfig({
         ...process.env,
         OPENROUTER_API_KEY: 'e2e-test-key',
         OPENROUTER_BASE_URL: 'http://127.0.0.1:4010/v1',
+        // Dead slug for the fallback-retry spec: "DeepSeek V4 Flash" resolves
+        // to this via its MODEL_* override, the mock 404s it (MOCK_404_SLUG
+        // below), and the route retries with the free fallback — which the
+        // mock streams. Only that option is affected; every other model
+        // resolves normally and the existing specs stay untouched.
+        MODEL_DEEPSEEK_V4_FLASH: 'deepseek/deepseek-v4-flash-dead',
       },
     },
     {
@@ -39,6 +45,11 @@ export default defineConfig({
       url: 'http://127.0.0.1:4010/__health',
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
+      // The mock 404s exactly the slug the app server's DeepSeek override
+      // resolves to, so e2e/fallback-retry.spec.ts can drive a real dead-model
+      // 404 through the full route. Unset on reused servers — the spec skips
+      // gracefully when the mock isn't wired this way.
+      env: { ...process.env, MOCK_404_SLUG: 'deepseek/deepseek-v4-flash-dead' },
     },
   ],
 })

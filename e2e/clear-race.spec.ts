@@ -47,7 +47,7 @@ test('New Chat during a slow first save still clears the thread', async ({ page,
 
   // Streamed reply is on screen; saveChatMessages is still in flight.
   await expect(
-    page.locator('main').getByText('Reply that must not survive New Chat.'),
+    page.getByTestId('message-list').getByText('Reply that must not survive New Chat.'),
   ).toBeVisible()
 
   // New Chat while the first save is unresolved (sessionId is still null).
@@ -58,15 +58,15 @@ test('New Chat during a slow first save still clears the thread', async ({ page,
 
   // The thread clears immediately — no waiting on the delayed save.
   await expect(page.getByText(/Ask me anything/)).toBeVisible()
-  await expect(page.locator('main').getByText('Reply that must not survive New Chat.')).toHaveCount(
-    0,
-  )
+  await expect(
+    page.getByTestId('message-list').getByText('Reply that must not survive New Chat.'),
+  ).toHaveCount(0)
 
   // Wait past the delayed save resolving; the stale publish must NOT bring the
   // cleared conversation back onto the screen.
   await page.waitForTimeout(SAVE_DELAY + 750)
   await expect(page.getByText(/Ask me anything/)).toBeVisible()
-  await expect(page.locator('main').getByText('Reply that must not survive New Chat.')).toHaveCount(
-    0,
-  )
+  await expect(
+    page.getByTestId('message-list').getByText('Reply that must not survive New Chat.'),
+  ).toHaveCount(0)
 })

@@ -5,11 +5,20 @@ import { MAX_AUDIO_DATA_URL_LENGTH, MAX_IMAGE_DATA_URL_LENGTH } from '@/lib/medi
  * A message in the chat thread (client state). The Zod schema is the single
  * source of truth: it validates the shape at the localStorage boundary (see
  * lib/storage.ts) and `ChatMessage` is inferred from it.
+ *
+ * `model` records which provider model actually served an assistant reply
+ * (stamped from the route's X-Served-Model header) so branch history shows
+ * which model answered; `modelOverridden` is true when that model differed
+ * from the user's selection (error-fallback retry or vision auto-routing)
+ * and drives the amber warning caption. Both are optional so pre-existing
+ * payloads and user messages stay valid.
  */
 export const ChatMessageSchema = z.object({
   id: z.string(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+  model: z.string().optional(),
+  modelOverridden: z.boolean().optional(),
 })
 
 export type ChatMessage = z.infer<typeof ChatMessageSchema>
@@ -144,6 +153,8 @@ export interface ChatSessionSummary {
   pinned: boolean
   archived: boolean
   systemPrompt?: string | null
+  /** Model id of the session's last assistant reply (sidebar provenance). */
+  lastModel?: string | null
 }
 
 // ─── Command Palette ───

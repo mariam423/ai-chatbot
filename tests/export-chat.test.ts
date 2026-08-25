@@ -9,7 +9,13 @@ import type { ChatMessage } from '../lib/types'
 
 const thread: ChatMessage[] = [
   { id: '1', role: 'user', content: 'Hello there' },
-  { id: '2', role: 'assistant', content: 'Hi! How can I help?' },
+  {
+    id: '2',
+    role: 'assistant',
+    content: 'Hi! How can I help?',
+    model: 'stealth/ox-alpha',
+    modelOverridden: true,
+  },
   { id: '3', role: 'user', content: 'Explain state in React' },
 ]
 
@@ -34,6 +40,22 @@ describe('chatToMarkdown', () => {
     expect(md).toContain('\\# heading')
     expect(md).toContain('\\- item')
   })
+
+  it('adds a *via <model>* line under assistant headings when the model is stamped', () => {
+    const md = chatToMarkdown(thread)
+    // The assistant reply carries a model — rendered right under its heading,
+    // before the content, with the (fallback) tag for an overridden model.
+    const assistantAt = md.indexOf('## Assistant')
+    const section = md.slice(assistantAt, md.indexOf('## You', assistantAt))
+    expect(section).toContain('*via stealth/ox-alpha (fallback)*')
+    expect(section.indexOf('*via')).toBeLessThan(section.indexOf('Hi! How can I help?'))
+  })
+
+  it('omits the model line when the message has no model stamp', () => {
+    const md = chatToMarkdown([{ id: 'x', role: 'assistant', content: 'plain reply' }])
+    expect(md).not.toContain('*via')
+    expect(md).toContain('plain reply')
+  })
 })
 
 describe('chatToJson', () => {
@@ -47,10 +69,24 @@ describe('chatToJson', () => {
     expect(parsed.exportedAt).toBeTruthy()
     expect(parsed.messages).toEqual([
       { role: 'user', content: 'Hello there' },
-      { role: 'assistant', content: 'Hi! How can I help?' },
+      {
+        role: 'assistant',
+        content: 'Hi! How can I help?',
+        model: 'stealth/ox-alpha',
+        modelOverridden: true,
+      },
       { role: 'user', content: 'Explain state in React' },
     ])
     expect(parsed.messages.every((m) => m.id === undefined)).toBe(true)
+  })
+
+  it('keeps model fields out of messages that have no model stamp', () => {
+    const parsed = JSON.parse(chatToJson([{ id: 'x', role: 'assistant', content: 'plain' }])) as {
+      messages: Array<{ model?: string; modelOverridden?: boolean }>
+    }
+    expect(parsed.messages[0]).toEqual({ role: 'assistant', content: 'plain' })
+    expect(parsed.messages[0]!.model).toBeUndefined()
+    expect(parsed.messages[0]!.modelOverridden).toBeUndefined()
   })
 })
 

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Download, type Page } from '@playwright/test'
 import { sseBody } from './helpers'
 
 async function sendMessage(page: Page, text: string): Promise<void> {
@@ -6,7 +6,8 @@ async function sendMessage(page: Page, text: string): Promise<void> {
   await page.getByRole('button', { name: 'Send' }).click()
 }
 
-const threadText = (page: Page, text: string | RegExp) => page.locator('main').getByText(text)
+const threadText = (page: Page, text: string | RegExp) =>
+  page.getByTestId('message-list').getByText(text)
 
 /**
  * Mock /api/chat to echo the last user message, so a regeneration (edit fork)
@@ -22,9 +23,21 @@ async function mockEcho(page: Page): Promise<void> {
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
+      // The route's real X-Served-Model header — every reply is stamped with
+      // the model that served it, and the exports must carry it.
+      headers: { 'x-served-model': 'stealth/ox-alpha', 'x-served-model-overridden': 'true' },
       body: sseBody([`echo: ${lastUser}`]),
     })
   })
+}
+
+/** Read a downloaded file's contents (Playwright gives a stream, not text). */
+async function readDownload(download: Download): Promise<string> {
+  const stream = await download.createReadStream()
+  if (!stream) return ''
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 test('editing a past prompt forks a branch and lets the user toggle versions', async ({ page }) => {
@@ -73,20 +86,31 @@ test('exports the chat as Markdown and JSON downloads', async ({ page }) => {
   const exportButton = page.getByRole('button', { name: 'Export chat' })
   await expect(exportButton).toBeEnabled()
 
-  await test.step('Markdown download fires with a .md file', async () => {
+  await test.step('Markdown download fires with a .md file carrying the served model', async () => {
     const downloadPromise = page.waitForEvent('download')
     await exportButton.click()
     await page.getByRole('menuitem', { name: 'Markdown (.md)' }).click()
     const download = await downloadPromise
     expect(download.suggestedFilename()).toMatch(/\.md$/)
+    const md = await readDownload(download)
+    // The assistant reply's model stamp (with the amber-warning fallback tag)
+    // rides into the transcript under its heading.
+    expect(md).toContain('*via stealth/ox-alpha (fallback)*')
+    expect(md).toContain('echo: export me')
   })
 
-  await test.step('JSON download fires with a .json file', async () => {
+  await test.step('JSON download fires with a .json file carrying the served model', async () => {
     const downloadPromise = page.waitForEvent('download')
     await exportButton.click()
     await page.getByRole('menuitem', { name: 'JSON (.json)' }).click()
     const download = await downloadPromise
     expect(download.suggestedFilename()).toMatch(/\.json$/)
+    const parsed = JSON.parse(await readDownload(download)) as {
+      messages: Array<{ role: string; content: string; model?: string; modelOverridden?: boolean }>
+    }
+    const assistant = parsed.messages.find((m) => m.role === 'assistant')
+    expect(assistant?.model).toBe('stealth/ox-alpha')
+    expect(assistant?.modelOverridden).toBe(true)
   })
 })
 

@@ -41,9 +41,17 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
       const label = roleLabel[message.role] ?? message.role
       const side = message.role === 'user' ? 'right' : 'left'
       const roleColor = message.role === 'user' ? '#0f766e' : '#047857'
+      // Assistant replies carry which model served them (stamped from the
+      // route's X-Served-Model header) — print it under the role so PDFs of
+      // shared conversations keep the provenance.
+      const modelLine =
+        message.role === 'assistant' && message.model
+          ? `<div class="model">via ${escapeHtml(message.model)}${message.modelOverridden ? ' (fallback)' : ''}</div>`
+          : ''
       return `
         <section class="turn ${side}">
           <div class="role" style="color:${roleColor}">${label}</div>
+          ${modelLine}
           <pre>${escapeHtml(message.content)}</pre>
         </section>`
     })
@@ -71,6 +79,8 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
       .turn.right pre { margin-left: auto; background: #f3f4f6; }
       .turn .role { font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
         letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+      .turn .model { font-size: 0.7rem; color: #6b7280; font-style: italic;
+        margin-bottom: 0.25rem; }
       .turn pre {
         display: inline-block; max-width: 85%; text-align: left; white-space: pre-wrap;
         word-break: break-word; background: #ffffff; border: 1px solid #e5e7eb;

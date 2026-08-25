@@ -26,8 +26,8 @@ export interface LlmConfig {
  * Google Gemini's OpenAI-compatible endpoint (docs:
  * https://ai.google.dev/gemini-api/docs/openai). Serves `/chat/completions`
  * with `Authorization: Bearer <GEMINI_API_KEY>`, so the shared route code
- * works unchanged — free-tier models like `gemini-2.0-flash` are reachable
- * with a free AI Studio key.
+ * works unchanged — free-tier models like `gemini-2.5-flash-lite` are
+ * reachable with a free AI Studio key.
  */
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
 
@@ -95,24 +95,45 @@ export function getLlmConfig(userApiKey?: string | null): LlmConfig {
 }
 
 /**
- * Conservative default for the completion-length cap (`max_tokens`) sent to
- * the provider when the caller doesn't specify one.
+ * Resolve the `max_tokens` value to put on a completion request.
  *
- * Sending an explicit value matters for cost control: when `max_tokens` is
- * omitted, OpenRouter falls back to the model's own maximum (often 65536)
- * and pre-authorizes the request against that full estimated cost — a
- * low-credit key can be rejected with 402 Insufficient Balance even for a
- * short reply. A modest cap keeps the pre-auth tiny while still allowing
- * long answers. Override with MAX_OUTPUT_TOKENS (e.g. 8192 for a chatty
- * model); the per-user settings slider still wins when the client sends one.
+ * A per-user value (Settings → Max Completion Tokens, sent by the client as
+ * `maxTokens`) always wins. Otherwise every provider gets the conservative
+ * cap from `getMaxOutputTokens()` (MAX_OUTPUT_TOKENS env or the 200 default).
  *
- * Scope: this cap is applied at every token-billed call site — the streaming
- * chat route (app/api/chat) and the agent tool-planning calls (lib/agent).
- * It is deliberately NOT sent to /audio/transcriptions: the OpenAI-compatible
- * STT API has no max_tokens parameter (whisper is billed by audio duration,
- * and strict providers reject unknown fields with a 400).
+ * The cap is what makes low-credit keys work: OpenRouter pre-authorizes the
+ * request against `max_tokens` and rejects the key with 402 Insufficient
+ * Balance when the pre-auth exceeds the remaining balance (verified live:
+ * omitting the field made OpenRouter pre-authorize ~16,000 tokens and 402 a
+ * key that can only afford ~2,500; an explicit tiny cap pre-authorizes cents
+ * and streams). So the field is always sent — never omitted.
  */
-export const DEFAULT_MAX_OUTPUT_TOKENS = 4096
+export function resolveMaxTokens(userMaxTokens?: number): number {
+  if (userMaxTokens !== undefined) return userMaxTokens
+  return getMaxOutputTokens()
+}
+
+/**
+ * Conservative default for the completion-length cap (`max_tokens`) sent to
+ * providers when the caller doesn't specify one.
+ *
+ * Sending an explicit value matters for cost control and 402 avoidance: when
+ * `max_tokens` is omitted, providers fall back to the model's own maximum
+ * (OpenRouter's is often 16,000–65,536) and pre-authorize the request against
+ * that full estimated cost, which rejects a low-credit key with 402
+ * Insufficient Balance before a single token streams (verified live). The cap
+ * is deliberately tiny (200) and is per-request; the per-user settings slider
+ * raises it per chat when a longer answer is wanted.
+ *
+ * Override with MAX_OUTPUT_TOKENS (e.g. 8192 for a chatty model).
+ *
+ * Scope: applied at every token-billed call site — the streaming chat route
+ * (app/api/chat) and the agent tool-planning calls (lib/agent) for all
+ * providers. It is deliberately NOT sent to /audio/transcriptions: the
+ * OpenAI-compatible STT API has no max_tokens parameter (whisper is billed by
+ * audio duration, and strict providers reject unknown fields with a 400).
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 200
 
 /** Resolve the effective completion cap: MAX_OUTPUT_TOKENS env or the default. */
 export function getMaxOutputTokens(): number {

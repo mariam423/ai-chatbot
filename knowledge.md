@@ -49,9 +49,11 @@ agent scaffold (`.agents/`) and tests that validate both.
   estimated tokens fit (defaults 20 / 8000; env `MAX_HISTORY_MESSAGES` /
   `MAX_CONTEXT_TOKENS`). Deterministic FIFO, no extra LLM calls.
 - `lib/storage.ts` — versioned localStorage thread persistence (loadThread/
-  saveThread/clearThread/normalizeThread); payload is `{ version: 1, messages }`
-  validated with Zod at the storage boundary. Legacy unversioned data (a bare
-  array) is migrated on first load and written back in the current format;
+  saveThread/clearThread/normalizeThread); payload is `{ version: 3, branches,
+  active }` with optional per-message `model`/`modelOverridden` (which model
+  served a reply, and whether it was swapped) — validated with Zod at the
+  storage boundary. Legacy unversioned data (a bare array) and v1/v2 payloads
+  are migrated on first load and written back in the current format;
   corrupt/partial data → empty thread.
 - `lib/types.ts` — shared chat + SSE types; `ChatMessageSchema` and
   `ChatWireMessageSchema` (Zod) are the source of truth for `ChatMessage` and
@@ -104,8 +106,13 @@ npm run check      # typecheck + tests
   200+ models, free models available). Copy `.env.example` → `.env.local`.
 - `OPENAI_API_KEY` — also supported for any other OpenAI-compatible endpoint.
   When only `OPENROUTER_API_KEY` is set, the route defaults to
-  `https://openrouter.ai/api/v1` and model `stealth/ox-alpha`;
-  otherwise defaults are OpenAI's (`api.openai.com/v1`, `gpt-4o-mini`).
+  `https://openrouter.ai/api/v1` and model `stealth/ox-alpha` (a genuinely
+  free, vision-capable route — 0-cost and verified live, so the app works on
+  a zero-credit key; override with `FALLBACK_MODEL`). The 404/402/429 error
+  retry is per-provider: OpenRouter retries with `FALLBACK_MODEL`,
+  Gemini with `GEMINI_FALLBACK_MODEL` (default `gemini-2.5-flash-lite`), and
+  OpenAI with `OPENAI_FALLBACK_MODEL` (default `gpt-4o-mini`). Otherwise
+  defaults are OpenAI's (`api.openai.com/v1`, `gpt-4o-mini`).
 - `OPENROUTER_BASE_URL`, `MODEL_NAME` — override OpenRouter defaults.
 - `OPENAI_BASE_URL`, `OPENAI_MODEL` — override OpenAI defaults.
 - `OPENROUTER_APP_NAME` — optional; sent as `X-Title` for OpenRouter app
@@ -181,9 +188,10 @@ npm run check      # typecheck + tests
   `npx prisma generate` after any schema change (postinstall does it).
 - Conversation persistence (FR-9) is best-effort via localStorage
   (`chat.messages` key). The stored payload is versioned
-  (`{ version: 1, messages }`) — bump `THREAD_STORAGE_VERSION` in
-  `lib/storage.ts` and add a migration case to `normalizeThread` when the
-  shape changes; legacy unversioned data (bare array) is migrated to v1 on
+  (`{ version: 3, branches, active }`, with optional per-message `model` /
+  `modelOverridden`) — bump `THREAD_STORAGE_VERSION` in `lib/storage.ts` and
+  add a migration case to `normalizeThread` when the shape changes; legacy
+  unversioned data (bare array) and v1/v2 payloads are migrated to v3 on
   first load and written back (tested). The persist effect is
   guarded by a `restored` flag: without it, React StrictMode's double effect
   run in dev writes `[]` over a stored thread before restore applies.

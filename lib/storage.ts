@@ -11,12 +11,16 @@ import { ChatMessageSchema, type ChatMessage } from './types'
  * The active branch is what the UI renders; switching branches re-renders the
  * stored conversation without losing any branch's context.
  *
- * Stored payload is versioned (`{ version: 2, branches, active }`) so future
+ * Stored payload is versioned (`{ version: 3, branches, active }`) so future
  * schema changes can migrate old data instead of silently dropping it (see the
  * vercel-react-best-practices `client-localstorage-schema` rule). Reading is
  * validated with Zod at the storage boundary — corrupt or partial payloads are
  * treated as an empty thread, never trusted, while legacy formats are migrated
  * to the current version (see `normalizeThread`).
+ *
+ * v3 adds the optional per-message `model` / `modelOverridden` fields (which
+ * model served an assistant reply, and whether it was swapped) so branch
+ * history shows which model answered; v2 payloads migrate losslessly.
  */
 
 export const THREAD_STORAGE_KEY = 'chat.messages'
@@ -52,7 +56,7 @@ export function clearSessionId(): void {
 }
 
 /** Current persisted format version. Bump + add a migration when the shape changes. */
-export const THREAD_STORAGE_VERSION = 2
+export const THREAD_STORAGE_VERSION = 3
 
 const ThreadStateSchema = z.object({
   version: z.literal(THREAD_STORAGE_VERSION),
@@ -68,6 +72,13 @@ export interface ThreadState {
   branches: ChatMessage[][]
   active: number
 }
+
+/** Version 2 format (branched, pre-model-field): migrated to v3 as-is. */
+const Version2Schema = z.object({
+  version: z.literal(2),
+  branches: z.array(z.array(ChatMessageSchema)).min(1),
+  active: z.number().int().min(0),
+})
 
 /** Version 1 format (pre-branching): a single linear thread. */
 const Version1Schema = z.object({
@@ -91,6 +102,20 @@ export function normalizeThread(
 ): { state: StoredThread; migrated: boolean } | null {
   const current = ThreadStateSchema.safeParse(payload)
   if (current.success) return { state: current.data, migrated: false }
+
+  const v2 = Version2Schema.safeParse(payload)
+  if (v2.success) {
+    // v2 → v3 is an identity migration: the message shape gained optional
+    // model fields, so every v2 payload is already valid v3 data.
+    return {
+      state: {
+        version: THREAD_STORAGE_VERSION,
+        branches: v2.data.branches,
+        active: v2.data.active,
+      },
+      migrated: true,
+    }
+  }
 
   const v1 = Version1Schema.safeParse(payload)
   if (v1.success) {

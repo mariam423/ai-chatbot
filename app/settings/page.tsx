@@ -191,6 +191,7 @@ export default function SettingsPage() {
   const [preferredModel, setPreferredModel] = useState('')
   const [temperature, setTemperature] = useState<number | null>(null)
   const [maxCompletionTokens, setMaxCompletionTokens] = useState<number | null>(null)
+  const [showModelCaptions, setShowModelCaptions] = useState(true)
   const [defaultMaxCompletionTokens, setDefaultMaxCompletionTokens] = useState<number | null>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
@@ -220,6 +221,7 @@ export default function SettingsPage() {
       setPreferredModel(result.data.preferredModel)
       setTemperature(result.data.temperature)
       setMaxCompletionTokens(result.data.maxCompletionTokens)
+      setShowModelCaptions(result.data.showModelCaptions)
       setDefaultMaxCompletionTokens(result.data.defaultMaxCompletionTokens)
       try {
         setPresets(JSON.parse(result.data.systemPromptPresets) as SystemPromptPreset[])
@@ -248,6 +250,7 @@ export default function SettingsPage() {
       preferredModel,
       ...(temperature !== null ? { temperature } : {}),
       ...(maxCompletionTokens !== null ? { maxCompletionTokens } : {}),
+      showModelCaptions,
     })
     setSaving(false)
     if (result.ok) {
@@ -536,6 +539,39 @@ export default function SettingsPage() {
               onChange={setMaxCompletionTokens}
               defaultValue={defaultMaxCompletionTokens}
             />
+
+            {/* Per-message model captions toggle */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <label
+                  htmlFor="settings-model-captions"
+                  className="block text-xs font-medium text-[var(--text-secondary)]"
+                >
+                  Model captions
+                </label>
+                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">
+                  Show a &quot;via &lt;model&gt;&quot; note under each reply so you know which model
+                  answered. Off hides them in new and restored chats.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                id="settings-model-captions"
+                aria-checked={showModelCaptions}
+                aria-label="Show model captions"
+                onClick={() => setShowModelCaptions((prev) => !prev)}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  showModelCaptions ? 'bg-emerald-500' : 'bg-[var(--border-medium)]'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-all ${
+                    showModelCaptions ? 'left-[22px]' : 'left-0.5'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
         </motion.section>
 

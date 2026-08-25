@@ -190,8 +190,9 @@ SHOULD keep chat state and API logic separate from presentational components so 
 - No auth in v1 (assumed) — confirm whether accounts are planned and when.
 - Single conversation thread in v1 (assumed) — confirm before adding persistence (FR-9).
 - Provider/model tuning: OpenRouter is the default (via `OPENROUTER_API_KEY`,
-  default model `stealth/ox-alpha`), with overrides via `OPENROUTER_BASE_URL` /
-  `MODEL_NAME` and an OpenAI-compatible fallback (`OPENAI_API_KEY`) — confirm
-  which models to ship in v1.
+  default model `stealth/ox-alpha`, a genuinely free and vision-capable
+  route — 0-cost and verified live against the OpenRouter API), with
+  overrides via `OPENROUTER_BASE_URL` / `MODEL_NAME` and an OpenAI-compatible
+  fallback (`OPENAI_API_KEY`) — confirm which models to ship in v1.
 - Maximum input length and any per-user rate limiting.
 - Whether retry (FR-5) should resend the full history or only the failed request.

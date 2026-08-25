@@ -103,6 +103,12 @@ model ChatMessage {
   role      String
   content   String
   position  Int
+  // Which provider model served this message, stamped client-side from the
+  // route's X-Served-Model header (NULL for messages that predate the field).
+  model           String?
+  // True when the served model differed from the user's selection (error
+  // fallback retry or vision auto-routing) — drives the amber warning caption.
+  modelOverridden Boolean?
   // The branch this message belongs to ("0", "1", …) — branch order is the
   // index, and `position` orders within a branch. Together they persist the
   // conversation's forked branches across session switches.
@@ -166,6 +172,8 @@ model UserPreference {
   preferredModel            String?
   temperature               Float?
   maxCompletionTokens       Int?
+  // Per-message "via <model>" captions in the thread (default: shown).
+  showModelCaptions         Boolean @default(true)
   user                      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")

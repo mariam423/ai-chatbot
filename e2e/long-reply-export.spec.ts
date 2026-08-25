@@ -3,22 +3,23 @@ import { expect, test, type Page } from '@playwright/test'
 import { sseBody } from './helpers'
 
 /**
- * The chat route always sends an explicit conservative `max_tokens` (4096 by
- * default — see lib/llm-config.ts) so OpenRouter pre-authorizes a small
- * amount instead of its 65,536 default, which 402s low-credit keys. This spec
- * pins the CLIENT-side contract around that change: a streamed reply much
- * longer than the default cap must be preserved end-to-end — SSE parse →
- * streaming accumulator → Markdown render → Markdown/JSON export →
- * localStorage persistence — with no truncation at any layer. If anything
- * starts capping content at ~4096 tokens (~16,384 chars), the mid-reply and
- * tail markers below will be missing from the exported file.
+ * The chat route never lets a reply be cut short server-side: every provider
+ * request carries the small 200-token conservative max_tokens cap (see
+ * lib/llm-config.ts resolveMaxTokens) — but the client must render and export
+ * the FULL streamed reply no matter what the provider caps. This spec pins
+ * that CLIENT-side contract: a streamed reply much longer than the default
+ * cap must be preserved end-to-end — SSE parse → streaming accumulator →
+ * Markdown render → Markdown/JSON export → localStorage persistence — with no
+ * truncation at any layer. If anything starts capping content at ~200 tokens
+ * (~800 chars), the mid-reply and tail markers below will be missing from the
+ * exported file.
  */
 
-const MARKER_MID = 'MID_MARKER_PAST_THE_DEFAULT_4096_TOKEN_CAP'
+const MARKER_MID = 'MID_MARKER_PAST_THE_DEFAULT_200_TOKEN_CAP'
 const MARKER_TAIL = 'TAIL_MARKER_FINAL_SENTENCE_END'
 
-/** ~4 chars per token heuristic for the 4096-token default boundary. */
-const DEFAULT_CAP_CHARS = 4096 * 4
+/** ~4 chars per token heuristic for the 200-token default boundary. */
+const DEFAULT_CAP_CHARS = 200 * 4
 
 const filler = (n: number, tag: string): string =>
   Array.from(
@@ -28,7 +29,7 @@ const filler = (n: number, tag: string): string =>
   ).join('\n\n')
 
 /**
- * A reply of ~30,500 chars (~7,600 tokens — well beyond the 4096 default):
+ * A reply of ~30,500 chars (~7,600 tokens — well beyond the 200 default):
  * the first filler block alone (~18,300 chars) crosses the default cap, so
  * MARKER_MID sits past the boundary and MARKER_TAIL at the very end.
  */
@@ -47,7 +48,8 @@ async function sendMessage(page: Page, text: string): Promise<void> {
   await page.getByRole('button', { name: 'Send' }).click()
 }
 
-const threadText = (page: Page, text: string | RegExp) => page.locator('main').getByText(text)
+const threadText = (page: Page, text: string | RegExp) =>
+  page.getByTestId('message-list').getByText(text)
 
 async function exportedMarkdown(page: Page): Promise<string> {
   const downloadPromise = page.waitForEvent('download')
@@ -58,7 +60,7 @@ async function exportedMarkdown(page: Page): Promise<string> {
   return readFileSync(filePath!, 'utf8')
 }
 
-test('exports a reply longer than the 4096-token default without truncation', async ({ page }) => {
+test('exports a reply longer than the 200-token default without truncation', async ({ page }) => {
   const reply = longReply()
   await page.route('**/api/chat', (route) =>
     route.fulfill({
@@ -78,10 +80,10 @@ test('exports a reply longer than the 4096-token default without truncation', as
     await expect(threadText(page, MARKER_MID)).toBeVisible()
   })
 
-  await test.step('Markdown export preserves the content beyond the 4096-token cap', async () => {
+  await test.step('Markdown export preserves the content beyond the 200-token cap', async () => {
     const md = await exportedMarkdown(page)
     // The mid marker must appear past the token cap, and the tail marker at
-    // the very end — any truncation at ~4096 tokens would drop both.
+    // the very end — any truncation at ~200 tokens would drop both.
     expect(md.indexOf(MARKER_MID)).toBeGreaterThan(DEFAULT_CAP_CHARS)
     expect(md.indexOf(MARKER_TAIL)).toBeGreaterThan(md.indexOf(MARKER_MID))
     expect(md).toContain(prompt)

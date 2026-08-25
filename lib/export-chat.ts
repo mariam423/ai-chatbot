@@ -40,6 +40,15 @@ export function chatToMarkdown(messages: ChatMessage[], title?: string): string 
   for (const message of messages) {
     const label = roleLabel[message.role] ?? message.role
     lines.push(`## ${label}`)
+    // Assistant replies carry which model served them (stamped from the
+    // route's X-Served-Model header) — surface it as a small line under the
+    // heading so shared transcripts keep the provenance. `fallback` tags the
+    // amber-warning case where the served model differed from the selection.
+    if (message.role === 'assistant' && message.model) {
+      const tag = message.modelOverridden ? ' (fallback)' : ''
+      lines.push('')
+      lines.push(`*via ${message.model}${tag}*`)
+    }
     lines.push('')
     const body = escapeMarkdown(message.content)
     // Indent multi-paragraph content so it stays under the heading, and blank a
@@ -77,7 +86,15 @@ export function chatToJson(messages: ChatMessage[], title?: string): string {
   const payload = {
     title: title ?? EXPORT_DEFAULT_TITLE,
     exportedAt: new Date().toISOString(),
-    messages: messages.map(({ role, content }) => ({ role, content })),
+    // `model`/`modelOverridden` ride along only when the message carries them
+    // (assistant replies stamped from the route's X-Served-Model header), so
+    // exports stay stable for payloads without model provenance.
+    messages: messages.map(({ role, content, model, modelOverridden }) => ({
+      role,
+      content,
+      ...(model ? { model } : {}),
+      ...(modelOverridden !== undefined ? { modelOverridden } : {}),
+    })),
   }
   return JSON.stringify(payload, null, 2)
 }
