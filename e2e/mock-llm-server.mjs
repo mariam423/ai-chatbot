@@ -18,10 +18,11 @@
  *  - POST /v1/chat/completions
  *      Records the parsed JSON body, then:
  *       - stream: true  -> SSE stream of a long reply whose mid marker sits
- *                          past the 4096-token default cap and whose tail
- *                          marker is at the very end (mirrors the markers in
- *                          e2e/long-reply-export.spec.ts; the proxy spec
- *                          asserts both come back verbatim).
+ *                          past the 200-token default cap (the explicit
+ *                          max_tokens the server sends on every provider)
+ *                          and whose tail marker is at the very end (mirrors
+ *                          the markers in e2e/long-reply-export.spec.ts; the
+ *                          proxy spec asserts both come back verbatim).
  *       - stream: false -> a plain (non-SSE) JSON completion, so an agent
  *                          planning call would still get a valid answer.
  */
@@ -32,9 +33,17 @@ const HOST = '127.0.0.1'
 const PORT = Number(process.env.MOCK_LLM_PORT) || 4010
 
 let lastRequest = null
+// Every chat-completions request body, in order — exposed at /__requests so a
+// spec can assert the full sequence (e.g. a 404'd model then the retry).
+const requests = []
 
-const MARKER_MID = 'MID_MARKER_PAST_THE_DEFAULT_4096_TOKEN_CAP'
+const MARKER_MID = 'MID_MARKER_PAST_THE_DEFAULT_200_TOKEN_CAP'
 const MARKER_TAIL = 'TAIL_MARKER_FINAL_SENTENCE_END'
+
+// Optional slug that this endpoint 404s on (e2e/fallback-retry.spec.ts drives
+// the real /api/chat route through a dead-model 404 so the provider-fallback
+// retry fires). Unset means every model streams normally.
+const MODEL_404 = process.env.MOCK_404_SLUG?.trim()
 
 const filler = (n, tag) =>
   Array.from(
@@ -43,7 +52,7 @@ const filler = (n, tag) =>
       `${tag} paragraph ${i}: the quick brown fox jumps over the lazy dog while the stream keeps flowing far past the token budget of the conservative default.`,
   ).join('\n\n')
 
-/** ~30,500 chars (~7,600 tokens — well beyond the 4096 default). */
+/** ~30,500 chars (~7,600 tokens — well beyond the 200 default). */
 function longReply() {
   return [
     'Here is a deliberately very long answer.',
@@ -73,11 +82,38 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/__requests') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(requests))
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === '/__reset') {
+    requests.length = 0
+    lastRequest = null
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ ok: true }))
+    return
+  }
+
   if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
     lastRequest = { url: req.url, body }
+    requests.push(body)
+
+    // Configurable dead slug: pretend the model doesn't exist so the route's
+    // 404/402/429 fallback retry has a real trigger (see MODEL_404 above).
+    if (MODEL_404 && body.model === MODEL_404) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          error: { message: `model \`${MODEL_404}\` not found`, type: 'invalid_request_error' },
+        }),
+      )
+      return
+    }
 
     res.writeHead(200, {
       'content-type': 'text/event-stream',
@@ -85,7 +121,9 @@ const server = createServer(async (req, res) => {
     })
 
     if (body.stream) {
-      const reply = longReply()
+      // Prefix the streamed reply with the served model so a spec can assert
+      // which model actually answered (e.g. the fallback after a 404 retry).
+      const reply = `Retried with the fallback model ${body.model ?? 'unknown'}.\n\n${longReply()}`
       // Stream the reply in ~512-char chunks with a small pause between them
       // so the proxy genuinely passes an ongoing stream rather than one blob.
       const partSize = 512
@@ -107,7 +145,10 @@ const server = createServer(async (req, res) => {
         choices: [
           {
             index: 0,
-            message: { role: 'assistant', content: longReply() },
+            message: {
+              role: 'assistant',
+              content: `Retried with the fallback model ${body.model ?? 'unknown'}.\n\n${longReply()}`,
+            },
             finish_reason: 'stop',
           },
         ],

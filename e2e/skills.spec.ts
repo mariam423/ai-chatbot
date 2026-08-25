@@ -20,9 +20,10 @@ async function sendMessage(page: Page, text: string): Promise<void> {
 }
 
 // Skill descriptions can substring-match short reply text (e.g. "lookups"
-// contains "ok"), so scope thread assertions to <main> like chat.spec.ts.
+// contains "ok"), so scope thread assertions to the message list like
+// chat.spec.ts (the header also shows the active session title).
 const threadText = (page: Page, text: string) =>
-  page.locator('main').getByText(text, { exact: true })
+  page.getByTestId('message-list').getByText(text, { exact: true })
 
 test('toggles skills per session and sends the override', async ({ page }) => {
   const bodies: Array<{ enabledSkills?: string[] }> = []

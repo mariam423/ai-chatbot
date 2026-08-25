@@ -381,7 +381,14 @@ export default function CommandPalette({
                               : 'text-[var(--text-muted)]'
                           }
                         />
-                        <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {session.title}
+                          {session.lastModel && (
+                            <span className="ml-2 font-mono text-[10px] font-normal text-[var(--text-muted)]">
+                              via {session.lastModel}
+                            </span>
+                          )}
+                        </span>
                         {session.pinned && (
                           <HugeiconsIcon
                             icon={PinIcon}

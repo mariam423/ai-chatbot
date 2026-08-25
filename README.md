@@ -81,7 +81,7 @@ OpenRouter is the default provider:
 OPENROUTER_API_KEY=sk-or-v1-your-key
 ```
 
-The route uses `https://openrouter.ai/api/v1` and the default model `stealth/ox-alpha` when no overrides are provided.
+The route uses `https://openrouter.ai/api/v1` and the default model `stealth/ox-alpha` (a genuinely free, vision-capable OpenRouter route — 0-cost, verified live — so the app works even on a zero-credit key) when no overrides are provided. Image/video/audio attachments automatically route to a vision-capable model (`stealth/ox-alpha` on OpenRouter, which is free AND multimodal).
 
 For another OpenAI-compatible provider, use:
 
@@ -134,6 +134,8 @@ MODEL_GPT_5_6=openai/gpt-5.6
 
 You can also set `OPENROUTER_APP_NAME` to send an optional `X-Title` header to OpenRouter.
 
+If a chosen model fails with a 404 (dead/deprecated slug), 402 (low-credit pre-authorization), or 429 (model-scoped rate limit), the chat route automatically retries once with that provider's backup model instead of surfacing the error to the UI. The backups are `stealth/ox-alpha` (OpenRouter — free, so it rescues even a zero-credit key, where a paid backup would 402 identically; overridable via `FALLBACK_MODEL`), `gemini-2.5-flash-lite` (direct Gemini; `GEMINI_FALLBACK_MODEL`), and `gpt-4o-mini` (OpenAI; `OPENAI_FALLBACK_MODEL`). On OpenRouter the same model backs the "Provider default" selection. The retry never fires when the backup model is already the selection.
+
 ### Optional MCP servers
 
 Configure one or more Streamable HTTP MCP servers with a JSON array. Keep credentials in server-only environment variables:
@@ -164,17 +166,17 @@ MAX_CONTEXT_TOKENS=8000
 
 ### Completion length (cost control)
 
-Every upstream request sends an explicit `max_tokens` cap so the provider never falls back to its own maximum (OpenRouter's is often 65536) — providers pre-authorize cost against `max_tokens`, so a huge default can reject a low-credit key with `402 Insufficient Balance` even for a short reply:
+Every provider request carries an explicit `max_tokens` cap (see `lib/llm-config.ts` → `resolveMaxTokens`): the per-user **Max Completion Tokens** slider in Settings wins when set, otherwise the conservative default below applies. The cap is what keeps low-credit keys alive — OpenRouter pre-authorizes the request against `max_tokens` and rejects the key with `402 Insufficient Balance` when the pre-auth exceeds the remaining balance (verified live: omitting the field made OpenRouter pre-authorize ~16,000 tokens and 402 a key that could only afford ~2,500; an explicit tiny cap pre-authorizes cents and streams).
 
 ```env
-MAX_OUTPUT_TOKENS=4096
+MAX_OUTPUT_TOKENS=200
 ```
 
-Defaults to 4096. The per-user **Max Completion Tokens** slider in Settings overrides it when set.
+Defaults to 200. The per-user **Max Completion Tokens** slider overrides it when set.
 
-This cap is applied at every token-billed call site: the streaming chat route and the agent tool-planning calls. It is deliberately **not** sent to `/audio/transcriptions` — the OpenAI-compatible STT API has no `max_tokens` parameter (whisper is billed by audio duration, and strict providers reject unknown fields with a 400).
+This cap is deliberately **not** sent to `/audio/transcriptions` — the OpenAI-compatible STT API has no `max_tokens` parameter (whisper is billed by audio duration, and strict providers reject unknown fields with a 400).
 
-The settings page (**Model & Generation → Max Completion Tokens**) shows the effective default (`4,096 (server default)`) so users can see what applies before they override it with the slider.
+The settings page (**Model & Generation → Max Completion Tokens**) shows the effective default (`200 (server default)`) so users can see what applies before they override it with the slider.
 
 ## Feature Walkthrough
 

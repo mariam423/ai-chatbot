@@ -41,6 +41,10 @@ test.describe('visual regression — dark mode', () => {
     await setTheme(page, 'dark')
     await expect(page.locator('main')).toHaveScreenshot('chat-empty-dark.png', {
       maxDiffPixelRatio: 0.02,
+      // The header's conversation metadata (title + served model) is
+      // session-dependent — mask it like the drawer's session list so the
+      // baseline stays deterministic.
+      mask: [page.getByTestId('conversation-meta')],
     })
   })
 
@@ -53,6 +57,7 @@ test.describe('visual regression — dark mode', () => {
 
     await expect(page.locator('main')).toHaveScreenshot('chat-thread-dark.png', {
       maxDiffPixelRatio: 0.02,
+      mask: [page.getByTestId('conversation-meta')],
     })
   })
 
@@ -94,6 +99,7 @@ test.describe('visual regression — light mode', () => {
     await setTheme(page, 'light')
     await expect(page.locator('main')).toHaveScreenshot('chat-empty-light.png', {
       maxDiffPixelRatio: 0.02,
+      mask: [page.getByTestId('conversation-meta')],
     })
   })
 
@@ -106,6 +112,7 @@ test.describe('visual regression — light mode', () => {
 
     await expect(page.locator('main')).toHaveScreenshot('chat-thread-light.png', {
       maxDiffPixelRatio: 0.02,
+      mask: [page.getByTestId('conversation-meta')],
     })
   })
 

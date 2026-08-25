@@ -31,6 +31,7 @@ function pref(overrides: Partial<UserPreference> = {}): UserPreference {
     preferredModel: null,
     temperature: null,
     maxCompletionTokens: null,
+    showModelCaptions: true,
     ...overrides,
   }
 }

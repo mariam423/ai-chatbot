@@ -7,10 +7,12 @@ async function sendMessage(page: Page, text: string): Promise<void> {
   await page.getByRole('button', { name: 'Send' }).click()
 }
 
-// The desktop sidebar lists every conversation's title, so unqualified
-// getByText could match both a thread bubble and a sidebar entry. Scope
-// thread assertions to <main> to keep them unambiguous.
-const threadText = (page: Page, text: string | RegExp) => page.locator('main').getByText(text)
+// The desktop sidebar lists every conversation's title and the header shows
+// the active session's title as conversation metadata, so unqualified getByText
+// could match a thread bubble, a sidebar entry, or the header. Scope thread
+// assertions to the message list to keep them unambiguous.
+const threadText = (page: Page, text: string | RegExp) =>
+  page.getByTestId('message-list').getByText(text)
 
 test('renders the chat shell with an empty state', async ({ page }) => {
   await page.goto('/')
@@ -18,6 +20,60 @@ test('renders the chat shell with an empty state', async ({ page }) => {
   await expect(page.getByText(/Ask me anything/)).toBeVisible()
   await expect(page.getByLabel('Message')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+})
+
+test('hides the per-message captions when the user disabled them in settings', async ({ page }) => {
+  // getUserPreferences runs as a server action on mount. Intercept its
+  // response (Next flight encoding: `0:…\n1:{"ok":true,"data":{…}}`) and flip
+  // showModelCaptions to false — the client path (chat-app reads the
+  // preference → Chat gates the caption) is then exercised end to end.
+  await page.route('**/*', async (route) => {
+    const request = route.request()
+    // Only touch the getUserPreferences server action. Its POST carries an
+    // encrypted next-action header (the body doesn't name the function), so
+    // identify it by its response: the flight-encoded data object with
+    // displayName is unique to getUserPreferences.
+    const isServerAction = request.method() === 'POST' && Boolean(request.headers()['next-action'])
+    if (!isServerAction) {
+      await route.continue()
+      return
+    }
+    try {
+      const response = await route.fetch()
+      const raw = await response.text()
+      const body = raw.includes('"displayName"')
+        ? raw.replace('"showModelCaptions":true', '"showModelCaptions":false')
+        : raw
+      await route.fulfill({
+        status: response.status(),
+        contentType: 'text/x-component',
+        body,
+      })
+    } catch {
+      // The route's response can be disposed when the test tears down while
+      // a server-action request is still in flight — the interception is
+      // best-effort and the assertion below is what matters.
+      await route.continue().catch(() => undefined)
+    }
+  })
+  // Mock the reply with the route's X-Served-Model header so a caption WOULD
+  // render if the preference were on.
+  await page.route('**/api/chat', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      headers: { 'x-served-model': 'stealth/ox-alpha', 'x-served-model-overridden': 'true' },
+      body: sseBody(['Hidden caption reply']),
+    }),
+  )
+
+  await page.goto('/')
+  await sendMessage(page, 'Toggle check')
+  await expect(threadText(page, 'Hidden caption reply')).toBeVisible()
+
+  await test.step('no caption renders for the stamped reply', async () => {
+    await expect(page.getByTestId('served-model')).toHaveCount(0)
+  })
 })
 
 test('sends a message and streams the assistant reply', async ({ page }) => {
@@ -32,6 +88,78 @@ test('sends a message and streams the assistant reply', async ({ page }) => {
 
   await test.step('assistant reply is streamed and rendered', async () => {
     await expect(threadText(page, 'Hello world!')).toBeVisible()
+  })
+})
+
+test('shows the served model caption from the X-Served-Model header', async ({ page }) => {
+  // Mock /api/chat with the route's X-Served-Model header so the client-side
+  // "via <model>" caption can be asserted end to end.
+  await page.route('**/api/chat', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      headers: { 'x-served-model': 'stealth/ox-alpha' },
+      body: sseBody(['Served by the fallback model.']),
+    }),
+  )
+
+  await page.goto('/')
+  await sendMessage(page, 'Hi there')
+
+  await test.step('reply streams and the served-model caption appears', async () => {
+    await expect(threadText(page, 'Served by the fallback model.')).toBeVisible()
+    await expect(page.getByTestId('served-model')).toContainText('stealth/ox-alpha')
+  })
+
+  await test.step('no override flag → the caption stays neutral (no fallback tag)', async () => {
+    // The mock doesn't set X-Served-Model-Overridden, so the caption must not
+    // carry the amber warning state.
+    await expect(page.getByTestId('served-model')).not.toHaveAttribute('data-overridden', 'true')
+    await expect(page.getByTestId('served-model')).not.toContainText('fallback')
+  })
+
+  await test.step('each reply carries its own caption', async () => {
+    await sendMessage(page, 'And again')
+    // The mock replies with the same header, so the second reply stamps its
+    // own caption too — one per assistant message, never duplicated.
+    await expect(page.getByTestId('served-model')).toHaveCount(2)
+  })
+})
+
+test('renders the served-model caption as an amber warning when the model was overridden', async ({
+  page,
+}) => {
+  // Mock a fallback swap: the served model differs from the selection and the
+  // route flags it via X-Served-Model-Overridden.
+  await page.route('**/api/chat', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      headers: { 'x-served-model': 'stealth/ox-alpha', 'x-served-model-overridden': 'true' },
+      body: sseBody(['Served by the fallback.']),
+    }),
+  )
+
+  await page.goto('/')
+  await sendMessage(page, 'Hi there')
+
+  await test.step('caption carries the amber warning state and fallback tag', async () => {
+    await expect(threadText(page, 'Served by the fallback.')).toBeVisible()
+    const caption = page.getByTestId('served-model')
+    await expect(caption).toContainText('stealth/ox-alpha')
+    await expect(caption).toHaveAttribute('data-overridden', 'true')
+    await expect(caption).toContainText('fallback')
+  })
+
+  await test.step('the served model survives a reload (DB restore)', async () => {
+    await page.reload()
+    await expect(threadText(page, 'Served by the fallback.')).toBeVisible()
+    // The model + override flag round-trip through the DB-backed restore.
+    const caption = page.getByTestId('served-model')
+    await expect(caption).toHaveCount(1)
+    await expect(caption).toContainText('stealth/ox-alpha')
+    await expect(caption).toHaveAttribute('data-overridden', 'true')
+    await expect(caption).toContainText('fallback')
   })
 })
 

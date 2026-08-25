@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { errorResponse } from '@/lib/http'
-import { getLlmConfig, getMaxOutputTokens } from '@/lib/llm-config'
+import { getLlmConfig, resolveMaxTokens } from '@/lib/llm-config'
 import { hasBuiltInToolIntent, runAgent, type AgentInputMessage } from '@/lib/agent'
 import { listMcpTools } from '@/lib/mcp-client'
 import {
@@ -11,7 +11,7 @@ import {
 } from '@/lib/skills/registry'
 import { listSkillTools } from '@/lib/skills/tools'
 import { DEFAULT_MAX_CONTEXT_TOKENS, estimateTokens, truncateHistory } from '@/lib/context'
-import { resolveModel, ModelKeySchema } from '@/lib/models'
+import { getProviderFallbackModel, resolveModel, ModelKeySchema } from '@/lib/models'
 import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 import { getSessionRagContext } from '@/lib/rag'
 import {
@@ -31,6 +31,15 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SYSTEM_PROMPT = 'You are a helpful assistant.'
+
+/**
+ * Upstream statuses that trigger the model fallback retry: 404 (dead/deprecated
+ * model slug), 402 (OpenRouter pre-authorizes against the model and rejects
+ * low-credit keys before streaming), and 429 (model-scoped rate limit). The
+ * route retries once with the provider's stable backup model (see
+ * `getProviderFallbackModel`) instead of surfacing the raw error to the UI.
+ */
+const RETRYABLE_STATUSES = new Set([404, 402, 429])
 
 /**
  * Hard cap on the raw request body, checked before buffering: the per-field
@@ -157,6 +166,8 @@ export async function POST(request: Request) {
   const videoFrames = parsed.data.videoFrames ?? []
   const imageDataUrl = parsed.data.imageDataUrl
   const audioDataUrl = parsed.data.audioDataUrl
+  // Media payloads must reach a vision-capable model — see resolveModel.
+  const hasMedia = videoFrames.length > 0 || Boolean(imageDataUrl) || Boolean(audioDataUrl)
   const structuredOutput =
     parsed.data.structuredOutput ?? detectStructuredOutputKind(question, Boolean(ragContext))
   const structuredInstruction = structuredOutput
@@ -236,7 +247,25 @@ export async function POST(request: Request) {
   // The model selector resolves stable UI keys here; base URL + key come from
   // the shared provider config above, and the provider picks the right model id
   // (OpenRouter namespaced id vs Google's plain name on the direct endpoint).
-  const model = resolveModel(parsed.data.model, provider)
+  // Media requests auto-route to a vision-capable model (on OpenRouter the
+  // provider default and vision fallback are both the free `stealth/ox-alpha`)
+  // so image/video/audio content is accepted.
+  const model = resolveModel(parsed.data.model, provider, { vision: hasMedia })
+  // Completion cap: the per-user settings value always wins; otherwise the
+  // conservative default (MAX_OUTPUT_TOKENS, 200) applies to every provider —
+  // see lib/llm-config.ts resolveMaxTokens for why the field is never omitted.
+  const resolvedMaxTokens = resolveMaxTokens(parsed.data.maxTokens)
+  // Error-fallback backup model for this provider (per-provider default, env
+  // overridable) — resolved once per request so the guard and the retry agree.
+  const fallbackModel = getProviderFallbackModel(provider)
+  // The model id that actually serves the reply — the selected model, or the
+  // backup when a retry fires. Reported to the client via X-Served-Model.
+  let servedModel = model
+  // True only when the error-fallback retry fires (404/402/429 → backup
+  // model). Vision auto-routing is NOT flagged: swapping a text-only
+  // selection to a vision-capable model is expected behavior for media
+  // requests, not a failure — the amber warning is reserved for retries.
+  let servedModelOverridden = false
 
   // OpenRouter uses X-Title for app attribution (optional, OpenRouter only).
   const appTitle = process.env.OPENROUTER_APP_NAME
@@ -262,24 +291,21 @@ export async function POST(request: Request) {
       if (agent.toolCount > 0) messagesForModel = agent.continuationMessages
     }
 
-    upstream = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        ...extraHeaders,
-      },
-      body: JSON.stringify({
-        model,
+    // The request body is rebuilt per model id so the error fallback can
+    // resend it with the backup model. Completion cap (see lib/llm-config.ts
+    // resolveMaxTokens): the per-user settings value always wins; otherwise
+    // the conservative 200 default is sent to EVERY provider, OpenRouter
+    // included — an explicit tiny cap keeps the pre-authorization cost near
+    // zero so low-credit keys stream instead of 402ing (omitting the field
+    // makes OpenRouter pre-authorize against the model max and reject the
+    // key; verified live).
+    const buildRequestBody = (modelId: string): string =>
+      JSON.stringify({
+        model: modelId,
         stream: true,
         messages: [{ role: 'system', content: systemPrompt }, ...messagesForModel],
         ...(parsed.data.temperature !== undefined ? { temperature: parsed.data.temperature } : {}),
-        // Always send an explicit completion cap: omitting max_tokens lets
-        // OpenRouter pre-authorize against its model maximum (often 65536),
-        // which rejects low-credit keys with 402 Insufficient Balance even
-        // for short replies. The per-user settings value wins when set;
-        // otherwise the conservative default (MAX_OUTPUT_TOKENS, 4096) applies.
-        max_tokens: parsed.data.maxTokens ?? getMaxOutputTokens(),
+        max_tokens: resolvedMaxTokens,
         ...(structuredOutput
           ? {
               response_format: {
@@ -292,9 +318,38 @@ export async function POST(request: Request) {
               },
             }
           : {}),
-      }),
-      signal: request.signal,
-    })
+      })
+
+    const streamFrom = (modelId: string): Promise<Response> =>
+      fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          ...extraHeaders,
+        },
+        body: buildRequestBody(modelId),
+        signal: request.signal,
+      })
+
+    upstream = await streamFrom(model)
+    // Error fallback: a dead/deprecated slug (404), a low-credit pre-auth
+    // rejection (402), or a model-scoped rate limit (429) should not fail the
+    // chat — retry once with the provider's own backup model (never when the
+    // backup IS the chosen model). The backup id is always valid on the
+    // provider's endpoint (free OpenRouter route / plain Gemini name / cheap
+    // OpenAI model), so the retry applies to every provider.
+    if (!upstream.ok && RETRYABLE_STATUSES.has(upstream.status) && model !== fallbackModel) {
+      // Release the failed response before retrying.
+      try {
+        await upstream.body?.cancel()
+      } catch {
+        // Ignore body-drain failures — the retry is what matters.
+      }
+      upstream = await streamFrom(fallbackModel)
+      servedModel = fallbackModel
+      servedModelOverridden = true
+    }
   } catch {
     return errorResponse('Could not reach the LLM API.', 502)
   }
@@ -312,6 +367,14 @@ export async function POST(request: Request) {
 
   return new Response(upstream.body, {
     headers: {
+      // The model that actually served this reply (after any error-fallback
+      // retry) — surfaced to the client so the UI can show "via <model>"
+      // when the selected option was silently swapped (e.g. a 404 fallback).
+      'X-Served-Model': servedModel,
+      // 'true' only when the error-fallback retry fired (a 404/402/429 swap
+      // to the provider backup) — the UI highlights the caption amber with a
+      // "fallback" tag. Vision auto-routing stays neutral ('false').
+      'X-Served-Model-Overridden': servedModelOverridden ? 'true' : 'false',
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',

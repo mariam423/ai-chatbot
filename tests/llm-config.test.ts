@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { detectProviderFromKey, getLlmConfig, getMaxOutputTokens } from '../lib/llm-config'
+import {
+  detectProviderFromKey,
+  getLlmConfig,
+  getMaxOutputTokens,
+  resolveMaxTokens,
+} from '../lib/llm-config'
 
 // The shell/dev environment may export real provider values (OPENROUTER_*,
 // GEMINI_API_KEY, …), so every test stubs the full env surface it cares about.
@@ -117,10 +122,28 @@ describe('detectProviderFromKey', () => {
   })
 })
 
-describe('getMaxOutputTokens', () => {
-  it('defaults to a conservative 4096 when MAX_OUTPUT_TOKENS is unset', () => {
+describe('resolveMaxTokens', () => {
+  it('sends the conservative cap by default and honors per-user overrides', () => {
     vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
-    expect(getMaxOutputTokens()).toBe(4096)
+    // An explicit tiny cap keeps the pre-authorization cost near zero so
+    // low-credit keys stream instead of 402ing (verified live: omitting the
+    // field makes OpenRouter pre-authorize ~16k tokens and reject the key).
+    expect(resolveMaxTokens()).toBe(200)
+    expect(resolveMaxTokens(undefined)).toBe(200)
+    // An explicit per-user value always wins.
+    expect(resolveMaxTokens(4096)).toBe(4096)
+    expect(resolveMaxTokens(512)).toBe(512)
+    // MAX_OUTPUT_TOKENS env override flows through.
+    vi.stubEnv('MAX_OUTPUT_TOKENS', '1024')
+    expect(resolveMaxTokens()).toBe(1024)
+    vi.unstubAllEnvs()
+  })
+})
+
+describe('getMaxOutputTokens', () => {
+  it('defaults to a conservative 200 when MAX_OUTPUT_TOKENS is unset', () => {
+    vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
+    expect(getMaxOutputTokens()).toBe(200)
   })
 
   it('honors a valid MAX_OUTPUT_TOKENS override', () => {
@@ -131,7 +154,7 @@ describe('getMaxOutputTokens', () => {
   it('falls back to the default for an invalid MAX_OUTPUT_TOKENS', () => {
     for (const bad of ['0', '-5', 'abc', '4.5']) {
       vi.stubEnv('MAX_OUTPUT_TOKENS', bad)
-      expect(getMaxOutputTokens(), bad).toBe(4096)
+      expect(getMaxOutputTokens(), bad).toBe(200)
     }
   })
 })

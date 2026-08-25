@@ -136,6 +136,10 @@ describe('POST /api/chat', () => {
   it('supports OPENROUTER_API_KEY with OpenRouter defaults', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('OPENROUTER_APP_NAME', 'Chatbot')
+    // The dev .env.local may export MODEL_NAME — pin it so the resolved
+    // default (stealth/ox-alpha) is asserted, not the override.
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
     const sse = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
@@ -151,11 +155,353 @@ describe('POST /api/chat', () => {
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
+    // Free-first: the provider default is the genuinely free, live
+    // `stealth/ox-alpha` route (verified against the catalog + live API).
     expect(payload.model).toBe('stealth/ox-alpha')
     expect(init!.headers).toMatchObject({
       Authorization: 'Bearer sk-or-v1-test',
       'X-Title': 'Chatbot',
     })
+    // The streaming response reports the served model back to the client —
+    // and, with no swap in play, the override flag stays false.
+    expect(res.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+    expect(res.headers.get('x-served-model-overridden')).toBe('false')
+  })
+
+  it('auto-routes image attachments to a vision-capable OpenRouter model', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Describe the photo.' }],
+          imageDataUrl: 'data:image/jpeg;base64,AAAA',
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    const payload = JSON.parse(init!.body as string) as {
+      model: string
+      messages: Array<{ role: string; content: unknown }>
+    }
+    // The text-only provider default is swapped for the free vision fallback
+    // (stealth/ox-alpha is 0-cost AND vision-capable — verified live).
+    expect(payload.model).toBe('stealth/ox-alpha')
+    // The image rides along as a multimodal part on the user message.
+    expect(payload.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Describe the photo.' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } },
+      ],
+    })
+  })
+
+  it('keeps the override header false when media swaps a text-only selection (vision routing stays neutral)', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'deepseek-v4-flash',
+          messages: [{ role: 'user', content: 'Describe the photo.' }],
+          imageDataUrl: 'data:image/jpeg;base64,AAAA',
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    // The text-only DeepSeek selection was swapped to the vision fallback —
+    // the served model differs from the selection, but this is routing, not
+    // a failure: the override flag stays false so the caption stays neutral.
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+    expect(payload.model).toBe('stealth/ox-alpha')
+    expect(res.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+    expect(res.headers.get('x-served-model-overridden')).toBe('false')
+  })
+
+  it('keeps an explicitly selected vision-capable model for media requests', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Describe the photo.' }],
+          model: 'gpt-5-6',
+          imageDataUrl: 'data:image/png;base64,BBBB',
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+    expect(payload.model).toBe('openai/gpt-5.6')
+  })
+
+  it('retries with the free fallback when the selected OpenRouter model 404s', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    // A stale MODEL_* override pointing at a genuinely dead slug
+    // (google/gemini-2.0-flash-lite-001 — verified 404 against the live
+    // OpenRouter API) is retried with the free backup model instead of
+    // failing the chat.
+    vi.stubEnv('MODEL_GEMINI_2_FLASH', 'google/gemini-2.0-flash-lite-001')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(404, { error: 'model not found' }))
+      .mockResolvedValueOnce(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gemini-2-flash',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+    const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as {
+      model: string
+      max_tokens?: number
+    }
+    expect(first.model).toBe('google/gemini-2.0-flash-lite-001')
+    expect(second.model).toBe('stealth/ox-alpha')
+    // The retry keeps the explicit conservative cap (pre-auth stays tiny).
+    expect(second.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
+    // The response reports the model that actually served the reply — the
+    // fallback, not the dead selection — and flags the swap for the UI's
+    // amber warning caption.
+    expect(res.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
+  })
+
+  it('uses the FALLBACK_MODEL env override as the retry target', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    // Pin the dev .env.local MODEL_NAME override so the provider default
+    // resolution follows FALLBACK_MODEL below.
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('FALLBACK_MODEL', 'custom/backup')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+
+    // A dead slug selected via a stale MODEL_* override 404s; the retry uses
+    // the FALLBACK_MODEL override instead of the default backup.
+    vi.stubEnv('MODEL_GEMINI_2_FLASH', 'google/gemini-2.0-flash-lite-001')
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(404, { error: 'model not found' }))
+      .mockResolvedValueOnce(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gemini-2-flash',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+    expect(second.model).toBe('custom/backup')
+
+    // The provider default follows the override too (no dead slug in play,
+    // so no no-loop guard interference).
+    vi.stubEnv('MODEL_GEMINI_2_FLASH', undefined)
+    fetchMock.mockClear()
+    fetchMock.mockResolvedValue(new Response(sse, { status: 200 }))
+    await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    const defaultPayload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      model: string
+    }
+    expect(defaultPayload.model).toBe('custom/backup')
+  })
+
+  it('retries with the fallback model on OpenRouter 402 and 429 rejections', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    for (const status of [402, 429]) {
+      const sse = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(status, { error: 'rejected' }))
+        .mockResolvedValueOnce(new Response(sse, { status: 200 }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const res = await POST(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-5-6',
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        }),
+      )
+      expect(res.status, `status ${status}`).toBe(200)
+      expect(fetchMock, `status ${status}`).toHaveBeenCalledTimes(2)
+      const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+      expect(second.model).toBe('stealth/ox-alpha')
+    }
+  })
+
+  it('retries with the provider backup on direct Gemini and OpenAI 404s', async () => {
+    const cases = [
+      {
+        key: 'GEMINI_API_KEY',
+        providerKey: 'AIza-test',
+        staleOverride: 'MODEL_GEMINI_2_FLASH',
+        deadSlug: 'gemini-2.0-flash',
+        backup: 'gemini-2.5-flash-lite',
+        modelKey: 'gemini-2-flash',
+      },
+      {
+        key: 'OPENAI_API_KEY',
+        providerKey: 'sk-openai-test',
+        staleOverride: 'MODEL_GPT_5_6',
+        deadSlug: 'gpt-4.1-preview',
+        backup: 'gpt-4o-mini',
+        modelKey: 'gpt-5-6',
+      },
+    ]
+    for (const c of cases) {
+      vi.stubEnv('OPENROUTER_API_KEY', '')
+      vi.stubEnv('OPENROUTER_BASE_URL', undefined)
+      vi.stubEnv('GEMINI_API_KEY', '')
+      vi.stubEnv('OPENAI_API_KEY', '')
+      vi.stubEnv('MODEL_NAME', undefined)
+      vi.stubEnv('OPENAI_MODEL', undefined)
+      vi.stubEnv(c.key, c.providerKey)
+      // A stale MODEL_* override pointing at a dead model name 404s on the
+      // direct endpoint; the retry uses the provider's own backup id — never
+      // an OpenRouter slug the endpoint can't resolve.
+      vi.stubEnv(c.staleOverride, c.deadSlug)
+      const sse = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(404, { error: 'not found' }))
+        .mockResolvedValueOnce(new Response(sse, { status: 200 }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const res = await POST(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: c.modelKey,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        }),
+      )
+      expect(res.status, `provider ${c.key}`).toBe(200)
+      expect(fetchMock, `provider ${c.key}`).toHaveBeenCalledTimes(2)
+      const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+      const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+      expect(first.model, `provider ${c.key}`).toBe(c.deadSlug)
+      expect(second.model, `provider ${c.key}`).toBe(c.backup)
+    }
+  })
+
+  it('honors GEMINI_FALLBACK_MODEL / OPENAI_FALLBACK_MODEL overrides', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '')
+    vi.stubEnv('OPENROUTER_BASE_URL', undefined)
+    vi.stubEnv('GEMINI_API_KEY', '')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('GEMINI_API_KEY', 'AIza-test')
+    vi.stubEnv('GEMINI_FALLBACK_MODEL', 'custom/gemini-backup')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(429, { error: 'rate limited' }))
+      .mockResolvedValueOnce(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+    expect(second.model).toBe('custom/gemini-backup')
+  })
+
+  it('does not loop when the chosen model is already the fallback', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    // The provider default resolves to stealth/ox-alpha — if IT 404s, there
+    // is no backup left to retry with (and the guard prevents a loop).
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(404, { error: 'not found' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(404)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to OPENAI_API_KEY and OpenAI defaults when OPENROUTER_API_KEY is unset', async () => {
@@ -188,6 +534,7 @@ describe('POST /api/chat', () => {
     vi.stubEnv('OPENAI_API_KEY', '')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
     vi.stubEnv('GEMINI_API_KEY', 'AIza-test')
     const sse = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -203,14 +550,16 @@ describe('POST /api/chat', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions')
-    const payload = JSON.parse(init!.body as string) as { model: string }
+    const payload = JSON.parse(init!.body as string) as { model: string; max_tokens?: number }
     // Provider-default selection sends a plain Gemini model name on the direct
     // endpoint, not an OpenRouter-namespaced id.
-    expect(payload.model).toBe('gemini-2.0-flash')
+    expect(payload.model).toBe('gemini-2.5-flash-lite')
+    // Every provider gets the conservative completion cap.
+    expect(payload.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
     expect(init!.headers).toMatchObject({ Authorization: 'Bearer AIza-test' })
   })
 
-  it('resolves the Gemini option to the OpenRouter free model id when routing via OpenRouter', async () => {
+  it('resolves the Gemini option to the stable OpenRouter model id when routing via OpenRouter', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     const sse = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -236,7 +585,7 @@ describe('POST /api/chat', () => {
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
-    expect(payload.model).toBe('google/gemini-2.0-flash-exp:free')
+    expect(payload.model).toBe('google/gemini-2.5-flash-lite')
   })
 
   it('uses MODEL_NAME and OPENROUTER_BASE_URL env vars when set', async () => {
@@ -261,7 +610,7 @@ describe('POST /api/chat', () => {
     expect(payload.model).toBe('deepseek/deepseek-v4')
   })
 
-  it('always sends an explicit max_tokens default to avoid provider pre-auth 402s', async () => {
+  it('sends the conservative max_tokens cap to OpenRouter by default (402 fix)', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
     const sse = new ReadableStream<Uint8Array>({
@@ -273,7 +622,11 @@ describe('POST /api/chat', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    // No client maxTokens → the conservative default is sent.
+    // No client maxTokens → the conservative default (200) is sent. The tiny
+    // cap keeps OpenRouter's pre-authorization cost near zero, so a low-credit
+    // key streams instead of 402ing (verified live: omitting the field made
+    // OpenRouter pre-authorize ~16k tokens and reject the key; an explicit
+    // tiny cap pre-authorizes cents).
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(200)
     let payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
@@ -281,7 +634,49 @@ describe('POST /api/chat', () => {
     }
     expect(payload.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
 
-    // MAX_OUTPUT_TOKENS env override applies when set.
+    // An explicit per-user maxTokens is still forwarded verbatim.
+    fetchMock.mockClear()
+    const tuned = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'hi' }],
+          maxTokens: 4096,
+        }),
+      }),
+    )
+    expect(tuned.status).toBe(200)
+    payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { max_tokens?: number }
+    expect(payload.max_tokens).toBe(4096)
+  })
+
+  it('sends the conservative max_tokens default to non-OpenRouter providers', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '')
+    vi.stubEnv('OPENROUTER_BASE_URL', undefined)
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('OPENAI_API_KEY', 'sk-openai-test')
+    vi.stubEnv('MAX_OUTPUT_TOKENS', undefined)
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    // No client maxTokens → the conservative default (200) is sent so the
+    // request never falls back to the model's own maximum.
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    let payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      max_tokens?: number
+    }
+    expect(payload.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
+
+    // MAX_OUTPUT_TOKENS env override applies for non-OpenRouter providers.
     vi.stubEnv('MAX_OUTPUT_TOKENS', '1024')
     fetchMock.mockClear()
     await POST(chatRequest([{ role: 'user', content: 'hi' }]))

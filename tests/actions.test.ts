@@ -87,6 +87,45 @@ describe('conversation persistence server actions', () => {
     })
   })
 
+  it('persists the served model per message and restores it', async () => {
+    const thread: ChatMessage[] = [
+      { id: 'sess-model-1', role: 'user', content: 'Hi' },
+      {
+        id: 'sess-model-2',
+        role: 'assistant',
+        content: 'Served reply',
+        model: 'stealth/ox-alpha',
+        modelOverridden: true,
+      },
+      {
+        id: 'sess-model-3',
+        role: 'assistant',
+        content: 'Neutral reply',
+        model: 'google/gemini-2.5-flash-lite',
+        modelOverridden: false,
+      },
+    ]
+    const saved = await actions.saveChatMessages({ sessionId: 'sess-model', branches: [thread] })
+    expect(saved).toEqual({ ok: true })
+
+    const loaded = await actions.getChatSession('sess-model')
+    expect(loaded).toEqual({
+      ok: true,
+      branches: [thread],
+      active: 0,
+      systemPrompt: null,
+    })
+    // An update (idempotent re-save) also keeps the model fields.
+    await actions.saveChatMessages({ sessionId: 'sess-model', branches: [thread] })
+    const reloaded = await actions.getChatSession('sess-model')
+    expect(reloaded).toEqual({
+      ok: true,
+      branches: [thread],
+      active: 0,
+      systemPrompt: null,
+    })
+  })
+
   it('persists multiple branches and the active branch index', async () => {
     const original = threadFor('sess-branch')
     // A fork diverges from the first two messages with a new user prompt.
@@ -344,6 +383,31 @@ describe('conversation persistence server actions', () => {
       })
     })
 
+    it("reports the last assistant reply's model as lastModel", async () => {
+      const threaded = threadFor('sess-model')
+      threaded[1] = { ...threaded[1]!, model: 'deepseek/deepseek-v4-flash' }
+      await actions.saveChatMessages({ sessionId: 'sess-model', branches: [threaded] })
+      // A later assistant reply with a different model wins (last reply).
+      const withSecond = threadFor('sess-model-2')
+      withSecond[1] = { ...withSecond[1]!, model: 'stealth/ox-alpha' }
+      withSecond.push({
+        id: 'sess-model-2-4',
+        role: 'assistant',
+        content: 'Second reply',
+        model: 'gpt-4o-mini',
+        modelOverridden: true,
+      })
+      await actions.saveChatMessages({ sessionId: 'sess-model-2', branches: [withSecond] })
+
+      const result = await actions.listChatSessions()
+      expect(result.ok).toBe(true)
+      const sessions = (result as { sessions: Array<{ id: string; lastModel?: string | null }> })
+        .sessions
+      const byId = Object.fromEntries(sessions.map((s) => [s.id, s]))
+      expect(byId['sess-model-2']?.lastModel).toBe('gpt-4o-mini')
+      expect(byId['sess-model']?.lastModel).toBe('deepseek/deepseek-v4-flash')
+    })
+
     it('excludes empty sessions (created but never used) from the list', async () => {
       const created = await actions.createChatSession()
       expect(created.ok).toBe(true)
@@ -549,6 +613,7 @@ describe('user preferences (calendar credentials)', () => {
         preferredModel: 'qwen-3-6',
         temperature: 0.7,
         maxCompletionTokens: 2048,
+        showModelCaptions: false,
       }),
     ).toEqual({ ok: true })
 
@@ -564,10 +629,35 @@ describe('user preferences (calendar credentials)', () => {
         preferredModel: 'qwen-3-6',
         temperature: 0.7,
         maxCompletionTokens: 2048,
+        showModelCaptions: false,
       },
     })
     // The effective server default rides along so the settings UI can show it.
-    expect(loaded).toMatchObject({ ok: true, data: { defaultMaxCompletionTokens: 4096 } })
+    expect(loaded).toMatchObject({ ok: true, data: { defaultMaxCompletionTokens: 200 } })
+  })
+
+  it('defaults model captions to shown and round-trips the toggle', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    // No preference row yet — captions default to on.
+    expect(await prefsActions.getUserPreferences()).toMatchObject({
+      ok: true,
+      data: { showModelCaptions: true },
+    })
+    // Toggle off, then on — the value persists and reloads.
+    expect(
+      await prefsActions.updateUserPreferences({ showModelCaptions: false }),
+    ).toEqual({ ok: true })
+    expect(await prefsActions.getUserPreferences()).toMatchObject({
+      ok: true,
+      data: { showModelCaptions: false },
+    })
+    expect(
+      await prefsActions.updateUserPreferences({ showModelCaptions: true }),
+    ).toEqual({ ok: true })
+    expect(await prefsActions.getUserPreferences()).toMatchObject({
+      ok: true,
+      data: { showModelCaptions: true },
+    })
   })
 
   it('surfaces the effective server default max tokens (env-overridable)', async () => {
@@ -584,7 +674,7 @@ describe('user preferences (calendar credentials)', () => {
     // Unset env falls back to the built-in conservative default.
     expect(await prefsActions.getUserPreferences()).toMatchObject({
       ok: true,
-      data: { defaultMaxCompletionTokens: 4096 },
+      data: { defaultMaxCompletionTokens: 200 },
     })
   })
 

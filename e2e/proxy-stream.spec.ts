@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { getMaxOutputTokens } from '../lib/llm-config'
 import { deltaText, extractSSEEvents, SSE_DONE } from '../lib/sse'
 
 /**
@@ -15,10 +14,12 @@ import { deltaText, extractSSEEvents, SSE_DONE } from '../lib/sse'
  * OPENROUTER_BASE_URL=http://127.0.0.1:4010/v1 + a dummy key, so no live API
  * key or cost is involved. The mock records every chat-completions request
  * body and exposes it at /__last-request, letting the test assert exactly
- * what the server sent the provider (that `max_tokens` lands on the wire).
+ * what the server sent the provider — including the explicit conservative
+ * max_tokens cap on every provider (the 402 pre-authorization fix: a tiny
+ * cap keeps the pre-auth cost near zero).
  *
  * The reply is ~30,500 chars (~7,600 tokens) with a mid marker past the
- * 4096-token default cap and a tail marker at the end — so "the full stream
+ * 200-token default cap and a tail marker at the end — so "the full stream
  * comes back" means both markers survive the real proxy verbatim (the client
  * render/export side of this is pinned by e2e/long-reply-export.spec.ts).
  */
@@ -31,11 +32,11 @@ const MOCK_ORIGIN = 'http://127.0.0.1:4010'
 // and the test stays deterministic regardless of parallel ordering.
 const ISOLATED_IP = '203.0.113.50'
 
-const MARKER_MID = 'MID_MARKER_PAST_THE_DEFAULT_4096_TOKEN_CAP'
+const MARKER_MID = 'MID_MARKER_PAST_THE_DEFAULT_200_TOKEN_CAP'
 const MARKER_TAIL = 'TAIL_MARKER_FINAL_SENTENCE_END'
 
-/** ~4 chars per token heuristic for the 4096-token default boundary. */
-const DEFAULT_CAP_CHARS = 4096 * 4
+/** ~4 chars per token heuristic for the 200-token default boundary. */
+const DEFAULT_CAP_CHARS = 200 * 4
 
 /** Reconstruct the streamed text from a buffered SSE body. */
 function decodeSse(body: string): string {
@@ -63,7 +64,6 @@ test('real /api/chat proxy sends max_tokens and streams the full long reply back
   // (diagram, chart, weather, schedule, search, …) so the route takes the
   // plain single streaming call instead of the agent loop.
   const prompt = `Proxy round-trip ${Date.now()} — tell me a long story about the open sea.`
-  const expectedMaxTokens = getMaxOutputTokens()
 
   const response = await request.post('/api/chat', {
     headers: { 'x-forwarded-for': ISOLATED_IP },
@@ -97,7 +97,20 @@ test('real /api/chat proxy sends max_tokens and streams the full long reply back
   }
   expect(response.status()).toBe(200)
 
-  await test.step('the full stream comes back through the proxy, past the 4096-token default', async () => {
+  await test.step('the response reports the served model via X-Served-Model', async () => {
+    // The route tells the client which model actually served the reply (the
+    // resolved id, or the error-fallback backup after a retry) so the UI can
+    // surface silent model swaps. Here the mock upstream echoes the request's
+    // model, and no fallback fired — the header must match it.
+    const served = response.headers()['x-served-model']
+    expect(served).toBeDefined()
+    expect(served).toBe(last.body?.model)
+    // No fallback fired on this happy path — the override flag must be off so
+    // the UI keeps the neutral caption style.
+    expect(response.headers()['x-served-model-overridden']).toBe('false')
+  })
+
+  await test.step('the full stream comes back through the proxy, past the 200-token default', async () => {
     const body = await response.text()
     // The stream must have terminated properly…
     expect(body).toContain('data: [DONE]')
@@ -112,17 +125,19 @@ test('real /api/chat proxy sends max_tokens and streams the full long reply back
     expect(text.length).toBeGreaterThan(25_000)
   })
 
-  await test.step('the server sent the conservative max_tokens to the provider', async () => {
+  await test.step('the server sends the conservative max_tokens cap for OpenRouter defaults (402 fix)', async () => {
     // A 200 response means the mock recorded the request (guarded above), so
     // the body is present — assert it to be explicit, then narrow for TS.
     expect(last.body).toBeDefined()
     const body = last.body!
 
-    // The core cost-control contract: an explicit cap is always on the wire,
-    // so OpenRouter pre-authorizes a small amount instead of its 65,536
-    // default (the cause of 402 Insufficient Balance on low-credit keys).
-    expect(body.max_tokens).toBe(expectedMaxTokens)
-    expect(body.max_tokens).toBeGreaterThan(0)
+    // The core cost-control contract: when the user hasn't customized
+    // max_tokens, every provider gets the conservative 200-token cap. The
+    // tiny cap keeps OpenRouter's pre-authorization cost near zero so a
+    // low-credit key streams instead of 402ing (verified live: omitting the
+    // field made OpenRouter pre-authorize ~16k tokens and reject the key;
+    // an explicit tiny cap pre-authorizes cents).
+    expect(body.max_tokens).toBe(200)
     expect(body.stream).toBe(true)
     expect(body.model?.length ?? 0).toBeGreaterThan(0)
 

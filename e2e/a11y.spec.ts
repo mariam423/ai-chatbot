@@ -31,7 +31,7 @@ test.describe('accessibility', () => {
     await mockStream(page, ['A11y reply'])
     await page.goto('/')
     await sendMessage(page, 'A11y question')
-    await expect(page.locator('main').getByText('A11y reply')).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText('A11y reply')).toBeVisible()
 
     const sidebar = page.getByRole('complementary', { name: 'Conversations' })
     const skipLink = page.getByRole('link', { name: 'Skip to content' })
@@ -53,7 +53,7 @@ test.describe('accessibility', () => {
     // interaction, Chromium absorbs the first Tab press into <body>. The
     // active session must survive the reload.
     await page.reload()
-    await expect(page.locator('main').getByText('A11y question')).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText('A11y question')).toBeVisible()
     await expect(firstSession).toHaveAttribute('aria-current', 'page')
 
     const collapseToggle = sidebar.getByRole('button', { name: 'Collapse sidebar' })
@@ -99,7 +99,7 @@ test.describe('accessibility', () => {
     await mockStream(page, ['A11y reply'])
     await page.goto('/')
     await sendMessage(page, 'A11y question')
-    await expect(page.locator('main').getByText('A11y reply')).toBeVisible()
+    await expect(page.getByTestId('message-list').getByText('A11y reply')).toBeVisible()
 
     const sidebar = page.getByRole('complementary', { name: 'Conversations' })
     const activeMarkers = sidebar.locator('[aria-current="page"]')

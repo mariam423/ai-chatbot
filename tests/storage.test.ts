@@ -92,6 +92,31 @@ describe('loadThread', () => {
     expect(loadThread()).toEqual([])
   })
 
+  it('migrates a v2 payload and writes it back in the current format', () => {
+    store.set(THREAD_STORAGE_KEY, JSON.stringify({ version: 2, branches: [sample], active: 0 }))
+    expect(loadThread()).toEqual(sample)
+    expect(JSON.parse(storedRaw()!)).toEqual({
+      version: THREAD_STORAGE_VERSION,
+      branches: [sample],
+      active: 0,
+    })
+  })
+
+  it('round-trips the served model fields on assistant messages', () => {
+    const withModel: ChatMessage[] = [
+      { id: '1', role: 'user', content: 'Hi' },
+      {
+        id: '2',
+        role: 'assistant',
+        content: 'Served by the fallback.',
+        model: 'stealth/ox-alpha',
+        modelOverridden: true,
+      },
+    ]
+    saveThread(withModel)
+    expect(loadThread()).toEqual(withModel)
+  })
+
   it('migrates a v1 payload and writes it back in the current format', () => {
     store.set(THREAD_STORAGE_KEY, JSON.stringify(v1Payload()))
     expect(loadThread()).toEqual(sample)
@@ -195,6 +220,14 @@ describe('normalizeThread', () => {
   it('passes through a current-version payload without migration', () => {
     const payload = { version: THREAD_STORAGE_VERSION, branches: [sample], active: 0 }
     expect(normalizeThread(payload)).toEqual({ state: payload, migrated: false })
+  })
+
+  it('migrates a v2 payload losslessly (identity shape change)', () => {
+    const v2 = { version: 2, branches: [sample], active: 0 }
+    expect(normalizeThread(v2)).toEqual({
+      state: { version: THREAD_STORAGE_VERSION, branches: [sample], active: 0 },
+      migrated: true,
+    })
   })
 
   it('migrates a v1 payload to a single branch', () => {

@@ -54,6 +54,8 @@ export default function ChatApp() {
   // every chat request; null = provider defaults.
   const [temperature, setTemperature] = useState<number | null>(null)
   const [maxCompletionTokens, setMaxCompletionTokens] = useState<number | null>(null)
+  // Per-message "via <model>" captions (Settings → Model & Generation).
+  const [showModelCaptions, setShowModelCaptions] = useState(true)
   // Per-session skill override. null = use the full catalog (defaults).
   const [enabledSkills, setEnabledSkills] = useState<string[] | null>(null)
   // Override chosen before a session existed; applied + persisted the moment a
@@ -122,6 +124,7 @@ export default function ChatApp() {
       }
       setTemperature(result.data.temperature)
       setMaxCompletionTokens(result.data.maxCompletionTokens)
+      setShowModelCaptions(result.data.showModelCaptions)
     })
     void refreshSessions()
     setReady(true)
@@ -198,6 +201,11 @@ export default function ChatApp() {
     if (id === sessionId) handleSessionChange(null)
     await refreshSessions()
   }
+
+  // Active conversation metadata for the header: the session's title and the
+  // model that served its last assistant reply (from the sidebar summary's
+  // lastModel). Null when no session is active (e.g. a fresh new chat).
+  const activeSession = sessionId ? (sessions.find((s) => s.id === sessionId) ?? null) : null
 
   function selectModel(value: string) {
     const parsed = ModelKeySchema.safeParse(value)
@@ -332,9 +340,33 @@ export default function ChatApp() {
                   className="text-[var(--gold)]"
                 />
               </div>
-              <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-                Chatbot
-              </h1>
+              <div className="min-w-0">
+                <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+                  Chatbot
+                </h1>
+                {/* Active conversation metadata — the session title and the
+                    model that served its last reply, so which model answered
+                    is visible without opening the sidebar. Always rendered
+                    (invisible when no session) so the header height is stable
+                    and visual snapshots can mask the slot deterministically. */}
+                <p
+                  className={`max-w-40 truncate text-[10px] text-[var(--text-tertiary)] sm:max-w-64 ${
+                    activeSession ? '' : 'invisible'
+                  }`}
+                  data-testid="conversation-meta"
+                >
+                  {activeSession?.title ?? ''}
+                  {activeSession?.lastModel ? (
+                    <>
+                      {' '}
+                      ·{' '}
+                      <span className="font-mono" data-testid="conversation-model">
+                        via {activeSession.lastModel}
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -474,6 +506,7 @@ export default function ChatApp() {
             enabledSkills={enabledSkills}
             temperature={temperature}
             maxCompletionTokens={maxCompletionTokens}
+            showModelCaptions={showModelCaptions}
             onSessionChange={handleSessionChange}
             onConversationChanged={refreshSessions}
           />

@@ -72,6 +72,8 @@ interface ChatProps {
   /** Generation tuning from user settings; null = provider defaults. */
   temperature?: number | null
   maxCompletionTokens?: number | null
+  /** Show the per-message "via <model>" captions (user setting; default on). */
+  showModelCaptions?: boolean
   onSessionChange: (id: string | null) => void
   onConversationChanged: () => void
 }
@@ -92,6 +94,7 @@ export default function Chat({
   enabledSkills,
   temperature = null,
   maxCompletionTokens = null,
+  showModelCaptions = true,
   onSessionChange,
   onConversationChanged,
 }: ChatProps) {
@@ -350,6 +353,20 @@ export default function Chat({
         throw new Error(message)
       }
 
+      // The route reports the model that actually served the reply (after any
+      // error-fallback retry) — stamp it onto the assistant message so branch
+      // history shows which model answered. The overridden flag (vision
+      // auto-routing or a fallback retry) drives the amber warning caption.
+      const served = response.headers.get('x-served-model')
+      if (served) {
+        const overridden = response.headers.get('x-served-model-overridden') === 'true'
+        updateActive((prev) => {
+          const last = prev[prev.length - 1]
+          if (!last || last.role !== 'assistant' || last.id !== assistantId) return prev
+          return [...prev.slice(0, -1), { ...last, model: served, modelOverridden: overridden }]
+        })
+      }
+
       if (!response.body) throw new Error('The server returned an empty response.')
 
       const aborted = await readSSEStream(response.body, {
@@ -538,7 +555,11 @@ export default function Chat({
         </div>
       )}
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        data-testid="message-list"
+        className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4"
+      >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-24">
             <div
@@ -577,6 +598,34 @@ export default function Chat({
                   editable={message.role === 'user' && !isStreaming}
                   onEditSave={(next) => void editMessage(index, next)}
                 />
+                {/* "via <model>" caption per assistant message — persisted on
+                    the message (from the X-Served-Model header) so branch
+                    history shows which model answered. Amber warning + a
+                    "fallback" tag only when the error-fallback retry fired
+                    (X-Served-Model-Overridden); vision auto-routing stays
+                    neutral. Hidden entirely when the user disables captions
+                    in settings. */}
+                {showModelCaptions && message.role === 'assistant' && message.model && (
+                  <p
+                    className="mt-1 ml-10 text-[11px] text-[var(--text-muted)]"
+                    data-testid="served-model"
+                    data-overridden={message.modelOverridden || undefined}
+                  >
+                    via{' '}
+                    <code
+                      className={
+                        message.modelOverridden
+                          ? 'rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] px-1 py-0.5 font-mono text-[10px] text-[var(--gold)]'
+                          : 'rounded bg-[var(--bg-input)] px-1 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]'
+                      }
+                    >
+                      {message.model}
+                    </code>
+                    {message.modelOverridden && (
+                      <span className="ml-1.5 font-medium text-[var(--gold)]">fallback</span>
+                    )}
+                  </p>
+                )}
                 {message.role === 'assistant' &&
                   !isStreaming &&
                   message.content !== '' &&
