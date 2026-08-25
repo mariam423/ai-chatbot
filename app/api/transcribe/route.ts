@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   const { apiKey, baseUrl } = getLlmConfig()
   if (!apiKey) {
     return errorResponse(
-      'Server is not configured with an LLM API key (OPENROUTER_API_KEY or OPENAI_API_KEY). Voice transcription requires one.',
+      'Server is not configured with an LLM API key (OPENROUTER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY). Voice transcription requires one.',
       500,
     )
   }

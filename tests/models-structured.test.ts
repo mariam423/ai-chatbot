@@ -15,6 +15,22 @@ describe('model registry', () => {
     expect(resolveModel('deepseek-v4-flash')).toBe('custom/deepseek')
     vi.unstubAllEnvs()
   })
+
+  it('resolves provider-appropriate ids for the Gemini option', () => {
+    vi.stubEnv('MODEL_GEMINI_2_FLASH', '')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    // Via OpenRouter the namespaced free-tier id is sent.
+    expect(resolveModel('gemini-2-flash', 'openrouter')).toBe('google/gemini-2.0-flash-exp:free')
+    // Via the direct Google OpenAI-compatible endpoint the plain name is sent.
+    expect(resolveModel('gemini-2-flash', 'gemini')).toBe('gemini-2.0-flash')
+    // The provider default falls back to a Gemini model on the direct endpoint.
+    expect(resolveModel(undefined, 'gemini')).toBe('gemini-2.0-flash')
+    // envVar override still wins for the Gemini option.
+    vi.stubEnv('MODEL_GEMINI_2_FLASH', 'custom/gemini')
+    expect(resolveModel('gemini-2-flash', 'gemini')).toBe('custom/gemini')
+    vi.unstubAllEnvs()
+  })
 })
 
 describe('structured output', () => {

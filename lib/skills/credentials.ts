@@ -33,3 +33,19 @@ export async function getUserSkillContext(userId: string | null): Promise<SkillT
     return {}
   }
 }
+
+/**
+ * Load the user's personal LLM API key (Settings → API Key). Stored encrypted
+ * at rest; legacy plaintext rows pass through decryptField unchanged. Returns
+ * null when unauthenticated, unset, or undecryptable (rotated key, tampering)
+ * so the chat route falls back to the server env key — never a throw.
+ */
+export async function getUserApiKey(userId: string | null): Promise<string | null> {
+  if (!userId) return null
+  try {
+    const pref = await prisma.userPreference.findUnique({ where: { userId } })
+    return decryptField(pref?.apiKey ?? '') || null
+  } catch {
+    return null
+  }
+}

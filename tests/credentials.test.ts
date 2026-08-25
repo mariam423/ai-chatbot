@@ -7,7 +7,7 @@ vi.mock('../lib/db', () => ({
   prisma: { userPreference: { findUnique: findUniqueMock } },
 }))
 
-import { getUserSkillContext } from '../lib/skills/credentials'
+import { getUserApiKey, getUserSkillContext } from '../lib/skills/credentials'
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -106,5 +106,39 @@ describe('getUserSkillContext', () => {
     } finally {
       delete process.env.ENCRYPTION_KEY
     }
+  })
+})
+
+describe('getUserApiKey', () => {
+  it('returns null when auth is disabled (no user id)', async () => {
+    expect(await getUserApiKey(null)).toBeNull()
+    expect(findUniqueMock).not.toHaveBeenCalled()
+  })
+
+  it('returns null when the user has no preferences or no stored key', async () => {
+    findUniqueMock.mockResolvedValue(null)
+    expect(await getUserApiKey('user-1')).toBeNull()
+
+    findUniqueMock.mockResolvedValue(pref())
+    expect(await getUserApiKey('user-1')).toBeNull()
+  })
+
+  it('returns the decrypted personal LLM key when stored', async () => {
+    process.env.ENCRYPTION_KEY = 'cred-test-key'
+    try {
+      const { encryptField } = await import('../lib/field-encryption')
+      findUniqueMock.mockResolvedValue(pref({ apiKey: encryptField('AIzaSy-user') }))
+      expect(await getUserApiKey('user-1')).toBe('AIzaSy-user')
+      // Legacy plaintext rows pass through unchanged.
+      findUniqueMock.mockResolvedValue(pref({ apiKey: 'sk-or-v1-legacy' }))
+      expect(await getUserApiKey('user-1')).toBe('sk-or-v1-legacy')
+    } finally {
+      delete process.env.ENCRYPTION_KEY
+    }
+  })
+
+  it('degrades to null when the DB query throws', async () => {
+    findUniqueMock.mockRejectedValue(new Error('db down'))
+    expect(await getUserApiKey('user-1')).toBeNull()
   })
 })

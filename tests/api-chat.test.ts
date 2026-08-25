@@ -182,6 +182,63 @@ describe('POST /api/chat', () => {
     expect(init!.headers).toMatchObject({ Authorization: 'Bearer sk-openai-test' })
   })
 
+  it('routes via the Gemini OpenAI-compatible endpoint when GEMINI_API_KEY is set', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '')
+    vi.stubEnv('OPENROUTER_BASE_URL', undefined)
+    vi.stubEnv('OPENAI_API_KEY', '')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('GEMINI_API_KEY', 'AIza-test')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions')
+    const payload = JSON.parse(init!.body as string) as { model: string }
+    // Provider-default selection sends a plain Gemini model name on the direct
+    // endpoint, not an OpenRouter-namespaced id.
+    expect(payload.model).toBe('gemini-2.0-flash')
+    expect(init!.headers).toMatchObject({ Authorization: 'Bearer AIza-test' })
+  })
+
+  it('resolves the Gemini option to the OpenRouter free model id when routing via OpenRouter', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gemini-2-flash',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    const payload = JSON.parse(init!.body as string) as { model: string }
+    expect(payload.model).toBe('google/gemini-2.0-flash-exp:free')
+  })
+
   it('uses MODEL_NAME and OPENROUTER_BASE_URL env vars when set', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('MODEL_NAME', 'deepseek/deepseek-v4')
