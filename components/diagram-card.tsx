@@ -88,9 +88,10 @@ export default function DiagramCard({ src, alt }: DiagramCardProps) {
   }
 
   function closeViewer() {
+    // Focus the trigger before AnimatePresence starts the exit animation so
+    // Escape and backdrop closes have a deterministic focus target.
+    viewButtonRef.current?.focus()
     setViewerOpen(false)
-    // Return focus to the trigger after the exit animation starts.
-    requestAnimationFrame(() => viewButtonRef.current?.focus())
   }
 
   // Defensive: non-SVG or undecodable sources render as a plain image.

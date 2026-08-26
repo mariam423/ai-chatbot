@@ -1,6 +1,7 @@
 'use client'
 
 import Image from 'next/image'
+import { Files, MonitorPlay, Rocket, Terminal } from 'lucide-react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   MenuIcon,
@@ -16,11 +17,15 @@ import { useSession, signOut } from 'next-auth/react'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   clearChatSession,
+  createWorkspaceTask,
+  getBillingStatus,
   getSessionSkills,
+  getWorkspaceTasks,
   getUserPreferences,
   listChatSessions,
   listCustomAgents,
   renameChatSession,
+  setActiveWorkspaceTask,
   togglePinSession,
   toggleArchiveSession,
   updateSessionSkills,
@@ -28,16 +33,45 @@ import {
 import { withThemeTransition } from '@/lib/theme-transition'
 import { clearSessionId, clearThread, getSessionId, setSessionId } from '@/lib/storage'
 import { DEFAULT_MODEL_KEY, MODEL_OPTIONS, ModelKeySchema, type ModelKey } from '@/lib/models'
-import type { ChatSessionSummary, CustomAgentSummary, CustomAgentTheme } from '@/lib/types'
+import type {
+  ChatSessionSummary,
+  CustomAgentSummary,
+  CustomAgentTheme,
+  WorkspaceTask,
+  WorkspaceTool,
+} from '@/lib/types'
 import Chat from './chat'
 import Sidebar from './sidebar'
 import CommandPalette from './command-palette'
 import SkillPicker from './skill-picker'
 
+const WORKSPACE_TOOLS: Array<{
+  id: WorkspaceTool
+  label: string
+  Icon: typeof Terminal
+}> = [
+  { id: 'terminal', label: 'Terminal', Icon: Terminal },
+  { id: 'files', label: 'Files', Icon: Files },
+  { id: 'preview', label: 'Preview', Icon: MonitorPlay },
+  { id: 'publish', label: 'Publish', Icon: Rocket },
+]
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+  return String(value)
+}
+
 export default function ChatApp() {
   const { data: session } = useSession()
   const [sessionId, setSessionIdState] = useState<string | null>(null)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
+  const [tasks, setTasks] = useState<WorkspaceTask[]>([
+    { id: 'inbox', name: 'Inbox' },
+    { id: 'build', name: 'Build workspace' },
+    { id: 'launch', name: 'Launch checklist' },
+  ])
+  const [activeTaskId, setActiveTaskId] = useState('inbox')
   // Bumped whenever the user starts a new chat (or deletes the active session)
   // while `sessionId` is already null — Chat's [sessionId] restore effect won't
   // re-run in that case, so the reset signal tells it to clear the thread
@@ -51,8 +85,15 @@ export default function ChatApp() {
   const [showArchived, setShowArchived] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelKey>(DEFAULT_MODEL_KEY)
+  const modelSelectionTouchedRef = useRef(false)
   const [customAgents, setCustomAgents] = useState<CustomAgentSummary[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [activeWorkspaceTool, setActiveWorkspaceTool] = useState<WorkspaceTool | null>(null)
+  const [quota, setQuota] = useState<{
+    usedToday: number
+    dailyLimit: number | null
+    estimatedTokensToday: number
+  } | null>(null)
   // Per-user generation tuning from Settings (Model & Generation). Applied to
   // every chat request; null = provider defaults.
   const [temperature, setTemperature] = useState<number | null>(null)
@@ -98,6 +139,11 @@ export default function ChatApp() {
       isFirstSearchRenderRef.current = false
       return
     }
+    // Clear the previous page while the debounced server search is pending;
+    // otherwise stale rows remain interactive and can make a new query appear
+    // not to have filtered yet.
+    setSessions([])
+    setHasMore(false)
     const timer = setTimeout(() => void loadSessions({ search, skip: 0 }), 250)
     return () => clearTimeout(timer)
   }, [search, showArchived, loadSessions])
@@ -122,12 +168,27 @@ export default function ChatApp() {
       const preferredKey = ModelKeySchema.safeParse(preferred)
       if (storedModelKey !== null) {
         setSelectedModel(storedModelKey)
-      } else if (preferredKey.success) {
+      } else if (preferredKey.success && !modelSelectionTouchedRef.current) {
         setSelectedModel(preferredKey.data)
       }
       setTemperature(result.data.temperature)
       setMaxCompletionTokens(result.data.maxCompletionTokens)
       setShowModelCaptions(result.data.showModelCaptions)
+    })
+    void getWorkspaceTasks().then((result) => {
+      if (result.ok) {
+        setTasks(result.tasks)
+        if (result.activeTaskId) setActiveTaskId(result.activeTaskId)
+      }
+    })
+    void getBillingStatus().then((result) => {
+      if (result.ok) {
+        setQuota({
+          usedToday: result.data.usedToday,
+          dailyLimit: result.data.dailyLimit,
+          estimatedTokensToday: result.data.estimatedTokensToday,
+        })
+      }
     })
     void refreshSessions()
     void listCustomAgents().then((result) => {
@@ -184,6 +245,22 @@ export default function ChatApp() {
     } else {
       pendingSkillsRef.current = next
     }
+  }
+
+  async function createTask() {
+    const nextNumber = tasks.length + 1
+    const result = await createWorkspaceTask({ name: `New task ${nextNumber}` })
+    if (!result.ok) return
+    setTasks((current) => [...current, result.task])
+    setActiveTaskId(result.activeTaskId)
+  }
+
+  function selectTask(id: string) {
+    setActiveTaskId(id)
+    // The action verifies authentication and ownership. Calling it directly
+    // also covers the short window while NextAuth is still hydrating the
+    // client session after the persisted task list has loaded.
+    void setActiveWorkspaceTask(id)
   }
 
   async function renameSession(id: string, title: string) {
@@ -253,6 +330,7 @@ export default function ChatApp() {
   function selectModel(value: string) {
     const parsed = ModelKeySchema.safeParse(value)
     if (!parsed.success) return
+    modelSelectionTouchedRef.current = true
     setSelectedModel(parsed.data)
     try {
       localStorage.setItem('chat.model', parsed.data)
@@ -301,6 +379,10 @@ export default function ChatApp() {
     <div className="flex h-dvh overflow-hidden" style={{ backgroundColor: 'var(--bg-deep)' }}>
       <Sidebar
         sessions={sessions}
+        tasks={tasks}
+        activeTaskId={activeTaskId}
+        onSelectTask={selectTask}
+        onCreateTask={createTask}
         activeSessionId={sessionId}
         theme={theme}
         search={search}
@@ -355,7 +437,7 @@ export default function ChatApp() {
         data-assistant-theme={activeAssistantTheme}
       >
         <header
-          className="flex items-center justify-between px-4 py-3"
+          className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
           style={{
             background: 'var(--glass-bg)',
             backdropFilter: 'blur(12px)',
@@ -417,7 +499,35 @@ export default function ChatApp() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-1">
+            <nav
+              aria-label="Workspace tools"
+              className="flex items-center gap-0.5 rounded-xl p-0.5"
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
+            >
+              {WORKSPACE_TOOLS.map(({ id, label, Icon }) => {
+                const active = activeWorkspaceTool === id
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={active}
+                    aria-label={label}
+                    title={label}
+                    data-testid={`workspace-${id}`}
+                    onClick={() => setActiveWorkspaceTool(active ? null : id)}
+                    className={`flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors sm:px-2.5 ${
+                      active
+                        ? 'bg-emerald-500/15 text-emerald-400'
+                        : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+                    <span className="hidden sm:inline">{label}</span>
+                  </button>
+                )
+              })}
+            </nav>
             <SkillPicker enabledSkills={enabledSkills} onChange={handleEnabledSkillsChange} />
             <label
               className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
@@ -456,6 +566,27 @@ export default function ChatApp() {
                 ))}
               </select>
             </label>
+            <span
+              data-testid="quota-badge"
+              title={
+                quota
+                  ? `${formatCompactNumber(quota.estimatedTokensToday)} estimated tokens used today`
+                  : 'Daily quota usage'
+              }
+              className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-medium text-emerald-400 sm:px-2.5"
+              style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent-medium)' }}
+            >
+              <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+              <span className="sm:hidden">Quota </span>
+              <span className="hidden sm:inline">Daily quota </span>
+              <span>
+                {quota
+                  ? quota.dailyLimit === null
+                    ? `${formatCompactNumber(quota.estimatedTokensToday)} tokens`
+                    : `${quota.usedToday}/${quota.dailyLimit}`
+                  : '...'}
+              </span>
+            </span>
             {/* Command palette trigger */}
             <motion.button
               type="button"
@@ -576,6 +707,8 @@ export default function ChatApp() {
             temperature={temperature}
             maxCompletionTokens={maxCompletionTokens}
             showModelCaptions={showModelCaptions}
+            activeWorkspaceTool={activeWorkspaceTool}
+            onWorkspaceToolChange={setActiveWorkspaceTool}
             onSessionChange={handleSessionChange}
             onConversationChanged={refreshSessions}
           />

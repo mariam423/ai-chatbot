@@ -38,6 +38,7 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   memoryRecords           MemoryRecord[]
   customAgents             CustomAgent[]
+  workspaceTasks           WorkspaceTask[]
 
   @@map("users")
 }
@@ -206,9 +207,24 @@ model UserPreference {
   maxCompletionTokens       Int?
   // Per-message "via <model>" captions in the thread (default: shown).
   showModelCaptions         Boolean @default(true)
+  activeWorkspaceTaskId     String?
   user                      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
+}
+
+/// A user-owned workspace task shown above the conversation list.
+model WorkspaceTask {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, position])
+  @@map("workspace_tasks")
 }
 
 /// Long-term user memory, scoped by category and optional source session.

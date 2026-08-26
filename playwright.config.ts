@@ -1,12 +1,15 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const playwrightPort = process.env.PLAYWRIGHT_PORT ?? '3000'
+const appUrl = `http://localhost:${playwrightPort}`
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: appUrl,
     trace: 'on-first-retry',
   },
   projects: [
@@ -19,7 +22,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'npm run build && npm run start',
-      url: 'http://localhost:3000',
+      url: appUrl,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
       // Point the REAL /api/chat proxy at the local mock LLM server below so
@@ -30,6 +33,8 @@ export default defineConfig({
       // browser level, so they are unaffected.
       env: {
         ...process.env,
+        PORT: playwrightPort,
+        NEXT_PUBLIC_APP_URL: appUrl,
         OPENROUTER_API_KEY: 'e2e-test-key',
         OPENROUTER_BASE_URL: 'http://127.0.0.1:4010/v1',
         // Dead slug for the fallback-retry spec: "DeepSeek V4 Flash" resolves

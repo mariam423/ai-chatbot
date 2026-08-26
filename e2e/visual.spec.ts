@@ -7,11 +7,17 @@ import { mockStream } from './helpers'
  * class on <html> and persisting to localStorage.
  */
 async function setTheme(page: Page, theme: 'light' | 'dark') {
-  await page.goto('/')
-  await page.evaluate((t) => {
-    document.documentElement.classList.toggle('dark', t === 'dark')
-    localStorage.setItem('chat.theme', t)
+  // Seed the preference before navigation so ChatApp's initial theme state and
+  // the document class agree; changing only the class after mount leaves the
+  // drawer's text/icon state dependent on hydration timing.
+  await page.addInitScript((requestedTheme) => {
+    localStorage.setItem('chat.theme', requestedTheme)
   }, theme)
+  await page.goto('/')
+  const themeButton = page.getByRole('button', {
+    name: theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
+  })
+  await expect(themeButton).toBeVisible()
   // Let the View Transitions API settle (if supported) and CSS variables
   // propagate before taking the snapshot.
   await page.waitForTimeout(50)
@@ -71,7 +77,7 @@ test.describe('visual regression — dark mode', () => {
     const dialog = page.getByRole('dialog', { name: 'Conversations' })
     await expect(page).toHaveScreenshot('drawer-open-dark.png', {
       maxDiffPixelRatio: 0.02,
-      mask: [dialog.locator('ul')],
+      mask: [dialog.getByTestId('conversation-viewport')],
     })
   })
 
@@ -126,7 +132,7 @@ test.describe('visual regression — light mode', () => {
     const dialog = page.getByRole('dialog', { name: 'Conversations' })
     await expect(page).toHaveScreenshot('drawer-open-light.png', {
       maxDiffPixelRatio: 0.02,
-      mask: [dialog.locator('ul')],
+      mask: [dialog.getByTestId('conversation-viewport')],
     })
   })
 

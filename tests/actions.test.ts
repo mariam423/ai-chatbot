@@ -59,6 +59,130 @@ function singleBranchExpected(sessionId: string) {
   } as const
 }
 
+describe('workspace task persistence server actions', () => {
+  beforeAll(async () => {
+    actions = await import('../app/actions')
+  })
+
+  beforeEach(async () => {
+    const { prisma } = await import('../lib/db')
+    await prisma.workspaceTask.deleteMany()
+    await prisma.userPreference.deleteMany()
+    await prisma.user.deleteMany({
+      where: { id: { in: ['task-user-a', 'task-user-b', 'task-user-c', 'task-user-validation'] } },
+    })
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+  })
+
+  it('returns the anonymous defaults and creates a local task without Prisma writes', async () => {
+    expect(await actions.getWorkspaceTasks()).toEqual({
+      ok: true,
+      tasks: [
+        { id: 'inbox', name: 'Inbox' },
+        { id: 'build', name: 'Build workspace' },
+        { id: 'launch', name: 'Launch checklist' },
+      ],
+      activeTaskId: 'inbox',
+    })
+    const created = await actions.createWorkspaceTask({ name: 'Local task' })
+    expect(created).toMatchObject({ ok: true, task: { name: 'Local task' } })
+    expect(await actions.setActiveWorkspaceTask('inbox')).toEqual({
+      ok: false,
+      error: 'Not authenticated.',
+    })
+  })
+
+  it('seeds defaults, persists a created task, and restores the active task', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('task-user-a')
+    const { prisma } = await import('../lib/db')
+    await prisma.user.create({ data: { id: 'task-user-a', email: 'task-a@example.com' } })
+
+    const first = await actions.getWorkspaceTasks()
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(first.tasks).toEqual([
+      { id: 'task-user-a-inbox', name: 'Inbox' },
+      { id: 'task-user-a-build', name: 'Build workspace' },
+      { id: 'task-user-a-launch', name: 'Launch checklist' },
+    ])
+    expect(first.activeTaskId).toBe('task-user-a-inbox')
+
+    const created = await actions.createWorkspaceTask({ name: 'Ship release' })
+    expect(created).toMatchObject({
+      ok: true,
+      task: { name: 'Ship release' },
+    })
+    if (!created.ok) return
+    expect(created.activeTaskId).toBe(created.task.id)
+
+    expect(await actions.setActiveWorkspaceTask('task-user-a-build')).toEqual({
+      ok: true,
+      activeTaskId: 'task-user-a-build',
+    })
+    const restored = await actions.getWorkspaceTasks()
+    expect(restored.ok).toBe(true)
+    if (restored.ok) {
+      expect(restored.tasks.map((task) => task.name)).toEqual([
+        'Inbox',
+        'Build workspace',
+        'Launch checklist',
+        'Ship release',
+      ])
+      expect(restored.activeTaskId).toBe('task-user-a-build')
+    }
+  })
+
+  it('isolates task selection and creation between users', async () => {
+    const { prisma } = await import('../lib/db')
+    await prisma.user.createMany({
+      data: [
+        { id: 'task-user-b', email: 'task-b@example.com' },
+        { id: 'task-user-c', email: 'task-c@example.com' },
+      ],
+    })
+    vi.mocked(getCurrentUserId).mockResolvedValue('task-user-b')
+    const userB = await actions.getWorkspaceTasks()
+    expect(userB.ok).toBe(true)
+    if (!userB.ok) return
+
+    vi.mocked(getCurrentUserId).mockResolvedValue('task-user-c')
+    const userC = await actions.getWorkspaceTasks()
+    expect(userC.ok).toBe(true)
+    if (!userC.ok) return
+    expect(userC.tasks[0]?.id).toBe('task-user-c-inbox')
+    expect(userC.tasks[0]?.id).not.toBe(userB.tasks[0]?.id)
+
+    expect(await actions.setActiveWorkspaceTask(userB.tasks[0]!.id)).toEqual({
+      ok: false,
+      error: 'Workspace task not found.',
+    })
+    expect(await actions.createWorkspaceTask({ name: 'C only' })).toMatchObject({
+      ok: true,
+      task: { name: 'C only' },
+    })
+    vi.mocked(getCurrentUserId).mockResolvedValue('task-user-b')
+    const restoredB = await actions.getWorkspaceTasks()
+    expect(restoredB.ok).toBe(true)
+    if (restoredB.ok) expect(restoredB.tasks.some((task) => task.name === 'C only')).toBe(false)
+  })
+
+  it('validates task names and task ids', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('task-user-validation')
+    expect(await actions.createWorkspaceTask({ name: '   ' })).toEqual({
+      ok: false,
+      error: 'Invalid workspace task.',
+    })
+    expect(await actions.createWorkspaceTask({ name: 'x'.repeat(81) })).toEqual({
+      ok: false,
+      error: 'Invalid workspace task.',
+    })
+    expect(await actions.setActiveWorkspaceTask('')).toEqual({
+      ok: false,
+      error: 'Invalid workspace task.',
+    })
+  })
+})
+
 describe('conversation persistence server actions', () => {
   beforeAll(async () => {
     actions = await import('../app/actions')

@@ -32,6 +32,7 @@ function pref(overrides: Partial<UserPreference> = {}): UserPreference {
     temperature: null,
     maxCompletionTokens: null,
     showModelCaptions: true,
+    activeWorkspaceTaskId: null,
     ...overrides,
   }
 }

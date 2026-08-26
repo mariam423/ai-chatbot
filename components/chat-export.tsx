@@ -206,14 +206,14 @@ export default function ChatExport({
             transition={{ duration: 0.12 }}
             role="menu"
             aria-label="Export chat"
-            className="absolute top-full left-0 z-50 mt-2 w-52 overflow-hidden rounded-xl py-1"
+            className="absolute top-full right-0 z-[100] mt-2 w-56 overflow-hidden rounded-xl p-1.5"
             style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
+              background: 'var(--code-header-bg)',
+              border: '1px solid var(--code-border)',
+              boxShadow: '0 16px 40px rgba(0,0,0,0.45)',
             }}
           >
-            <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
+            <p className="px-2.5 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--code-text)] uppercase">
               Export
             </p>
             <button
@@ -223,7 +223,7 @@ export default function ChatExport({
                 handleMarkdown()
                 setOpen(false)
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--bg-input)]"
+              className="flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-[var(--code-text)] transition-colors hover:bg-emerald-400/10 focus-visible:bg-emerald-400/10"
             >
               <HugeiconsIcon icon={FileExportIcon} size={15} strokeWidth={1.5} />
               <span>Markdown (.md)</span>
@@ -235,7 +235,7 @@ export default function ChatExport({
                 handleJson()
                 setOpen(false)
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--bg-input)]"
+              className="flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-[var(--code-text)] transition-colors hover:bg-emerald-400/10 focus-visible:bg-emerald-400/10"
             >
               <HugeiconsIcon icon={FileExportIcon} size={15} strokeWidth={1.5} />
               <span>JSON (.json)</span>
@@ -251,7 +251,7 @@ export default function ChatExport({
                 track(EVENTS.exportChat, { format: 'text' })
                 setOpen(false)
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--bg-input)]"
+              className="flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-[var(--code-text)] transition-colors hover:bg-emerald-400/10 focus-visible:bg-emerald-400/10"
             >
               <HugeiconsIcon icon={FileExportIcon} size={15} strokeWidth={1.5} />
               <span>Plain text (.txt)</span>
@@ -263,7 +263,7 @@ export default function ChatExport({
                 handlePdf()
                 setOpen(false)
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--bg-input)]"
+              className="flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-[var(--code-text)] transition-colors hover:bg-emerald-400/10 focus-visible:bg-emerald-400/10"
             >
               <HugeiconsIcon icon={Pdf01Icon} size={15} strokeWidth={1.5} />
               <span>PDF (print)</span>

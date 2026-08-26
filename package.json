@@ -20,6 +20,8 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testsprite/testsprite-cli": "^0.7.0",
+    "@testsprite/testsprite-mcp": "^0.0.42",
     "@types/bcryptjs": "^3.0.0",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
