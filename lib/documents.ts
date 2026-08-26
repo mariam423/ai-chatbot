@@ -11,6 +11,14 @@ export const SUPPORTED_DOCUMENTS = {
   txt: { extension: '.txt', mimeTypes: ['text/plain'] },
   md: { extension: '.md', mimeTypes: ['text/markdown', 'text/plain'] },
   csv: { extension: '.csv', mimeTypes: ['text/csv', 'text/plain', 'application/vnd.ms-excel'] },
+  xlsx: {
+    extension: '.xlsx',
+    mimeTypes: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  },
+  docx: {
+    extension: '.docx',
+    mimeTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  },
 } as const
 
 export type SupportedDocumentExtension = keyof typeof SUPPORTED_DOCUMENTS
@@ -21,6 +29,140 @@ export function getDocumentExtension(name: string): SupportedDocumentExtension |
     (key) => SUPPORTED_DOCUMENTS[key].extension === extension,
   )
   return match ?? null
+}
+
+const ZIP_LOCAL_HEADER = 0x04034b50
+const ZIP_CENTRAL_HEADER = 0x02014b50
+const ZIP_END_HEADER = 0x06054b50
+
+function uint16(bytes: Uint8Array, offset: number): number {
+  return bytes[offset]! | (bytes[offset + 1]! << 8)
+}
+
+function uint32(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset]! |
+      (bytes[offset + 1]! << 8) |
+      (bytes[offset + 2]! << 16) |
+      (bytes[offset + 3]! << 24)) >>>
+    0
+  )
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code: string) =>
+      String.fromCodePoint(
+        Number.parseInt(
+          code.startsWith('x') ? code.slice(1) : code,
+          code.startsWith('x') ? 16 : 10,
+        ),
+      ),
+    )
+}
+
+function zipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
+  let end = -1
+  for (let offset = Math.min(bytes.length - 22, 65_557); offset >= 0; offset -= 1) {
+    if (uint32(bytes, offset) === ZIP_END_HEADER) {
+      end = offset
+      break
+    }
+  }
+  if (end < 0) throw new Error('The archive has no valid ZIP directory.')
+  const count = uint16(bytes, end + 10)
+  const directoryOffset = uint32(bytes, end + 16)
+  const entries = new Map<string, Uint8Array>()
+  let cursor = directoryOffset
+  for (let index = 0; index < count; index += 1) {
+    if (uint32(bytes, cursor) !== ZIP_CENTRAL_HEADER) break
+    const method = uint16(bytes, cursor + 10)
+    const compressedSize = uint32(bytes, cursor + 20)
+    const nameLength = uint16(bytes, cursor + 28)
+    const extraLength = uint16(bytes, cursor + 30)
+    const commentLength = uint16(bytes, cursor + 32)
+    const localOffset = uint32(bytes, cursor + 42)
+    const name = new TextDecoder().decode(bytes.slice(cursor + 46, cursor + 46 + nameLength))
+    cursor += 46 + nameLength + extraLength + commentLength
+    if (name.endsWith('/') || compressedSize > MAX_EXTRACTED_TEXT_LENGTH * 4) continue
+    if (uint32(bytes, localOffset) !== ZIP_LOCAL_HEADER) continue
+    const localNameLength = uint16(bytes, localOffset + 26)
+    const localExtraLength = uint16(bytes, localOffset + 28)
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength
+    const compressed = bytes.slice(dataStart, dataStart + compressedSize)
+    try {
+      const output =
+        method === 0
+          ? compressed
+          : method === 8
+            ? inflateSync(compressed, { maxOutputLength: MAX_EXTRACTED_TEXT_LENGTH })
+            : null
+      if (output) entries.set(name, output)
+    } catch {
+      // Ignore one malformed member; the format-specific extractor will
+      // report a useful error if its required member is missing.
+    }
+  }
+  return entries
+}
+
+function xmlText(xml: string): string {
+  return decodeXml(
+    xml
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
+}
+
+function extractDocxText(bytes: Uint8Array): string {
+  const document = zipEntries(bytes).get('word/document.xml')
+  if (!document) throw new Error('The DOCX document body is missing.')
+  const xml = new TextDecoder().decode(document)
+  const paragraphs = [...xml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)].map((match) =>
+    xmlText(match[1]!.replace(/<w:tab\s*\/?>/g, '\\t').replace(/<w:br\s*\/?>/g, '\\n')),
+  )
+  const text = paragraphs.join('\n').trim()
+  if (!text) throw new Error('The DOCX document does not contain extractable text.')
+  return text.slice(0, MAX_EXTRACTED_TEXT_LENGTH)
+}
+
+function extractXlsxText(bytes: Uint8Array): string {
+  const entries = zipEntries(bytes)
+  const decoder = new TextDecoder()
+  const shared = entries.get('xl/sharedStrings.xml')
+  const sharedStrings = shared
+    ? [...decoder.decode(shared).matchAll(/<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g)].map((match) =>
+        xmlText(match[1]!),
+      )
+    : []
+  const sheets = [...entries.keys()]
+    .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
+    .sort()
+  const rows: string[] = []
+  for (const sheetName of sheets) {
+    const xml = decoder.decode(entries.get(sheetName)!)
+    for (const row of xml.matchAll(/<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/g)) {
+      const cells: string[] = []
+      for (const cell of row[1]!.matchAll(/<c(?:\s[^>]*)?>([\s\S]*?)<\/c>/g)) {
+        const body = cell[1]!
+        const type = cell[0].match(/\bt="([^"]+)"/)?.[1]
+        const raw =
+          body.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? body.match(/<t>([\s\S]*?)<\/t>/)?.[1] ?? ''
+        const value = type === 's' ? (sharedStrings[Number(raw)] ?? '') : xmlText(raw)
+        cells.push(value)
+      }
+      if (cells.length > 0) rows.push(cells.join('\t'))
+    }
+  }
+  const text = rows.join('\n').trim()
+  if (!text) throw new Error('The XLSX workbook does not contain extractable cell text.')
+  return text.slice(0, MAX_EXTRACTED_TEXT_LENGTH)
 }
 
 function decodeUtf8(bytes: Uint8Array): string {
@@ -85,8 +227,10 @@ export function extractDocumentText(name: string, mimeType: string, bytes: Uint8
     throw new Error('Document is empty or exceeds the 20 MB limit.')
   }
   const extension = getDocumentExtension(name)
-  if (!extension) throw new Error('Only PDF, TXT, MD, and CSV files are supported.')
+  if (!extension) throw new Error('Only PDF, TXT, MD, CSV, XLSX, and DOCX files are supported.')
 
+  if (extension === 'docx') return extractDocxText(bytes)
+  if (extension === 'xlsx') return extractXlsxText(bytes)
   if (extension !== 'pdf') {
     // TextDecoder with fatal=true rejects malformed/binary payloads early.
     const text = decodeUtf8(bytes)

@@ -33,6 +33,12 @@ function isAllowedMime(
   if (extension === 'pdf') return mime === '' || mime === 'application/pdf'
   if (extension === 'txt') return mime === '' || mime === 'text/plain'
   if (extension === 'md') return mime === '' || mime === 'text/markdown' || mime === 'text/plain'
+  if (extension === 'xlsx') {
+    return mime === '' || mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  }
+  if (extension === 'docx') {
+    return mime === '' || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  }
   return (
     mime === '' ||
     mime === 'text/csv' ||
@@ -69,7 +75,7 @@ export async function POST(request: Request) {
     return errorResponse('The document exceeds the 20 MB limit.', 413)
 
   const extension = getDocumentExtension(file.name)
-  if (!extension) return errorResponse('Only PDF, TXT, MD, and CSV files are supported.')
+  if (!extension) return errorResponse('Only PDF, TXT, MD, CSV, XLSX, and DOCX files are supported.')
   if (!isAllowedMime(extension, file.type)) {
     return errorResponse('The file type does not match its extension.')
   }
@@ -87,7 +93,15 @@ export async function POST(request: Request) {
       data: {
         sessionId: session.id,
         name: file.name.slice(0, 255),
-        mimeType: file.type || (extension === 'pdf' ? 'application/pdf' : 'text/plain'),
+        mimeType:
+          file.type ||
+          (extension === 'pdf'
+            ? 'application/pdf'
+            : extension === 'xlsx'
+              ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+              : extension === 'docx'
+                ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                : 'text/plain'),
         size: file.size,
         textLength: text.length,
         chunks: {

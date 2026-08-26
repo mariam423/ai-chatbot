@@ -13,6 +13,7 @@ import { useState, type FormEvent } from 'react'
 import type { ChatMessage } from '@/lib/types'
 import Markdown from './markdown'
 import StructuredResponse from './structured-response'
+import SpeechButton from './speech-button'
 import { parseStructuredResponse } from '@/lib/structured-output'
 
 export default function MessageBubble({
@@ -144,34 +145,37 @@ export default function MessageBubble({
           className="text-emerald-400"
         />
       </div>
-      <div
-        aria-live="polite"
-        className="max-w-[80%] break-words rounded-2xl rounded-bl-md px-4 py-2.5 text-[13.5px] leading-relaxed text-[var(--text-primary)]"
-        style={{
-          background: 'var(--glass-bg)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid var(--glass-border)',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.04)',
-        }}
-      >
-        {message.content === '' ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400" />
-            <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
-              style={{ animationDelay: '0.15s' }}
-            />
-            <span
-              className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
-              style={{ animationDelay: '0.3s' }}
-            />
-          </span>
-        ) : parseStructuredResponse(message.content) ? (
-          <StructuredResponse content={message.content} sessionId={sessionId} />
-        ) : (
-          <Markdown content={message.content} sessionId={sessionId} />
-        )}
+      <div className="group flex max-w-[80%] items-end gap-1">
+        <div
+          aria-live="polite"
+          className="min-w-0 break-words rounded-2xl rounded-bl-md px-4 py-2.5 text-[13.5px] leading-relaxed text-[var(--text-primary)]"
+          style={{
+            background: 'var(--glass-bg)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.04)',
+          }}
+        >
+          {message.content === '' ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400" />
+              <span
+                className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
+                style={{ animationDelay: '0.15s' }}
+              />
+              <span
+                className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-400"
+                style={{ animationDelay: '0.3s' }}
+              />
+            </span>
+          ) : parseStructuredResponse(message.content) ? (
+            <StructuredResponse content={message.content} sessionId={sessionId} />
+          ) : (
+            <Markdown content={message.content} sessionId={sessionId} />
+          )}
+        </div>
+        {message.content !== '' && <SpeechButton text={message.content} />}
       </div>
     </motion.div>
   )

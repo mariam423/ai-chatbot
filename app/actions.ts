@@ -13,11 +13,20 @@ import { checkBillingRateLimit, clientIpFromHeaders, sanitizeInput } from '@/lib
 import { logSecurityEvent } from '@/lib/audit'
 import { decryptField, encryptField } from '@/lib/field-encryption'
 import { getPlan, isOverDailyLimit, PLANS } from '@/lib/billing/plans'
+import { createEmbedToken, normalizeEmbedOrigin } from '@/lib/embed'
 import {
   createBillingPortalSession as createStripePortalSession,
   createCheckoutSession as createStripeCheckoutSession,
 } from '@/lib/billing/stripe'
-import { ChatMessageSchema, type ChatMessage, type ChatSessionSummary } from '@/lib/types'
+import { normalizeUserRole } from '@/lib/roles'
+import type { DashboardData } from '@/lib/dashboard'
+import {
+  ChatMessageSchema,
+  type ChatMessage,
+  type ChatSessionSummary,
+  CustomAgentThemeSchema,
+  type CustomAgentSummary,
+} from '@/lib/types'
 
 /**
  * Server Actions for per-session conversation persistence (FR-11).
@@ -57,6 +66,36 @@ const SaveMessagesInputSchema = z
       })
     }
   })
+
+const CustomAgentInputSchema = z.object({
+  id: z.string().trim().min(1).max(100).optional(),
+  name: z.string().trim().min(1).max(60),
+  description: z.string().trim().max(240).optional().or(z.literal('')),
+  systemPrompt: z.string().trim().min(1).max(8_000),
+  baselineModel: ModelKeySchema.optional().or(z.literal('')),
+  selectedTools: z.array(z.string().trim().min(1).max(100)).max(32),
+  theme: CustomAgentThemeSchema.optional().nullable(),
+})
+
+function parseSelectedTools(raw: string): string[] {
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (Array.isArray(value)) {
+      return value.filter((tool): tool is string => typeof tool === 'string').slice(0, 32)
+    }
+    // Read the original object format written by the first CustomAgent
+    // migration so existing assistants remain usable after the field rename.
+    const legacy = z.record(z.string(), z.boolean()).safeParse(value)
+    return legacy.success
+      ? Object.entries(legacy.data)
+          .filter(([, enabled]) => enabled)
+          .map(([tool]) => tool)
+          .slice(0, 32)
+      : []
+  } catch {
+    return []
+  }
+}
 
 const RenameSessionInputSchema = z.object({
   sessionId: z.string().min(1).max(100),
@@ -414,6 +453,124 @@ export async function toggleArchiveSession(
   }
 }
 
+// ─── Custom Agents ───
+
+/** List the current user's custom assistants. */
+export async function listCustomAgents(): Promise<
+  { ok: true; agents: CustomAgentSummary[] } | { ok: false; error: string }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: true, agents: [] }
+  try {
+    const agents = await prisma.customAgent.findMany({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+    })
+    return {
+      ok: true,
+      agents: agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        systemPrompt: agent.systemPrompt,
+        baselineModel: agent.baselineModel,
+        selectedTools: parseSelectedTools(agent.selectedTools),
+        theme: CustomAgentThemeSchema.safeParse(agent.theme).data ?? null,
+        updatedAt: agent.updatedAt.toISOString(),
+      })),
+    }
+  } catch {
+    return { ok: false, error: 'Could not load custom agents.' }
+  }
+}
+
+/** Create or update one user-owned custom assistant. */
+export async function saveCustomAgent(input: {
+  id?: string
+  name: string
+  description?: string
+  systemPrompt: string
+  baselineModel?: string
+  selectedTools: string[]
+  theme?: string | null
+}): Promise<{ ok: true; agent: CustomAgentSummary } | { ok: false; error: string }> {
+  const parsed = CustomAgentInputSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, error: 'Invalid custom agent.' }
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'Not authenticated.' }
+  try {
+    const data = {
+      name: parsed.data.name,
+      description: parsed.data.description || null,
+      systemPrompt: parsed.data.systemPrompt,
+      baselineModel: parsed.data.baselineModel || null,
+      selectedTools: JSON.stringify(parsed.data.selectedTools),
+      theme: parsed.data.theme ?? null,
+    }
+    const agent = parsed.data.id
+      ? await prisma.customAgent
+          .updateMany({ where: { id: parsed.data.id, userId }, data })
+          .then(() =>
+            prisma.customAgent.findFirstOrThrow({ where: { id: parsed.data.id, userId } }),
+          )
+      : await prisma.customAgent.create({ data: { userId, ...data } })
+    return {
+      ok: true,
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        description: agent.description,
+        systemPrompt: agent.systemPrompt,
+        baselineModel: agent.baselineModel,
+        selectedTools: parseSelectedTools(agent.selectedTools),
+        theme: CustomAgentThemeSchema.safeParse(agent.theme).data ?? null,
+        updatedAt: agent.updatedAt.toISOString(),
+      },
+    }
+  } catch {
+    return { ok: false, error: 'Could not save custom agent.' }
+  }
+}
+
+/** Delete a custom assistant without affecting its user's conversations. */
+export async function deleteCustomAgent(
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = SessionIdSchema.safeParse(id)
+  const userId = await getCurrentUserId()
+  if (!parsed.success || !userId) return { ok: false, error: 'Custom agent not found.' }
+  try {
+    await prisma.customAgent.deleteMany({ where: { id, userId } })
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not delete custom agent.' }
+  }
+}
+
+/** Create a short-lived signed token for an owned assistant embed. */
+export async function createCustomAgentEmbedToken(input: {
+  agentId: string
+  origin?: string
+}): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+  const agentId = SessionIdSchema.safeParse(input.agentId)
+  if (!agentId.success) return { ok: false, error: 'Invalid custom agent.' }
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'Not authenticated.' }
+  try {
+    const agent = await prisma.customAgent.findFirst({ where: { id: agentId.data, userId } })
+    if (!agent) return { ok: false, error: 'Custom agent not found.' }
+    let origin: string
+    try {
+      origin = normalizeEmbedOrigin(input.origin)
+    } catch {
+      return { ok: false, error: 'Embed origin must be a valid URL.' }
+    }
+    return { ok: true, token: createEmbedToken({ agentId: agent.id, userId, origin }) }
+  } catch {
+    return { ok: false, error: 'Could not create embed token.' }
+  }
+}
+
 // ─── Session Skills ───
 
 function parseEnabledSkills(raw: string | null): string[] | null {
@@ -761,6 +918,7 @@ export async function getBillingStatus(): Promise<
         planLabel: string
         dailyLimit: number | null
         usedToday: number
+        estimatedTokensToday: number
         overLimit: boolean
         stripeConfigured: boolean
       }
@@ -776,6 +934,7 @@ export async function getBillingStatus(): Promise<
         planLabel: PLANS.free.label,
         dailyLimit: PLANS.free.dailyChatRequests,
         usedToday: 0,
+        estimatedTokensToday: 0,
         overLimit: false,
         stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO),
       },
@@ -787,6 +946,7 @@ export async function getBillingStatus(): Promise<
     const user = await prisma.user.findUnique({ where: { id: userId } })
     const today = new Date().toISOString().slice(0, 10)
     const usedToday = user?.usageDate === today ? user.usageCount : 0
+    const estimatedTokensToday = user?.usageDate === today ? user.usageTokens : 0
     const plan = getPlan(user?.plan)
     return {
       ok: true,
@@ -795,6 +955,7 @@ export async function getBillingStatus(): Promise<
         planLabel: plan.label,
         dailyLimit: plan.dailyChatRequests,
         usedToday,
+        estimatedTokensToday,
         overLimit: isOverDailyLimit(user?.plan, usedToday),
         stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO),
       },
@@ -836,6 +997,47 @@ export async function upgradeToPro(): Promise<
 }
 
 /** Open the Stripe billing portal so the user can manage/cancel their plan. */
+/** Load user usage, billing, assistants, and admin-only aggregate metrics. */
+export async function getDashboardData(): Promise<
+  { ok: true; data: DashboardData } | { ok: false; error: string }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'Sign in to view your dashboard.' }
+  try {
+    const [user, agents, billing] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId } }),
+      listCustomAgents(),
+      getBillingStatus(),
+    ])
+    if (!user || !agents.ok || !billing.ok)
+      return { ok: false, error: 'Could not load dashboard data.' }
+    let admin: DashboardData['admin'] = null
+    if (normalizeUserRole(user.role) === 'ADMIN') {
+      const [users, proUsers, messages, documents] = await Promise.all([
+        prisma.user.count(),
+        prisma.user.count({ where: { plan: 'pro' } }),
+        prisma.chatMessage.count(),
+        prisma.document.count(),
+      ])
+      admin = { users, proUsers, messages, documents, database: 'ok' }
+    }
+    return {
+      ok: true,
+      data: {
+        usage: {
+          messages: billing.data.usedToday,
+          tokens: billing.data.estimatedTokensToday,
+        },
+        billing: billing.data,
+        agents: agents.agents,
+        admin,
+      },
+    }
+  } catch {
+    return { ok: false, error: 'Could not load dashboard data.' }
+  }
+}
+
 export async function openBillingPortal(): Promise<
   | { ok: true; url: string; notConfigured?: boolean }
   | { ok: false; error: string; notConfigured?: boolean }

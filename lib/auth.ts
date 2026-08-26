@@ -11,6 +11,7 @@ import { checkLoginRateLimit, clientIp } from '@/lib/security'
 import { logSecurityEvent } from '@/lib/audit'
 import { DEFAULT_USER_ROLE, normalizeUserRole, type UserRole } from '@/lib/roles'
 import bcrypt from 'bcryptjs'
+import { sendWelcomeEmail } from '@/lib/email'
 
 /**
  * Provider credentials support both the app's documented names and Auth.js
@@ -109,6 +110,8 @@ async function persistOAuthIdentity(
           plan: 'free',
         },
       })
+
+  if (!existingUser) void sendWelcomeEmail(email, user.name)
 
   await prisma.account.upsert({
     where: {

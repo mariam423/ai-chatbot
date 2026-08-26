@@ -1,0 +1,95 @@
+# Chatbot reverse proxy for /etc/nginx/conf.d/chatbot.conf
+# Replace example.com and the certificate paths before enabling this file.
+# This file is included from nginx's `http {}` context, so limit_req_zone,
+# map, and upstream are intentionally declared at the top level.
+
+limit_req_zone $binary_remote_addr zone=chatbot_proxy:10m rate=20r/s;
+limit_req_status 429;
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream chatbot_next {
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name example.com www.example.com;
+
+    # Certbot HTTP-01 challenge path.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name example.com www.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Security headers. The Next.js app also sets these headers; keeping the
+    # proxy copy protects responses before they reach the application layer.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob: data:; frame-src 'self'" always;
+
+    # Keep health checks cheap and observable. The app returns 503 when its
+    # database check fails, which lets an ALB/systemd monitor detect failure.
+    location = /api/health {
+        proxy_pass http://chatbot_next;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+    }
+
+    location / {
+        # This is a proxy-level flood brake; application routes retain their
+        # own user/IP limits and emit their exact Retry-After value.
+        limit_req zone=chatbot_proxy burst=40 nodelay;
+        add_header X-RateLimit-Policy "20;w=1" always;
+        add_header X-RateLimit-Limit "20" always;
+        add_header X-Accel-Buffering "no" always;
+
+        proxy_pass http://chatbot_next;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Required for streamed /api/chat SSE responses and WebSocket
+        # upgrades. Do not buffer or gzip the event stream at the proxy.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Accept-Encoding "";
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        proxy_connect_timeout 10s;
+        proxy_request_buffering off;
+        chunked_transfer_encoding on;
+    }
+}

@@ -52,18 +52,27 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   applies. The chat empty state fetches it to advertise clickable capability
   chips. Guarded by a per-IP rate limit (no CSRF — read-only GET).
 - **`app/api/upload/route.ts`** — Node-runtime document API. `POST` accepts
-  PDF/TXT/MD/CSV multipart uploads up to 20 MB, validates ownership and
-  limits, extracts text, chunks and embeds it, and stores metadata. `GET`
+  PDF/TXT/MD/CSV/XLSX/DOCX multipart uploads up to 20 MB, validates ownership
+  and limits, extracts text, chunks and embeds it, and stores metadata. `GET`
   lists session documents; `DELETE` removes a document and its chunks.
+- **`app/api/health/route.ts`** — Public, non-sensitive readiness endpoint for
+  Nginx/ALB/uptime monitors. It runs a lightweight Prisma database check and
+  returns `200` for healthy or `503` for degraded readiness.
 - **`app/actions.ts`** — Server Actions for session/message persistence,
-  sidebar listing, rename/pin/archive, preferences, prompt presets, and
-  long-term memory records. Inputs are Zod-validated and results use `{ ok }`
-  discriminated unions.
+  sidebar listing, rename/pin/archive, per-user custom assistants, preferences,
+  prompt presets, and long-term memory records. Inputs are Zod-validated and
+  results use `{ ok }` discriminated unions.
+- **`app/dashboard/page.tsx`** + **`lib/dashboard.ts`** — Authenticated usage
+  and analytics dashboard with token/message quota, subscription status,
+  custom-assistant management, and an ADMIN-only platform metrics tab.
 - **`components/chat-app.tsx`** — Client shell for sessions, sidebar, command
-  palette, theme, and the model selector. The selected stable model key is
-  persisted as `chat.model`; on load it also reads user preferences to apply
-  the preferred default model (only when no local choice exists) and carries
-  generation tuning (temperature/max completion tokens) into `Chat`.
+  palette, theme, model selector, and the standard/custom-assistant selector.
+  The selected stable model key is persisted as `chat.model`; on load it also
+  reads user preferences to apply the preferred default model (only when no
+  local choice exists) and carries generation tuning (temperature/max
+  completion tokens) into `Chat`. The active custom assistant supplies scoped
+  `--accent-*` variables for its persisted emerald/sapphire/violet/obsidian/
+  amber visual theme.
 - **`app/settings/page.tsx`** — Settings UI (Profile, Model & Generation,
   API Key, Google Calendar, System Prompt Presets). The Model & Generation
   section picks a preferred default model (from `lib/models.ts`) and has
@@ -80,9 +89,9 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   (see `components/message-bubble.tsx`): editing a past user prompt forks a new
   branch from the shared prefix and regenerates the reply, and a version
   switcher bar lets the user toggle between branches without losing context.
-  Also wires the voice mic and the export menu into the composer.
-- **`components/file-upload.tsx`** — PDF/TXT/MD/CSV attachment picker with
-  compact removable badges and processing errors.
+  The chat toolbar also exposes the active assistant identity and export menu.
+- **`components/file-upload.tsx`** — PDF/TXT/MD/CSV/XLSX/DOCX attachment
+  picker with compact removable badges and processing errors.
 - **`components/media-upload.tsx`** — MP4/WebM picker that previews sampled
   keyframes, plus JPEG/PNG/WEBP/GIF and MP3/WAV attachments for the current
   vision/audio request (20 MB caps; images over 5 MB are auto-compressed
@@ -97,14 +106,18 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   that swaps the bubble for an inline textarea; saving calls back into
   `chat.tsx` to fork a new branch (tree-branching).
 - **`components/chat-export.tsx`** + **`lib/export-chat.ts`** — An **Export
-  chat** menu in the composer that downloads the active branch as Markdown
-  (`lib/export-chat.ts` also holds the Node-testable pure `chatToMarkdown`/
-  `chatToJson`/`exportFileName` helpers) or JSON via a generated Blob, and
-  renders a styled self-contained transcript into a hidden iframe for the
-  browser's native **Print → Save-as-PDF** flow (no PDF dependency). All
-  three formats carry each assistant reply's served model (`*via <model>*`
-  in Markdown, a `model`/`modelOverridden` field in JSON, a small line in
-  the PDF), so shared conversations keep the model provenance.
+  chat** menu in the chat toolbar that downloads the active branch as
+  timestamped Markdown, JSON, or plain text (`lib/export-chat.ts` also holds
+  the Node-testable pure `chatToMarkdown`/`chatToJson`/`chatToText`/
+  `exportFileName` helpers) via generated Blobs, and renders a styled
+  self-contained transcript into a hidden iframe for the browser's native
+  **Print → Save-as-PDF** flow (no PDF dependency). Exports include assistant
+  identity, message timestamps, and served-model provenance.
+- **`lib/email.ts`** — Server-only transactional email boundary. Resend is
+  preferred over SendGrid when configured; otherwise local development logs a
+  short console preview and production skips delivery safely. Provider
+  failures are swallowed and lifecycle helpers cover welcome, Pro activation,
+  and cancellation notifications.
 - **`components/audio-input.tsx`** — A mic button in the composer. Engine
   selection is `pickVoiceEngine`: the browser Web Speech `SpeechRecognition`
   API when available (Chrome/Edge, no network), otherwise a MediaRecorder
@@ -113,12 +126,38 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   available. While active it shows a pulsing red indicator and an animated
   equalizer (recording or transcribing), a transient inline pill on failure,
   and the finalized transcript is appended to the composer via `onTranscript`.
+- **`components/speech-button.tsx`** — Speaker control rendered beside each
+  completed assistant response. It tries the server `/api/speak` adapter first
+  (for OpenAI-compatible TTS), then uses browser `SpeechSynthesis`; stopping,
+  cleanup, and reduced provider availability do not affect the chat thread.
+- **`components/embed-chat.tsx`** + **`components/embed-generator.tsx`** —
+  Lightweight iframe chat surface with the same STT/TTS controls and a
+  dashboard custom-assistant panel that creates copyable signed iframe/script
+  snippets. Tokens are generated only by the authenticated
+  `createCustomAgentEmbedToken` server action and are scoped to one assistant
+  owner.
 - **`app/api/transcribe/route.ts`** — Server-side speech-to-text fallback. It
   accepts a multipart audio `file`, enforces a size cap, and forwards it to
   the configured provider's OpenAI-compatible `/audio/transcriptions` endpoint
   (API key stays server-side; `TRANSCRIBE_MODEL` overrides the default
   `whisper-1`), returning `{ transcript }` with timeout/error mapping. Same-origin
   check + per-IP rate limit.
+- **`app/api/speak/route.ts`** — Bounded server-side OpenAI-compatible TTS
+  adapter. It accepts up to 4,000 characters, forwards the request to
+  `/audio/speech` when a compatible OpenAI-style provider is configured, and
+  returns audio bytes with provider failures mapped to safe statuses. The
+  client falls back to browser `SpeechSynthesis`; the route is rate-limited
+  through the existing transcription guard without changing provider routing.
+- **`app/api/embed/chat/route.ts`** — Public-but-token-authenticated custom
+  assistant stream. It verifies a signed, expiring assistant-owner token,
+  checks the optional parent origin, bounds message history, applies a per-
+  assistant/IP rate limit, loads only the requested assistant, and reuses the
+  existing provider model/fallback resolution for SSE. CORS `OPTIONS` and
+  stream headers support cross-origin iframe clients.
+- **`app/embed/[agentId]/page.tsx`** + **`app/embed-widget.js/route.ts`** —
+  Minimal iframe page and public script loader for generated embeds. The page
+  reveals only the owned assistant name after token verification; the script
+  creates an iframe and never receives an LLM credential.
 - **`app/api/analytics/route.ts`** — Thin client bridge for user-activity
   events: validates `{ event, properties }` with Zod and forwards to the
   configured provider (PostHog) server-side so the key never reaches the
@@ -126,12 +165,13 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`app/api/webhooks/stripe/route.ts`** — Signature-verified Stripe webhook
   (`STRIPE_WEBHOOK_SECRET`; unverified → 401, unconfigured → 501). Handles
   `checkout.session.completed` (upgrade → pro/PRO, stores customer/subscription
-  ids) and `customer.subscription.updated`/`deleted` (synchronizes plan and
-  role; deletion clears the subscription id). Subscription events can resolve
-  the user from metadata/reference id or stored Stripe ids. Guarded by a
-  generous per-IP flood brake (signature verification is the real auth; the
-  CSRF check is defense in depth — Stripe's server-to-server calls carry no
-  Origin).
+  ids, and sends the activation notification) and
+  `customer.subscription.updated`/`deleted` (synchronizes plan and role;
+  deletion clears the subscription id and sends the cancellation notification).
+  Subscription events can resolve the user from metadata/reference id or
+  stored Stripe ids. Guarded by a generous per-IP flood brake (signature
+  verification is the real auth; the CSRF check is defense in depth — Stripe's
+  server-to-server calls carry no Origin).
 - **`lib/security.ts`** — Shared guardrails: `checkCsrf`
   (Origin/Referer vs `NEXT_PUBLIC_APP_URL`; absent Origin allowed for
   non-browser traffic), `sanitizeInput` (control-char strip preserving
@@ -220,6 +260,10 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   resolves to any blocked address (rebinding defense). Applied to web search,
   MCP server URLs, `diagram_render`, and `weather_lookup`; deliberately not
   applied to the LLM base URL (self-hosted local models are legitimate).
+- **`lib/embed.ts`** — Server-only HMAC-signed embed token contract. Payloads
+  carry assistant id, owner id, optional normalized origin, and expiry; token
+  verification is timing-safe, rejects tampering/expiry/id mismatches, and is
+  used by both the embed page and stream route.
 - **`lib/field-encryption.ts`** — Data-at-rest encryption for sensitive
   preference fields: AES-256-GCM with a `v1:<iv>:<tag>:<ct>` versioned
   envelope, keyed by the `ENCRYPTION_KEY` env var (sha256-derived to 32
@@ -323,8 +367,8 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`lib/structured-output.ts`** — Intent detection, strict JSON-schema metadata,
   Zod validation, safe Markdown conversion for table/code/citation envelopes,
   and validated chart data for the Recharts renderer.
-- **`lib/documents.ts`** — Bounded UTF-8/PDF extraction and overlapping text
-  chunking for document RAG.
+- **`lib/documents.ts`** — Bounded UTF-8/PDF/ZIP-XML extraction for CSV, XLSX,
+  and DOCX files plus overlapping text chunking for document RAG.
 - **`lib/rag.ts`** — Deterministic normalized 128-dimensional local embeddings,
   Zod vector validation, cosine retrieval, and bounded citation-labeled context.
 - **`lib/video.ts`** — Browser-only MP4/WebM keyframe sampling. It extracts at
@@ -355,10 +399,11 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   `Document[]`. `DocumentChunk` stores bounded extracted text and a JSON vector
   embedding. `MemoryRecord` stores user-scoped preferences, entities, and
   summaries. `Account` links Google/GitHub identities to `User`; new users
-  default to the `FREE` role; `ADMIN` is operator-managed. `User` carries the SaaS billing state (`role`,
-  `plan`, `stripeCustomerId`, `stripeSubscriptionId`, daily
-  `usageCount`/`usageDate`). Document and user
-  relations cascade appropriately.
+  default to the `FREE` role; `ADMIN` is operator-managed. `CustomAgent` stores
+  each user's prompt, baseline model, selected tools, and optional visual
+  theme. `User` carries the SaaS billing state (`role`, `plan`,
+  `stripeCustomerId`, `stripeSubscriptionId`, daily `usageCount`/`usageDate`).
+  Document and user relations cascade appropriately.
 - **`prisma/migrations/20260822100000_add_documents/migration.sql`** — Creates
   the document and chunk tables and retrieval indexes.
 - **`prisma/migrations/20260822120000_add_memory/migration.sql`** — Creates

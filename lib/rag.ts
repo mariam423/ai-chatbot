@@ -2,6 +2,18 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { findOwnedSession } from '@/lib/session-access'
 
+// Keep the RAG boundary convenient for callers that own document ingestion:
+// format-aware extraction/chunking lives in lib/documents.ts, while this
+// module re-exports the public pipeline helpers alongside embeddings/retrieval.
+export {
+  chunkDocumentText,
+  extractDocumentText,
+  getDocumentExtension,
+  MAX_DOCUMENT_BYTES,
+  MAX_DOCUMENT_CHUNKS,
+  MAX_EXTRACTED_TEXT_LENGTH,
+} from '@/lib/documents'
+
 export const EMBEDDING_DIMENSION = 128
 export const MAX_RAG_CHUNKS = 6
 export const MAX_RAG_CONTEXT_LENGTH = 8_000

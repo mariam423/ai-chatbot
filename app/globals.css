@@ -42,6 +42,13 @@
   --accent-medium: rgba(5, 150, 105, 0.14);
   --accent-glow: rgba(5, 150, 105, 0.18);
 
+  /* Custom assistant swatches — stable outside the active chat theme scope. */
+  --assistant-emerald: #10b981;
+  --assistant-sapphire: #60a5fa;
+  --assistant-violet: #a78bfa;
+  --assistant-obsidian: #94a3b8;
+  --assistant-amber: #fbbf24;
+
   /* Gold — reserved for brand + pinned/highlight states */
   --gold: #a16207;
   --gold-soft: rgba(161, 98, 7, 0.1);

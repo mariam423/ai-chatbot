@@ -67,6 +67,10 @@ interface ChatProps {
   /** Bumped by the shell on New Chat / delete-active while sessionId is null. */
   resetNonce?: number
   modelKey: ModelKey
+  /** Optional user-owned assistant persona selected in the chat header. */
+  customAgentId?: string | null
+  /** Display name for transcript metadata and the active assistant theme. */
+  assistantName?: string
   /** Per-session skill override; null = default catalog. */
   enabledSkills: string[] | null
   /** Generation tuning from user settings; null = provider defaults. */
@@ -91,6 +95,8 @@ export default function Chat({
   sessionId,
   resetNonce = 0,
   modelKey,
+  customAgentId = null,
+  assistantName = 'Chatbot',
   enabledSkills,
   temperature = null,
   maxCompletionTokens = null,
@@ -330,6 +336,7 @@ export default function Chat({
           messages: history.map<ChatWireMessage>(({ role, content: c }) => ({ role, content: c })),
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(sessionId ? { sessionId } : {}),
+          ...(customAgentId ? { customAgentId } : {}),
           ...(enabledSkills !== null ? { enabledSkills } : {}),
           model: modelKey,
           ...(temperature !== null ? { temperature } : {}),
@@ -507,6 +514,20 @@ export default function Chat({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* ─── Chat tools ─── */}
+      <div
+        className="flex items-center justify-between px-4 py-2"
+        style={{ borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <span className="text-[11px] font-medium text-[var(--text-tertiary)]">{assistantName}</span>
+        <ChatExport
+          messages={messages}
+          title={messages.find((m) => m.role === 'user')?.content}
+          assistantName={assistantName}
+          disabled={isStreaming}
+        />
+      </div>
+
       {/* ─── Branch switcher (visible only once a thread has forked) ─── */}
       {thread.branches.length > 1 && (
         <div
@@ -744,11 +765,6 @@ export default function Chat({
         <AudioInput
           disabled={isStreaming}
           onTranscript={(text) => setInput((prev) => `${prev}${text}`.trimStart())}
-        />
-        <ChatExport
-          messages={messages}
-          title={messages.find((m) => m.role === 'user')?.content}
-          disabled={isStreaming}
         />
         <MediaUpload
           frames={videoFrames}
