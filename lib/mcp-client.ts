@@ -23,6 +23,8 @@ const JsonRpcResponseSchema = z.object({
 const ToolSchema = z.object({
   name: z.string().min(1).max(128),
   description: z.string().max(2_000).optional(),
+  // MCP servers send JSON Schema here. Keep it as data, then validate each
+  // tool call against the discovered schema before it leaves this process.
   inputSchema: z.record(z.string(), z.unknown()).default({}),
 })
 
@@ -64,6 +66,122 @@ function rpcHeaders(session: McpSession, accept = 'application/json, text/event-
     'Content-Type': 'application/json',
     ...session.config.headers,
     ...(session.sessionId ? { 'Mcp-Session-Id': session.sessionId } : {}),
+  }
+}
+
+/**
+ * Validate the common JSON-Schema subset used by MCP tool inputSchema values.
+ *
+ * MCP schemas are supplied by remote servers, so converting them to executable
+ * code or trusting them as Zod is unsafe. This bounded validator handles the
+ * interoperable object/array/string/number/boolean subset, required fields,
+ * enums, and additionalProperties without throwing on malformed schemas.
+ */
+export function validateMcpArguments(
+  value: unknown,
+  schema: Record<string, unknown>,
+  path = 'arguments',
+  depth = 0,
+): string | null {
+  if (depth > 12) return `${path} exceeds the schema nesting limit.`
+
+  const enumValues = schema.enum
+  if (Array.isArray(enumValues) && !enumValues.some((candidate) => Object.is(candidate, value))) {
+    return `${path} must be one of the allowed values.`
+  }
+  if ('const' in schema && !Object.is(schema.const, value)) {
+    return `${path} must equal the schema constant.`
+  }
+
+  const type = schema.type
+  if (type === undefined) return null
+  if (Array.isArray(type)) {
+    if (
+      type.some(
+        (candidate) =>
+          validateMcpArguments(value, { ...schema, type: candidate }, path, depth + 1) === null,
+      )
+    ) {
+      return null
+    }
+    return `${path} has an invalid type.`
+  }
+
+  switch (type) {
+    case 'object': {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return `${path} must be an object.`
+      }
+      const object = value as Record<string, unknown>
+      const required = Array.isArray(schema.required) ? schema.required : []
+      for (const key of required) {
+        if (typeof key === 'string' && !(key in object)) return `${path}.${key} is required.`
+      }
+      const properties =
+        schema.properties &&
+        typeof schema.properties === 'object' &&
+        !Array.isArray(schema.properties)
+          ? (schema.properties as Record<string, unknown>)
+          : {}
+      for (const [key, propertySchema] of Object.entries(properties)) {
+        if (!(key in object) || !propertySchema || typeof propertySchema !== 'object') continue
+        const error = validateMcpArguments(
+          object[key],
+          propertySchema as Record<string, unknown>,
+          `${path}.${key}`,
+          depth + 1,
+        )
+        if (error) return error
+      }
+      if (schema.additionalProperties === false) {
+        const unknown = Object.keys(object).find((key) => !(key in properties))
+        if (unknown) return `${path}.${unknown} is not allowed.`
+      }
+      return null
+    }
+    case 'array': {
+      if (!Array.isArray(value)) return `${path} must be an array.`
+      if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
+        return `${path} must contain at least ${schema.minItems} items.`
+      }
+      if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
+        return `${path} must contain at most ${schema.maxItems} items.`
+      }
+      if (schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)) {
+        for (const [index, item] of value.entries()) {
+          const error = validateMcpArguments(
+            item,
+            schema.items as Record<string, unknown>,
+            `${path}[${index}]`,
+            depth + 1,
+          )
+          if (error) return error
+        }
+      }
+      return null
+    }
+    case 'string':
+      if (typeof value !== 'string') return `${path} must be a string.`
+      if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
+        return `${path} is too short.`
+      }
+      if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
+        return `${path} is too long.`
+      }
+      return null
+    case 'number':
+    case 'integer':
+      if (typeof value !== 'number' || !Number.isFinite(value)) return `${path} must be a number.`
+      if (type === 'integer' && !Number.isInteger(value)) return `${path} must be an integer.`
+      return null
+    case 'boolean':
+      return typeof value === 'boolean' ? null : `${path} must be a boolean.`
+    case 'null':
+      return value === null ? null : `${path} must be null.`
+    default:
+      // Unknown JSON-Schema keywords/types are ignored rather than making a
+      // valid MCP server unusable. The object boundary remains enforced.
+      return null
   }
 }
 
@@ -182,6 +300,8 @@ export async function callMcpTool(
   }
   const args = z.record(z.string(), z.unknown()).safeParse(argumentsValue)
   if (!args.success) throw new Error('MCP tool arguments must be a JSON object.')
+  const schemaError = validateMcpArguments(args.data, tool.inputSchema)
+  if (schemaError) throw new Error(`MCP tool arguments failed validation: ${schemaError}`)
   const config = configuredServers().find((server) => server.id === tool.serverId)
   if (!config) throw new Error(`MCP server is not configured: ${tool.serverId}`)
   const session = await openSession(config)

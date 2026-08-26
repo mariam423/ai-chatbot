@@ -6,6 +6,7 @@ import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
 import { checkAuthRateLimit, clientIpFromHeaders } from '@/lib/security'
+import { DEFAULT_USER_ROLE } from '@/lib/roles'
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(100),
@@ -52,7 +53,7 @@ export async function registerUser(input: {
 
     const passwordHash = await bcrypt.hash(password, 12)
     await prisma.user.create({
-      data: { name, email: normalisedEmail, passwordHash },
+      data: { name, email: normalisedEmail, passwordHash, role: DEFAULT_USER_ROLE, plan: 'free' },
     })
 
     return { ok: true }

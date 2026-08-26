@@ -1,5 +1,12 @@
 import { z } from 'zod'
 import { assertSafeUrl } from '@/lib/ssrf'
+import {
+  CodeStructuredOutputSchema,
+  RechartsStructuredOutputSchema,
+  TableStructuredOutputSchema,
+  type StructuredOutput,
+  type StructuredOutputKind,
+} from '@/lib/structured-output'
 
 const MAX_TOOL_TEXT = 8_000
 const TOOL_TIMEOUT_MS = 8_000
@@ -19,7 +26,34 @@ export interface AgentToolDefinition {
   name: z.infer<typeof AgentToolCallSchema>['name']
   description: string
   parameters: Record<string, unknown>
+  /** Optional strict output contract for tools returning structured data. */
+  outputSchema?: z.ZodType
 }
+
+/** Strict Zod contracts available to the agent for rendered structured output. */
+export const AgentStructuredOutputSchemas = {
+  table: TableStructuredOutputSchema,
+  code: CodeStructuredOutputSchema,
+  chart: RechartsStructuredOutputSchema,
+} as const
+
+export function validateStructuredAgentOutput(
+  kind: StructuredOutputKind,
+  value: unknown,
+): StructuredOutput | null {
+  if (kind === 'citations') return null
+  const parsed = AgentStructuredOutputSchemas[kind].safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+
+const CodeInterpreterOutputSchema = z
+  .object({
+    result: z.number().finite(),
+    chart: z
+      .array(z.object({ timestamp: z.string(), value: z.number().finite() }).strict())
+      .max(500),
+  })
+  .strict()
 
 export interface AgentToolResult {
   ok: boolean
@@ -53,6 +87,7 @@ const TOOL_DEFINITIONS: AgentToolDefinition[] = [
         points: { type: 'array', maxItems: 500 },
       },
     },
+    outputSchema: CodeInterpreterOutputSchema,
   },
   {
     name: 'image_inspect',
@@ -220,6 +255,19 @@ export async function executeBuiltInAgentTool(input: unknown): Promise<AgentTool
             : parsed.data.name === 'audio_transcribe'
               ? audioTranscribe(parsed.data.arguments)
               : audioSynthesize(parsed.data.arguments)
+    const definition = TOOL_DEFINITIONS.find((tool) => tool.name === parsed.data.name)
+    if (definition?.outputSchema) {
+      const output = definition.outputSchema.safeParse(data)
+      if (!output.success) {
+        return {
+          ok: false,
+          tool: parsed.data.name,
+          data: null,
+          error: 'Built-in tool returned data outside its output schema.',
+        }
+      }
+      return { ok: true, tool: parsed.data.name, data: output.data }
+    }
     return { ok: true, tool: parsed.data.name, data }
   } catch (error) {
     return {

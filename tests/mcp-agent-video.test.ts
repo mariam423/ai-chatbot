@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MAX_AGENT_STEPS, runAgent, type AgentInputMessage } from '../lib/agent'
-import { toOpenAITools, type McpTool } from '../lib/mcp-client'
+import { toOpenAITools, validateMcpArguments, type McpTool } from '../lib/mcp-client'
 import { VideoFrameSchema } from '../lib/types'
 
 // The SSRF guard (lib/ssrf.ts) resolves configured endpoints before fetching.
@@ -23,6 +23,22 @@ afterEach(() => {
 })
 
 describe('MCP client and agent loop', () => {
+  it('validates discovered MCP JSON schemas before tool execution', () => {
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['query'],
+      properties: {
+        query: { type: 'string', minLength: 2 },
+        limit: { type: 'integer', maximum: 10 },
+      },
+    }
+    expect(validateMcpArguments({ query: 'status', limit: 5 }, schema)).toBeNull()
+    expect(validateMcpArguments({ query: 'x' }, schema)).toContain('too short')
+    expect(validateMcpArguments({ query: 'status', extra: true }, schema)).toContain('not allowed')
+    expect(validateMcpArguments({ limit: 1 }, schema)).toContain('required')
+  })
+
   it('converts MCP tool metadata to function tools', () => {
     expect(toOpenAITools([tool])[0]).toEqual({
       type: 'function',
@@ -104,6 +120,52 @@ describe('MCP client and agent loop', () => {
     ])
     expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(MAX_AGENT_STEPS).toBe(4)
+  })
+
+  it('uses a strict Zod-derived response schema for a tool-free structured agent', async () => {
+    const structured = JSON.stringify({
+      kind: 'chart',
+      content: 'Trend',
+      code: '',
+      language: '',
+      columns: [],
+      rows: [],
+      chart: [{ timestamp: '2026-01', value: 3 }],
+      citations: [],
+    })
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ choices: [{ message: { role: 'assistant', content: structured } }] }),
+          { status: 200 },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await runAgent({
+      apiKey: 'test-key',
+      baseUrl: 'https://llm.example.com/v1',
+      model: 'test/model',
+      messages: [{ role: 'user', content: 'Make a chart.' }],
+      systemPrompt: 'Return structured data.',
+      tools: [],
+      builtInTools: [],
+      skillTools: [],
+      structuredOutput: 'chart',
+    })
+
+    expect(result.structuredOutput).toMatchObject({
+      kind: 'chart',
+      chart: [{ timestamp: '2026-01', value: 3 }],
+    })
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      response_format?: { type: string; json_schema: { strict: boolean; schema: { type: string } } }
+    }
+    expect(payload.response_format).toMatchObject({
+      type: 'json_schema',
+      json_schema: { strict: true, schema: { type: 'object' } },
+    })
   })
 })
 

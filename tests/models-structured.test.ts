@@ -89,6 +89,18 @@ describe('model registry', () => {
     vi.unstubAllEnvs()
   })
 
+  it('resolves the verified Kimi K3 slug and ignores empty overrides', () => {
+    vi.stubEnv('MODEL_KIMI_K3', undefined)
+    expect(resolveModel('kimi-k3', 'openrouter')).toBe('moonshotai/kimi-k3')
+
+    vi.stubEnv('MODEL_KIMI_K3', '   ')
+    expect(resolveModel('kimi-k3', 'openrouter')).toBe('moonshotai/kimi-k3')
+
+    vi.stubEnv('MODEL_KIMI_K3', 'moonshotai/moonshot-v1-8k')
+    expect(resolveModel('kimi-k3', 'openrouter')).toBe('moonshotai/moonshot-v1-8k')
+    vi.unstubAllEnvs()
+  })
+
   it('resolves a selected model key and permits server-side overrides', () => {
     vi.stubEnv('MODEL_DEEPSEEK_V4_FLASH', 'custom/deepseek')
     expect(resolveModel('deepseek-v4-flash')).toBe('custom/deepseek')

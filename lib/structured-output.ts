@@ -3,29 +3,74 @@ import { z } from 'zod'
 export const StructuredOutputKindSchema = z.enum(['table', 'chart', 'code', 'citations'])
 export type StructuredOutputKind = z.infer<typeof StructuredOutputKindSchema>
 
-const CitationSchema = z.object({
-  label: z.string().min(1).max(300),
-  section: z.string().min(1).max(100),
-  quote: z.string().max(2_000),
-})
+const CitationSchema = z
+  .object({
+    label: z.string().min(1).max(300),
+    section: z.string().min(1).max(100),
+    quote: z.string().max(2_000),
+  })
+  .strict()
 
-export const ChartPointSchema = z.object({
-  timestamp: z.string().min(1).max(200),
-  value: z.number().finite(),
-})
+export const ChartPointSchema = z
+  .object({
+    timestamp: z.string().min(1).max(200),
+    value: z.number().finite(),
+  })
+  .strict()
 
 /** The model envelope is intentionally simple so it can stream as JSON. */
-export const StructuredResponseSchema = z.object({
-  kind: StructuredOutputKindSchema,
-  content: z.string().max(20_000),
-  code: z.string().max(20_000),
-  language: z.string().max(40),
-  columns: z.array(z.string().max(200)).max(30),
-  rows: z.array(z.array(z.string().max(1_000)).max(30)).max(500),
-  chart: z.array(ChartPointSchema).max(500).default([]),
-  citations: z.array(CitationSchema).max(30),
-})
+export const StructuredResponseSchema = z
+  .object({
+    kind: StructuredOutputKindSchema,
+    content: z.string().max(20_000),
+    code: z.string().max(20_000),
+    language: z.string().max(40),
+    columns: z.array(z.string().max(200)).max(30),
+    rows: z.array(z.array(z.string().max(1_000)).max(30)).max(500),
+    chart: z.array(ChartPointSchema).max(500).default([]),
+    citations: z.array(CitationSchema).max(30),
+  })
+  .strict()
 export type StructuredResponse = z.infer<typeof StructuredResponseSchema>
+
+/** Strict per-kind schemas used by agent planning and structured renderers. */
+export const TableStructuredOutputSchema = StructuredResponseSchema.extend({
+  kind: z.literal('table'),
+})
+export const CodeStructuredOutputSchema = StructuredResponseSchema.extend({
+  kind: z.literal('code'),
+})
+/** Recharts consumes the validated `chart` points from this chart envelope. */
+export const RechartsStructuredOutputSchema = StructuredResponseSchema.extend({
+  kind: z.literal('chart'),
+})
+export const StructuredOutputSchema = z.discriminatedUnion('kind', [
+  TableStructuredOutputSchema,
+  CodeStructuredOutputSchema,
+  RechartsStructuredOutputSchema,
+  StructuredResponseSchema.extend({ kind: z.literal('citations') }),
+])
+export type StructuredOutput = z.infer<typeof StructuredOutputSchema>
+
+export function structuredOutputSchemaFor(kind: StructuredOutputKind) {
+  return {
+    table: TableStructuredOutputSchema,
+    code: CodeStructuredOutputSchema,
+    chart: RechartsStructuredOutputSchema,
+    citations: StructuredOutputSchema.options[3],
+  }[kind]
+}
+
+/** Convert the strict per-kind Zod schema to an OpenAI-compatible schema. */
+export function structuredOutputJsonSchemaFor(kind: StructuredOutputKind): Record<string, unknown> {
+  const json = z.toJSONSchema(structuredOutputSchemaFor(kind))
+  if (!json || typeof json !== 'object' || Array.isArray(json)) {
+    return STRUCTURED_RESPONSE_JSON_SCHEMA
+  }
+  const schema = { ...(json as Record<string, unknown>) }
+  delete schema.$schema
+  return schema
+}
 
 /** OpenAI-compatible strict JSON-schema payload for response_format. */
 export const STRUCTURED_RESPONSE_JSON_SCHEMA = {

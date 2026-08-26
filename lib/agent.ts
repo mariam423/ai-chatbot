@@ -9,6 +9,7 @@ import {
 import {
   executeBuiltInAgentTool,
   hasBuiltInToolIntent,
+  validateStructuredAgentOutput,
   listBuiltInAgentTools,
   type AgentToolDefinition,
 } from '@/lib/agent-tools'
@@ -20,6 +21,12 @@ import {
   type SkillToolContext,
 } from '@/lib/skills/tools'
 import { getMaxOutputTokens } from '@/lib/llm-config'
+import {
+  structuredOutputJsonSchemaFor,
+  structuredOutputSchemaFor,
+  type StructuredOutput,
+  type StructuredOutputKind,
+} from '@/lib/structured-output'
 
 export const MAX_AGENT_STEPS = 4
 const ToolCallSchema = z.object({
@@ -71,6 +78,8 @@ export interface AgentRunOptions {
   skillContext?: SkillToolContext
   signal?: AbortSignal
   headers?: Record<string, string>
+  /** Request strict JSON output for callers that run an agent without tools. */
+  structuredOutput?: StructuredOutputKind
 }
 
 export interface AgentRunResult {
@@ -79,6 +88,8 @@ export interface AgentRunResult {
   /** History to continue with a streamed final answer without replaying that answer. */
   continuationMessages: AgentMessage[]
   toolCount: number
+  /** Validated structured content, when a structured output was requested. */
+  structuredOutput: StructuredOutput | null
 }
 
 function builtInDefinitions(tools: AgentToolDefinition[]): OpenAITool[] {
@@ -123,6 +134,21 @@ async function complete(
       max_tokens: getMaxOutputTokens(),
       messages: [{ role: 'system', content: options.systemPrompt }, ...messages],
       ...(tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
+      // OpenAI-compatible providers generally reject response_format together
+      // with tool planning. Apply the strict Zod-derived envelope when this
+      // agent is explicitly used as a structured, tool-free executor.
+      ...(options.structuredOutput && tools.length === 0
+        ? {
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: `structured_${options.structuredOutput}_response`,
+                strict: true,
+                schema: structuredOutputJsonSchemaFor(options.structuredOutput),
+              },
+            },
+          }
+        : {}),
     }),
     signal: options.signal,
   })
@@ -178,12 +204,30 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     content,
   }))
   let toolCount = 0
+  let structuredOutput: StructuredOutput | null = null
 
   for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
     const result = await complete(options, execution, availableTools)
     const assistant = result.message
     if (!assistant) break
     const toolCalls = z.array(ToolCallSchema).safeParse(assistant.tool_calls ?? [])
+    if (options.structuredOutput && assistant.content) {
+      try {
+        const candidate = JSON.parse(assistant.content)
+        if (options.structuredOutput === 'citations') {
+          const parsedStructured = structuredOutputSchemaFor(options.structuredOutput).safeParse(
+            candidate,
+          )
+          if (parsedStructured.success) structuredOutput = parsedStructured.data
+        } else {
+          const validated = validateStructuredAgentOutput(options.structuredOutput, candidate)
+          if (validated) structuredOutput = validated
+        }
+      } catch {
+        // Keep the execution trace; callers can decide how to handle a
+        // provider that ignored the structured-output contract.
+      }
+    }
     const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: assistant.content ?? null,
@@ -220,5 +264,5 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     toolCount > 0 && lastMessage?.role === 'assistant' && !lastMessage.tool_calls
       ? execution.slice(0, -1)
       : execution
-  return { finalMessages: execution, continuationMessages, toolCount }
+  return { finalMessages: execution, continuationMessages, toolCount, structuredOutput }
 }

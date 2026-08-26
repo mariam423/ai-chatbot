@@ -369,6 +369,45 @@ describe('POST /api/chat', () => {
     expect(defaultPayload.model).toBe('custom/backup')
   })
 
+  it('routes Kimi K3 to its verified slug and retries 404/402/429 with the provider backup', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MODEL_KIMI_K3', undefined)
+
+    for (const status of [404, 402, 429]) {
+      const sse = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\\n\\n'))
+          controller.close()
+        },
+      })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(status, { error: 'kimi rejected' }))
+        .mockResolvedValueOnce(new Response(sse, { status: 200 }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      const response = await POST(
+        new Request('http://localhost/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'kimi-k3',
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        }),
+      )
+
+      expect(response.status, `status ${status}`).toBe(200)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+      const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+      expect(first.model).toBe('moonshotai/kimi-k3')
+      expect(second.model).toBe('stealth/ox-alpha')
+      expect(response.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+      expect(response.headers.get('x-served-model-overridden')).toBe('true')
+    }
+  })
+
   it('retries with the fallback model on OpenRouter 402 and 429 rejections', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     for (const status of [402, 429]) {

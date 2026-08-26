@@ -26,6 +26,7 @@ export type SecurityEventKind =
   | 'auth_throttled'
   | 'auth_failed'
   | 'auth_succeeded'
+  | 'billing_throttled'
   | 'webhook_invalid_signature'
   | 'decryption_failed'
 

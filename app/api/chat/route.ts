@@ -16,7 +16,7 @@ import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 import { getSessionRagContext } from '@/lib/rag'
 import {
   detectStructuredOutputKind,
-  STRUCTURED_RESPONSE_JSON_SCHEMA,
+  structuredOutputJsonSchemaFor,
   StructuredOutputKindSchema,
 } from '@/lib/structured-output'
 import {
@@ -287,6 +287,7 @@ export async function POST(request: Request) {
         skillContext,
         signal: request.signal,
         headers: extraHeaders,
+        structuredOutput: structuredOutput ?? undefined,
       })
       if (agent.toolCount > 0) messagesForModel = agent.continuationMessages
     }
@@ -313,7 +314,7 @@ export async function POST(request: Request) {
                 json_schema: {
                   name: 'structured_chat_response',
                   strict: true,
-                  schema: STRUCTURED_RESPONSE_JSON_SCHEMA,
+                  schema: structuredOutputJsonSchemaFor(structuredOutput),
                 },
               },
             }

@@ -4,15 +4,20 @@ import { POST } from '../app/api/webhooks/stripe/route'
 
 // The webhook only touches prisma.user; mock the client so no DB is needed.
 const userUpdate = vi.fn()
+const userFindFirst = vi.fn()
 vi.mock('../lib/db', () => ({
   prisma: {
-    user: { update: (...args: unknown[]) => userUpdate(...args) },
+    user: {
+      update: (...args: unknown[]) => userUpdate(...args),
+      findFirst: (...args: unknown[]) => userFindFirst(...args),
+    },
   },
 }))
 
 afterEach(() => {
   vi.unstubAllEnvs()
   userUpdate.mockClear()
+  userFindFirst.mockReset()
 })
 
 function signedHeader(
@@ -64,6 +69,7 @@ describe('POST /api/webhooks/stripe', () => {
       where: { id: 'user-123' },
       data: {
         plan: 'pro',
+        role: 'PRO',
         stripeCustomerId: 'cus_abc',
         stripeSubscriptionId: 'sub_xyz',
       },
@@ -86,7 +92,39 @@ describe('POST /api/webhooks/stripe', () => {
     expect(res.status).toBe(200)
     expect(userUpdate).toHaveBeenCalledWith({
       where: { id: 'user-123' },
-      data: { plan: 'free', stripeSubscriptionId: 'sub_xyz' },
+      data: { plan: 'free', role: 'FREE', stripeSubscriptionId: null },
+    })
+  })
+
+  it('resolves subscription updates by stored Stripe customer id', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    userFindFirst.mockResolvedValue({ id: 'user-456' })
+    const payload = JSON.stringify({
+      type: 'customer.subscription.updated',
+      data: {
+        object: {
+          id: 'sub_new',
+          customer: 'cus_existing',
+          status: 'active',
+        },
+      },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(200)
+    expect(userFindFirst).toHaveBeenCalledWith({
+      where: {
+        OR: [{ stripeCustomerId: 'cus_existing' }, { stripeSubscriptionId: 'sub_new' }],
+      },
+      select: { id: true },
+    })
+    expect(userUpdate).toHaveBeenCalledWith({
+      where: { id: 'user-456' },
+      data: {
+        plan: 'pro',
+        role: 'PRO',
+        stripeSubscriptionId: 'sub_new',
+        stripeCustomerId: 'cus_existing',
+      },
     })
   })
 
