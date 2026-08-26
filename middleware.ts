@@ -19,6 +19,9 @@ export function middleware(req: NextRequest) {
   // Allow NextAuth API routes, login page, and static assets through.
   if (
     pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/embed') ||
+    pathname.startsWith('/embed') ||
+    pathname === '/api/health' ||
     pathname.startsWith('/login') ||
     pathname.startsWith('/forgot-password') ||
     pathname.startsWith('/reset-password') ||

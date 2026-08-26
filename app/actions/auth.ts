@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
 import { checkAuthRateLimit, clientIpFromHeaders } from '@/lib/security'
 import { DEFAULT_USER_ROLE } from '@/lib/roles'
+import { sendWelcomeEmail } from '@/lib/email'
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(100),
@@ -55,6 +56,10 @@ export async function registerUser(input: {
     await prisma.user.create({
       data: { name, email: normalisedEmail, passwordHash, role: DEFAULT_USER_ROLE, plan: 'free' },
     })
+
+    // Email delivery is best-effort and must never turn a successful signup
+    // into a failed request. The utility falls back locally when unconfigured.
+    void sendWelcomeEmail(normalisedEmail, name).catch(() => undefined)
 
     return { ok: true }
   } catch {

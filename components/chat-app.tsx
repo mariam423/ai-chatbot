@@ -13,12 +13,13 @@ import {
 } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useSession, signOut } from 'next-auth/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   clearChatSession,
   getSessionSkills,
   getUserPreferences,
   listChatSessions,
+  listCustomAgents,
   renameChatSession,
   togglePinSession,
   toggleArchiveSession,
@@ -27,7 +28,7 @@ import {
 import { withThemeTransition } from '@/lib/theme-transition'
 import { clearSessionId, clearThread, getSessionId, setSessionId } from '@/lib/storage'
 import { DEFAULT_MODEL_KEY, MODEL_OPTIONS, ModelKeySchema, type ModelKey } from '@/lib/models'
-import type { ChatSessionSummary } from '@/lib/types'
+import type { ChatSessionSummary, CustomAgentSummary, CustomAgentTheme } from '@/lib/types'
 import Chat from './chat'
 import Sidebar from './sidebar'
 import CommandPalette from './command-palette'
@@ -50,6 +51,8 @@ export default function ChatApp() {
   const [showArchived, setShowArchived] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelKey>(DEFAULT_MODEL_KEY)
+  const [customAgents, setCustomAgents] = useState<CustomAgentSummary[]>([])
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   // Per-user generation tuning from Settings (Model & Generation). Applied to
   // every chat request; null = provider defaults.
   const [temperature, setTemperature] = useState<number | null>(null)
@@ -127,6 +130,9 @@ export default function ChatApp() {
       setShowModelCaptions(result.data.showModelCaptions)
     })
     void refreshSessions()
+    void listCustomAgents().then((result) => {
+      if (result.ok) setCustomAgents(result.agents)
+    })
     setReady(true)
   }, [])
   /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
@@ -206,6 +212,43 @@ export default function ChatApp() {
   // model that served its last assistant reply (from the sidebar summary's
   // lastModel). Null when no session is active (e.g. a fresh new chat).
   const activeSession = sessionId ? (sessions.find((s) => s.id === sessionId) ?? null) : null
+  const activeAgent = selectedAgentId
+    ? (customAgents.find((agent) => agent.id === selectedAgentId) ?? null)
+    : null
+
+  const assistantThemeStyles: Record<CustomAgentTheme, Record<string, string>> = {
+    emerald: {
+      '--accent': '#34d399',
+      '--accent-soft': 'rgba(52, 211, 153, 0.08)',
+      '--accent-medium': 'rgba(52, 211, 153, 0.16)',
+      '--accent-glow': 'rgba(52, 211, 153, 0.22)',
+    },
+    sapphire: {
+      '--accent': '#60a5fa',
+      '--accent-soft': 'rgba(96, 165, 250, 0.1)',
+      '--accent-medium': 'rgba(96, 165, 250, 0.2)',
+      '--accent-glow': 'rgba(96, 165, 250, 0.24)',
+    },
+    violet: {
+      '--accent': '#a78bfa',
+      '--accent-soft': 'rgba(167, 139, 250, 0.1)',
+      '--accent-medium': 'rgba(167, 139, 250, 0.2)',
+      '--accent-glow': 'rgba(167, 139, 250, 0.24)',
+    },
+    obsidian: {
+      '--accent': '#94a3b8',
+      '--accent-soft': 'rgba(148, 163, 184, 0.1)',
+      '--accent-medium': 'rgba(148, 163, 184, 0.2)',
+      '--accent-glow': 'rgba(148, 163, 184, 0.2)',
+    },
+    amber: {
+      '--accent': '#fbbf24',
+      '--accent-soft': 'rgba(251, 191, 36, 0.1)',
+      '--accent-medium': 'rgba(251, 191, 36, 0.2)',
+      '--accent-glow': 'rgba(251, 191, 36, 0.24)',
+    },
+  }
+  const activeAssistantTheme = activeAgent?.theme ?? 'emerald'
 
   function selectModel(value: string) {
     const parsed = ModelKeySchema.safeParse(value)
@@ -305,7 +348,12 @@ export default function ChatApp() {
         }}
       />
 
-      <main id="main" className="flex min-w-0 flex-1 flex-col vt-chat-shell">
+      <main
+        id="main"
+        className="flex min-w-0 flex-1 flex-col vt-chat-shell"
+        style={assistantThemeStyles[activeAssistantTheme] as CSSProperties}
+        data-assistant-theme={activeAssistantTheme}
+      >
         <header
           className="flex items-center justify-between px-4 py-3"
           style={{
@@ -371,6 +419,25 @@ export default function ChatApp() {
           </div>
           <div className="flex items-center gap-1">
             <SkillPicker enabledSkills={enabledSkills} onChange={handleEnabledSkillsChange} />
+            <label
+              className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
+              style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
+            >
+              <span className="sr-only">Select assistant</span>
+              <select
+                value={selectedAgentId ?? ''}
+                onChange={(event) => setSelectedAgentId(event.target.value || null)}
+                aria-label="Select custom assistant"
+                className="max-w-28 cursor-pointer truncate bg-transparent outline-none sm:max-w-40"
+              >
+                <option value="">Default assistant</option>
+                {customAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label
               className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
               style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
@@ -503,6 +570,8 @@ export default function ChatApp() {
             sessionId={sessionId}
             resetNonce={resetNonce}
             modelKey={selectedModel}
+            customAgentId={selectedAgentId}
+            assistantName={activeAgent?.name ?? 'Chatbot'}
             enabledSkills={enabledSkills}
             temperature={temperature}
             maxCompletionTokens={maxCompletionTokens}

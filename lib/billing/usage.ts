@@ -15,10 +15,11 @@ import { getPlan, isOverDailyLimit } from './plans'
  */
 export async function checkAndRecordUsage(
   userId: string,
+  estimatedTokens = 0,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { plan: true, usageCount: true, usageDate: true },
+    select: { plan: true, usageCount: true, usageTokens: true, usageDate: true },
   })
   if (!user) return { ok: true }
 
@@ -37,6 +38,9 @@ export async function checkAndRecordUsage(
     where: { id: userId },
     data: {
       usageCount: isNewDay ? 1 : user.usageCount + 1,
+      usageTokens: isNewDay
+        ? Math.max(0, Math.min(estimatedTokens, 1_000_000))
+        : user.usageTokens + Math.max(0, Math.min(estimatedTokens, 1_000_000)),
       usageDate: today,
     },
   })

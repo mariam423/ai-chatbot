@@ -15,12 +15,17 @@ A production-oriented Next.js chatbot with streaming responses, bounded autonomo
 - **MCP Integration** - Discover and call tools from configured Streamable HTTP MCP servers.
 - **Dynamic Model Switching** - Switch models from the chat header with server-side model resolution and environment overrides.
 - **Streaming Chat** - OpenAI-compatible SSE streaming with responsive word-sized rendering and abort support.
+- **Voice assistant** - Use Web Speech or the MediaRecorder → Whisper-compatible STT fallback, and read assistant replies aloud with server TTS or browser SpeechSynthesis.
 - **Video and Media Analysis** - Extract browser-side video keyframes and attach JPEG, PNG, MP3, and WAV media for multimodal requests.
 - **Interactive RAG Citations** - Upload documents, retrieve relevant chunks, and open exact source excerpts from citation badges.
 - **Dynamic Recharts Visualization** - Render validated time-series chart data as interactive Recharts line charts.
 - **Structured Outputs** - Strict JSON schemas for tables, charts, code snippets, and citation responses.
 - **Cross-Session Long-Term Memory** - Persist authenticated user preferences, entities, and bounded conversation summaries.
 - **Authentication and Persistence** - NextAuth-based auth, Prisma-backed sessions/messages, document metadata, and memory.
+- **Custom assistant themes** - Private assistants can use emerald, sapphire, violet, obsidian, or amber accents that follow the active chat.
+- **Transactional notifications** - Server-only Resend/SendGrid delivery with a safe local console fallback for welcome and subscription lifecycle emails.
+- **Chat exports** - Export the active conversation as timestamped Markdown, JSON, plain text, or a native print/PDF transcript with assistant and model metadata.
+- **Embeddable assistants** - Generate signed iframe or script snippets for private custom-assistant widgets with token expiry, origin checks, CORS, and isolated UI.
 - **Accessible Chat UI** - Responsive sidebar, mobile drawer, keyboard navigation, theme switching, retry, stop, regenerate, and copy-code actions.
 
 ## Tech Stack
@@ -149,6 +154,20 @@ AUTH_DISABLED=true
 
 Do not enable `AUTH_DISABLED` in production.
 
+### Transactional email (optional)
+
+The server can send welcome, Pro activation, and cancellation notifications through Resend or SendGrid without adding an SDK dependency:
+
+```env
+RESEND_API_KEY=re_...
+RESEND_EMAIL_FROM=notifications@yourdomain.com
+# Or use SendGrid:
+# SENDGRID_API_KEY=SG....
+# SENDGRID_EMAIL_FROM=notifications@yourdomain.com
+```
+
+Resend takes precedence when both keys are present. With no provider configured, local development prints a short preview to the server console; production skips delivery safely. Provider failures never fail signup or Stripe webhook processing.
+
 ### Stripe subscription billing (optional)
 
 Set a Stripe secret, webhook signing secret, and recurring Pro price to enable
@@ -224,17 +243,27 @@ Defaults to 200. The per-user **Max Completion Tokens** slider overrides it when
 
 This cap is deliberately **not** sent to `/audio/transcriptions` — the OpenAI-compatible STT API has no `max_tokens` parameter (whisper is billed by audio duration, and strict providers reject unknown fields with a 400).
 
+### Voice assistant
+
+The composer microphone prefers the browser Web Speech API. When it is unavailable, the existing MediaRecorder path posts a bounded clip to `/api/transcribe`, which uses the configured OpenAI-compatible provider and `TRANSCRIBE_MODEL` (default `whisper-1`). Assistant bubbles include a speaker control that tries `/api/speak` with `TTS_MODEL`/`TTS_VOICE`, then falls back to the browser's local `SpeechSynthesis` API. TTS is best-effort and does not affect chat persistence or provider fallback behavior.
+
+### Embeddable custom assistants
+
+From the Dashboard custom-assistant panel, enter an optional allowed site origin and generate either an iframe or script snippet. The generated token is signed with `AUTH_SECRET`, scoped to the assistant owner and id, expires after 30 days, and is never a provider credential. Requests go through `/api/embed/chat`, which validates the token, origin, input bounds, and a per-assistant rate limit before streaming. `/embed/[agentId]` is intentionally minimal for iframe use; iframes should include `allow="microphone"` when voice input is desired. Keep generated snippets private and rotate `AUTH_SECRET` to revoke existing tokens.
+
 The settings page (**Model & Generation → Max Completion Tokens**) shows the effective default (`200 (server default)`) so users can see what applies before they override it with the slider.
 
 ## Feature Walkthrough
 
-### 1. Chat and model switching
+### 1. Chat, assistants, and model switching
 
 1. Start a new chat or select an existing session from the sidebar.
-2. Choose a model from the chat header.
-3. Enter a message and send it.
-4. Responses stream over SSE and render incrementally.
-5. Use Stop, Retry, Regenerate, Clear, or the model selector as needed.
+2. Choose **Default assistant** or a private custom assistant in the header. Custom assistants apply their saved system prompt, baseline model, selected tools, and visual theme.
+3. Choose a model from the chat header.
+4. Enter a message and send it.
+5. Responses stream over SSE and render incrementally.
+6. Use Stop, Retry, Regenerate, Clear, or the model selector as needed.
+7. Use the export control in the chat toolbar to download Markdown, JSON, plain text, or print a PDF-ready transcript. Exports include the assistant identity, timestamps, and served-model provenance.
 
 The selected model key is persisted locally as `chat.model`; the actual provider model ID is resolved on the server.
 
@@ -262,7 +291,7 @@ MCP failures are returned to the agent as bounded tool errors so a single unavai
 
 ### 4. Document RAG and citations
 
-1. Attach a PDF, TXT, Markdown, or CSV file from the message composer.
+1. Attach a PDF, TXT, Markdown, CSV, XLSX, or DOCX file from the message composer.
 2. The server validates the extension, MIME type, size, and session ownership.
 3. Text is extracted, chunked, embedded, and stored in Prisma.
 4. Relevant chunks are retrieved for subsequent questions in that session.
@@ -312,11 +341,17 @@ Relevant memory is injected into future system prompts as untrusted personalizat
 ```text
 app/
   api/chat/route.ts          Validated streaming chat and agent orchestration
+  api/speak/route.ts         Server TTS adapter with browser fallback
+  api/embed/chat/route.ts    Token-authenticated embeddable assistant stream
   api/citation/route.ts      Session-owned citation lookup
   api/upload/route.ts        Document upload, extraction, and persistence
   actions.ts                 Session, preference, and persistence actions
 components/
   chat-app.tsx               Application shell and model selector
+  audio-input.tsx            Web Speech / MediaRecorder STT control
+  speech-button.tsx          Server TTS / SpeechSynthesis response control
+  embed-generator.tsx        Signed iframe/script snippet generator
+  embed-chat.tsx             Lightweight iframe chat surface
   chat.tsx                   Chat state, streaming, uploads, and persistence
   citation-drawer.tsx        Interactive RAG source drawer
   markdown.tsx               Markdown, code, and citation rendering
@@ -355,6 +390,11 @@ npm run format       # Format the repository with Prettier
 The end-to-end suite builds and starts the production app through Playwright. It does not require a live LLM key because chat requests are mocked in the tests.
 
 ## Deployment runbook
+
+For a production single-host deployment on AWS EC2, use the checked-in PM2,
+Nginx, deploy, and Certbot instructions in
+[`AWS_EC2_DEPLOYMENT.md`](./AWS_EC2_DEPLOYMENT.md). The public readiness check
+is `GET /api/health` and returns `503` when the database is unavailable.
 
 ### Rate limiting
 

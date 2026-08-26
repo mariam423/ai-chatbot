@@ -151,6 +151,9 @@ export default function DiagramViewer({ src, alt, onClose }: DiagramViewerProps)
         if (pressedOnBackdrop && event.target === event.currentTarget) onClose()
       }}
     >
+      {/* Use a short tween so controls become actionable immediately after
+          the dialog appears; a long spring can look perpetually unstable to
+          Chromium's actionability checks. */}
       <motion.div
         className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl"
         style={{
@@ -164,7 +167,7 @@ export default function DiagramViewer({ src, alt, onClose }: DiagramViewerProps)
         initial={reducedMotion ? false : { opacity: 0, scale: 0.98, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={reducedMotion ? undefined : { opacity: 0, scale: 0.98, y: 8 }}
-        transition={reducedMotion ? undefined : { type: 'spring', stiffness: 380, damping: 30 }}
+        transition={reducedMotion ? undefined : { duration: 0.18, ease: 'easeOut' }}
       >
         {/* Header: title + zoom controls */}
         <div

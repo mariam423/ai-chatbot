@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { errorResponse } from '@/lib/http'
+import { prisma } from '@/lib/db'
 import { getLlmConfig, resolveMaxTokens } from '@/lib/llm-config'
 import { hasBuiltInToolIntent, runAgent, type AgentInputMessage } from '@/lib/agent'
+import { listBuiltInAgentTools } from '@/lib/agent-tools'
 import { listMcpTools } from '@/lib/mcp-client'
 import {
   getSkillSystemInstructions,
@@ -48,6 +50,25 @@ const RETRYABLE_STATUSES = new Set([404, 402, 429])
  */
 const MAX_CHAT_BODY_BYTES = 25 * 1024 * 1024
 
+function parseSelectedTools(raw: string): string[] {
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (Array.isArray(value)) {
+      return value.filter((tool): tool is string => typeof tool === 'string').slice(0, 32)
+    }
+    // Accept the object shape used by the first CustomAgent migration.
+    if (typeof value === 'object' && value !== null) {
+      return Object.entries(value)
+        .filter(([, enabled]) => enabled === true)
+        .map(([tool]) => tool)
+        .slice(0, 32)
+    }
+  } catch {
+    // Invalid persisted configuration means no custom tools, not a failed chat.
+  }
+  return []
+}
+
 // Bounded wire message for the route: the shared ChatWireMessageSchema caps
 // shape, this adds a content ceiling so a client cannot push an unbounded
 // message into memory / the upstream request.
@@ -60,6 +81,7 @@ const ChatRequestSchema = z.object({
   messages: z.array(ChatRequestMessageSchema).min(1).max(200),
   systemPrompt: z.string().max(2_000).optional(),
   sessionId: z.string().trim().min(1).max(100).optional(),
+  customAgentId: z.string().trim().min(1).max(100).optional(),
   model: ModelKeySchema.optional(),
   // Optional per-user generation tuning (settings → Model & Generation).
   // Validated against the same bounds as the preferences action so only
@@ -125,12 +147,26 @@ export async function POST(request: Request) {
   const skillInstructions = hasToolIntent ? getSkillSystemInstructions(enabledSkillIds) : ''
   const { getCurrentUserId } = await import('@/lib/auth-context')
   const userId = await getCurrentUserId()
+  let customAgent: {
+    systemPrompt: string
+    baselineModel: string | null
+    selectedTools: string
+  } | null = null
+  if (parsed.data.customAgentId && userId) {
+    customAgent = await prisma.customAgent.findFirst({
+      where: { id: parsed.data.customAgentId, userId },
+      select: { systemPrompt: true, baselineModel: true, selectedTools: true },
+    })
+  }
   // SaaS cost control: signed-in users are capped at their plan's daily LLM
   // request limit (Free tier) or unlimited (Pro). Enforced before any RAG or
   // provider work so an over-limit request fails fast.
   if (userId) {
     const { checkAndRecordUsage } = await import('@/lib/billing/usage')
-    const usage = await checkAndRecordUsage(userId)
+    const usage = await checkAndRecordUsage(
+      userId,
+      estimateTokens(messages.map((message) => message.content).join('\n')),
+    )
     if (!usage.ok) {
       return errorResponse(usage.error, 429)
     }
@@ -181,7 +217,7 @@ export async function POST(request: Request) {
     ? 'Audio is attached to the latest user message. Transcribe or analyze it only when requested, and distinguish audible observations from uncertainty.'
     : ''
   const systemPrompt = [
-    customSystemPrompt,
+    customAgent?.systemPrompt || customSystemPrompt,
     skillInstructions
       ? `You have access to the following active enterprise skills. Follow each skill's guidance when it applies to the request.\n\n${skillInstructions}`
       : '',
@@ -250,7 +286,14 @@ export async function POST(request: Request) {
   // Media requests auto-route to a vision-capable model (on OpenRouter the
   // provider default and vision fallback are both the free `stealth/ox-alpha`)
   // so image/video/audio content is accepted.
-  const model = resolveModel(parsed.data.model, provider, { vision: hasMedia })
+  const model = resolveModel(
+    parsed.data.model ??
+      (customAgent?.baselineModel && ModelKeySchema.safeParse(customAgent.baselineModel).success
+        ? ModelKeySchema.parse(customAgent.baselineModel)
+        : undefined),
+    provider,
+    { vision: hasMedia },
+  )
   // Completion cap: the per-user settings value always wins; otherwise the
   // conservative default (MAX_OUTPUT_TOKENS, 200) applies to every provider —
   // see lib/llm-config.ts resolveMaxTokens for why the field is never omitted.
@@ -274,16 +317,27 @@ export async function POST(request: Request) {
   let upstream: Response
   try {
     const mcpTools = await listMcpTools()
+    const selectedTools = customAgent ? parseSelectedTools(customAgent.selectedTools) : null
+    const agentMcpTools = customAgent
+      ? mcpTools.filter((tool) => selectedTools!.includes(tool.name))
+      : mcpTools
+    const agentSkillTools = customAgent
+      ? skillTools.filter((tool) => selectedTools!.includes(tool.name))
+      : skillTools
+    const agentBuiltInTools = customAgent
+      ? listBuiltInAgentTools().filter((tool) => selectedTools!.includes(tool.name))
+      : undefined
     let messagesForModel: unknown[] = modelMessages
-    if (mcpTools.length > 0 || hasToolIntent) {
+    if (agentMcpTools.length > 0 || hasToolIntent) {
       const agent = await runAgent({
         apiKey,
         baseUrl,
         model,
         messages: modelMessages,
         systemPrompt,
-        tools: mcpTools,
-        skillTools,
+        tools: agentMcpTools,
+        builtInTools: agentBuiltInTools,
+        skillTools: agentSkillTools,
         skillContext,
         signal: request.signal,
         headers: extraHeaders,

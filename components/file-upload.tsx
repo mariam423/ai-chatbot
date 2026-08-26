@@ -15,7 +15,7 @@ interface FileUploadProps {
   disabled?: boolean
 }
 
-const ACCEPT = '.pdf,.txt,.md,.csv,application/pdf,text/plain,text/markdown,text/csv'
+const ACCEPT = '.pdf,.txt,.md,.csv,.xlsx,.docx,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 export default function FileUpload({
   sessionId,
@@ -130,7 +130,7 @@ export default function FileUpload({
           onClick={() => inputRef.current?.click()}
           disabled={disabled || busy}
           aria-label="Attach document"
-          title="Attach PDF, TXT, MD, or CSV"
+          title="Attach PDF, TXT, MD, CSV, XLSX, or DOCX"
           className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <HugeiconsIcon icon={PaperclipIcon} size={18} strokeWidth={1.5} />

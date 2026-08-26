@@ -17,6 +17,8 @@ export const ChatMessageSchema = z.object({
   id: z.string(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+  /** Creation time for transcript exports; optional for legacy messages. */
+  createdAt: z.string().datetime().optional(),
   model: z.string().optional(),
   modelOverridden: z.boolean().optional(),
 })
@@ -145,6 +147,22 @@ export const BUILTIN_PRESETS: SystemPromptPreset[] = [
 // ─── Chat Session (extended) ───
 
 /** Session summary extended with pin/archive metadata. */
+/** User-owned assistant persona exposed to the chat selector. */
+export const CustomAgentThemeSchema = z.enum(['emerald', 'sapphire', 'violet', 'obsidian', 'amber'])
+
+export type CustomAgentTheme = z.infer<typeof CustomAgentThemeSchema>
+
+export interface CustomAgentSummary {
+  id: string
+  name: string
+  description: string | null
+  systemPrompt: string
+  baselineModel: string | null
+  selectedTools: string[]
+  theme?: CustomAgentTheme | null
+  updatedAt: string
+}
+
 export interface ChatSessionSummary {
   id: string
   title: string

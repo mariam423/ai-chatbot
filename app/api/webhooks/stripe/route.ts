@@ -5,6 +5,7 @@ import { logSecurityEvent } from '@/lib/audit'
 import { verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { parsePlanKey } from '@/lib/billing/plans'
 import { DEFAULT_USER_ROLE } from '@/lib/roles'
+import { sendSubscriptionActivatedEmail, sendSubscriptionCancelledEmail } from '@/lib/email'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
     switch (event.type) {
       case 'checkout.session.completed': {
         if (!userId) return NextResponse.json({ received: true })
-        await prisma.user.update({
+        const updatedUser = await prisma.user.update({
           where: { id: userId },
           data: {
             plan: 'pro',
@@ -106,6 +107,7 @@ export async function POST(request: Request) {
               typeof object.subscription === 'string' ? object.subscription : null,
           },
         })
+        if (updatedUser?.email) void sendSubscriptionActivatedEmail(updatedUser.email)
         break
       }
       case 'customer.subscription.updated':
@@ -123,10 +125,19 @@ export async function POST(request: Request) {
             event.type === 'customer.subscription.deleted' ? null : subscriptionId,
           ...(customerId ? { stripeCustomerId: customerId } : {}),
         }
-        await prisma.user.update({
+        const updatedUser = await prisma.user.update({
           where: { id: userId },
           data: updateData,
         })
+        // Stripe can emit several inactive subscription.updated events while
+        // a cancellation settles. Send the lifecycle notification once, on
+        // the definitive deleted event, to avoid duplicate emails.
+        if (
+          updatedUser?.email &&
+          event.type === 'customer.subscription.deleted'
+        ) {
+          void sendSubscriptionCancelledEmail(updatedUser.email)
+        }
         break
       }
       default:

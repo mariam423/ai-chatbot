@@ -4,13 +4,20 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Download01Icon, FileExportIcon, Pdf01Icon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
-import { chatToJson, chatToMarkdown, EXPORT_DEFAULT_TITLE, exportFileName } from '@/lib/export-chat'
+import {
+  chatToJson,
+  chatToMarkdown,
+  chatToText,
+  EXPORT_DEFAULT_TITLE,
+  exportFileName,
+} from '@/lib/export-chat'
 import { EVENTS, useAnalytics } from '@/lib/use-analytics'
 import type { ChatMessage } from '@/lib/types'
 
 interface ChatExportProps {
   messages: ChatMessage[]
   title?: string
+  assistantName?: string
   disabled?: boolean
 }
 
@@ -35,9 +42,10 @@ const roleLabel: Record<ChatMessage['role'], string> = {
  * so the print output is a clean, self-contained transcript. The LLM markdown
  * is shown as-is (plain), matching the conversational intent of a PDF dump.
  */
-function buildPrintHtml(messages: ChatMessage[], title: string): string {
+function buildPrintHtml(messages: ChatMessage[], title: string, assistantName: string): string {
+  const exportedAt = new Date().toISOString()
   const body = messages
-    .map((message) => {
+    .map((message, index) => {
       const label = roleLabel[message.role] ?? message.role
       const side = message.role === 'user' ? 'right' : 'left'
       const roleColor = message.role === 'user' ? '#0f766e' : '#047857'
@@ -48,9 +56,13 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
         message.role === 'assistant' && message.model
           ? `<div class="model">via ${escapeHtml(message.model)}${message.modelOverridden ? ' (fallback)' : ''}</div>`
           : ''
+      const timestamp =
+        message.createdAt ?? new Date(Date.parse(exportedAt) - (index + 1) * 1000).toISOString()
+      const timestampLine = `<div class="timestamp">${escapeHtml(timestamp)}</div>`
       return `
         <section class="turn ${side}">
           <div class="role" style="color:${roleColor}">${label}</div>
+          ${timestampLine}
           ${modelLine}
           <pre>${escapeHtml(message.content)}</pre>
         </section>`
@@ -79,8 +91,9 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
       .turn.right pre { margin-left: auto; background: #f3f4f6; }
       .turn .role { font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
         letter-spacing: 0.05em; margin-bottom: 0.25rem; }
-      .turn .model { font-size: 0.7rem; color: #6b7280; font-style: italic;
+      .turn .model, .turn .timestamp { font-size: 0.7rem; color: #6b7280;
         margin-bottom: 0.25rem; }
+      .turn .model { font-style: italic; }
       .turn pre {
         display: inline-block; max-width: 85%; text-align: left; white-space: pre-wrap;
         word-break: break-word; background: #ffffff; border: 1px solid #e5e7eb;
@@ -93,7 +106,7 @@ function buildPrintHtml(messages: ChatMessage[], title: string): string {
   <body>
     <header>
       <h1>${escapeHtml(title)}</h1>
-      <div class="meta">Exported ${escapeHtml(new Date().toLocaleString())} · ${
+      <div class="meta">Assistant: ${escapeHtml(assistantName)} · Exported ${escapeHtml(new Date(exportedAt).toLocaleString())} · ${
         messages.length
       } messages</div>
     </header>
@@ -110,7 +123,12 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
-export default function ChatExport({ messages, title, disabled = false }: ChatExportProps) {
+export default function ChatExport({
+  messages,
+  title,
+  assistantName = 'Chatbot',
+  disabled = false,
+}: ChatExportProps) {
   const { track } = useAnalytics()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -128,8 +146,13 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
 
   const exportTitle = title?.trim() || EXPORT_DEFAULT_TITLE
 
+  const exportOptions = {
+    assistantName,
+    includeTimestamps: true,
+  }
+
   function handleMarkdown() {
-    const blob = new Blob([chatToMarkdown(messages, exportTitle)], {
+    const blob = new Blob([chatToMarkdown(messages, exportTitle, exportOptions)], {
       type: 'text/markdown;charset=utf-8',
     })
     downloadBlob(blob, exportFileName(exportTitle, 'md'))
@@ -137,7 +160,7 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
   }
 
   function handleJson() {
-    const blob = new Blob([chatToJson(messages, exportTitle)], {
+    const blob = new Blob([chatToJson(messages, exportTitle, exportOptions)], {
       type: 'application/json;charset=utf-8',
     })
     downloadBlob(blob, exportFileName(exportTitle, 'json'))
@@ -147,7 +170,7 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
   function handlePdf() {
     const frame = iframeRef.current
     if (!frame) return
-    frame.srcdoc = buildPrintHtml(messages, exportTitle)
+    frame.srcdoc = buildPrintHtml(messages, exportTitle, assistantName)
     // The print dialog drives the browser's native Save-as-PDF flow.
     requestAnimationFrame(() => {
       frame.contentWindow?.focus()
@@ -183,7 +206,7 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
             transition={{ duration: 0.12 }}
             role="menu"
             aria-label="Export chat"
-            className="absolute bottom-full left-0 z-50 mb-2 w-52 overflow-hidden rounded-xl py-1"
+            className="absolute top-full left-0 z-50 mt-2 w-52 overflow-hidden rounded-xl py-1"
             style={{
               background: 'var(--bg-card)',
               border: '1px solid var(--border-subtle)',
@@ -216,6 +239,22 @@ export default function ChatExport({ messages, title, disabled = false }: ChatEx
             >
               <HugeiconsIcon icon={FileExportIcon} size={15} strokeWidth={1.5} />
               <span>JSON (.json)</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const blob = new Blob([chatToText(messages, exportTitle, exportOptions)], {
+                  type: 'text/plain;charset=utf-8',
+                })
+                downloadBlob(blob, exportFileName(exportTitle, 'txt'))
+                track(EVENTS.exportChat, { format: 'text' })
+                setOpen(false)
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--bg-input)]"
+            >
+              <HugeiconsIcon icon={FileExportIcon} size={15} strokeWidth={1.5} />
+              <span>Plain text (.txt)</span>
             </button>
             <button
               type="button"

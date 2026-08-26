@@ -566,6 +566,58 @@ describe('conversation persistence server actions', () => {
   })
 })
 
+describe('custom assistant server actions', () => {
+  beforeAll(async () => {
+    actions = await import('../app/actions')
+    const { prisma } = await import('../lib/db')
+    await prisma.user.upsert({
+      where: { id: 'user-1' },
+      create: { id: 'user-1', email: 'user-1@example.com' },
+      update: {},
+    })
+  })
+
+  beforeEach(async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    const { prisma } = await import('../lib/db')
+    await prisma.customAgent.deleteMany()
+  })
+
+  it('persists the baseline model and selected tools for the signed-in user', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    const result = await actions.saveCustomAgent({
+      name: 'Researcher',
+      description: 'Finds and summarizes sources.',
+      systemPrompt: 'Be precise and cite evidence.',
+      baselineModel: 'deepseek-v4-flash',
+      selectedTools: ['web_search', 'code_interpreter'],
+      theme: 'violet',
+    } as Parameters<typeof actions.saveCustomAgent>[0])
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        name: 'Researcher',
+        baselineModel: 'deepseek-v4-flash',
+        selectedTools: ['web_search', 'code_interpreter'],
+        theme: 'violet',
+      },
+    })
+
+    const listed = await actions.listCustomAgents()
+    expect(listed).toMatchObject({
+      ok: true,
+      agents: [
+        {
+          name: 'Researcher',
+          baselineModel: 'deepseek-v4-flash',
+          selectedTools: ['web_search', 'code_interpreter'],
+        },
+      ],
+    })
+  })
+})
+
 describe('user preferences (calendar credentials)', () => {
   let prefsActions: typeof import('../app/actions')
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -644,16 +696,16 @@ describe('user preferences (calendar credentials)', () => {
       data: { showModelCaptions: true },
     })
     // Toggle off, then on — the value persists and reloads.
-    expect(
-      await prefsActions.updateUserPreferences({ showModelCaptions: false }),
-    ).toEqual({ ok: true })
+    expect(await prefsActions.updateUserPreferences({ showModelCaptions: false })).toEqual({
+      ok: true,
+    })
     expect(await prefsActions.getUserPreferences()).toMatchObject({
       ok: true,
       data: { showModelCaptions: false },
     })
-    expect(
-      await prefsActions.updateUserPreferences({ showModelCaptions: true }),
-    ).toEqual({ ok: true })
+    expect(await prefsActions.updateUserPreferences({ showModelCaptions: true })).toEqual({
+      ok: true,
+    })
     expect(await prefsActions.getUserPreferences()).toMatchObject({
       ok: true,
       data: { showModelCaptions: true },

@@ -3,6 +3,7 @@ import {
   EXPORT_DEFAULT_TITLE,
   chatToJson,
   chatToMarkdown,
+  chatToText,
   exportFileName,
 } from '../lib/export-chat'
 import type { ChatMessage } from '../lib/types'
@@ -55,6 +56,40 @@ describe('chatToMarkdown', () => {
     const md = chatToMarkdown([{ id: 'x', role: 'assistant', content: 'plain reply' }])
     expect(md).not.toContain('*via')
     expect(md).toContain('plain reply')
+  })
+})
+
+describe('chat export metadata', () => {
+  it('adds assistant identity and ordered timestamps to Markdown/text/JSON exports', () => {
+    const options = {
+      assistantName: 'Researcher',
+      includeTimestamps: true,
+      exportedAt: '2026-08-29T12:00:00.000Z',
+    }
+    const markdown = chatToMarkdown(thread, 'Shared chat', options)
+    expect(markdown).toContain('Assistant: Researcher')
+    expect(markdown).toContain('_2026-08-29T11:59:59.000Z_')
+    expect(markdown).toContain('_2026-08-29T11:59:57.000Z_')
+
+    const text = chatToText(thread, 'Shared chat', options)
+    expect(text).toContain('Assistant: Researcher')
+    expect(text).toContain('via stealth/ox-alpha (fallback)')
+    expect(text.indexOf('2026-08-29T11:59:59.000Z')).toBeLessThan(text.indexOf('Hello there'))
+
+    const json = JSON.parse(chatToJson(thread, 'Shared chat', options)) as {
+      assistantName: string
+      exportedAt: string
+      messages: Array<{ timestamp: string }>
+    }
+    expect(json).toMatchObject({
+      assistantName: 'Researcher',
+      exportedAt: '2026-08-29T12:00:00.000Z',
+    })
+    expect(json.messages.map((message) => message.timestamp)).toEqual([
+      '2026-08-29T11:59:59.000Z',
+      '2026-08-29T11:59:58.000Z',
+      '2026-08-29T11:59:57.000Z',
+    ])
   })
 })
 
