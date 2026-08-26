@@ -137,7 +137,7 @@ export default function DiagramViewer({ src, alt, onClose }: DiagramViewerProps)
         backdropFilter: 'blur(28px) saturate(140%)',
         WebkitBackdropFilter: 'blur(28px) saturate(140%)',
       }}
-      initial={reducedMotion ? false : { opacity: 0 }}
+      initial={false}
       animate={{ opacity: 1 }}
       exit={reducedMotion ? undefined : { opacity: 0 }}
       transition={{ duration: 0.18 }}
@@ -164,7 +164,7 @@ export default function DiagramViewer({ src, alt, onClose }: DiagramViewerProps)
           boxShadow:
             '0 24px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03) inset, 0 0 60px rgba(6, 182, 212, 0.08)',
         }}
-        initial={reducedMotion ? false : { opacity: 0, scale: 0.98, y: 12 }}
+        initial={false}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={reducedMotion ? undefined : { opacity: 0, scale: 0.98, y: 8 }}
         transition={reducedMotion ? undefined : { duration: 0.18, ease: 'easeOut' }}

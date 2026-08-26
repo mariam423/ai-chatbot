@@ -39,6 +39,7 @@ import {
   type SystemPromptPreset,
   UploadedDocumentSchema,
   type UploadedDocument,
+  type WorkspaceTool,
 } from '@/lib/types'
 
 import { MAX_INPUT_LENGTH, isValidMessageInput } from '@/lib/validation'
@@ -61,6 +62,7 @@ const AudioInput = dynamic(() => import('./audio-input'), {
   ),
 })
 import ChatExport from './chat-export'
+import WorkspacePanel from './workspace-panel'
 
 interface ChatProps {
   sessionId: string | null
@@ -78,6 +80,8 @@ interface ChatProps {
   maxCompletionTokens?: number | null
   /** Show the per-message "via <model>" captions (user setting; default on). */
   showModelCaptions?: boolean
+  activeWorkspaceTool?: WorkspaceTool | null
+  onWorkspaceToolChange?: (tool: WorkspaceTool | null) => void
   onSessionChange: (id: string | null) => void
   onConversationChanged: () => void
 }
@@ -101,6 +105,8 @@ export default function Chat({
   temperature = null,
   maxCompletionTokens = null,
   showModelCaptions = true,
+  activeWorkspaceTool = null,
+  onWorkspaceToolChange,
   onSessionChange,
   onConversationChanged,
 }: ChatProps) {
@@ -527,6 +533,18 @@ export default function Chat({
           disabled={isStreaming}
         />
       </div>
+      {activeWorkspaceTool && (
+        <WorkspacePanel
+          tool={activeWorkspaceTool}
+          sessionId={sessionId}
+          messages={messages}
+          documents={documents}
+          onDocumentsChange={handleDocumentsChange}
+          onSessionRequired={createSessionForDocument}
+          onNewChat={clearConversation}
+          onClose={() => onWorkspaceToolChange?.(null)}
+        />
+      )}
 
       {/* ─── Branch switcher (visible only once a thread has forked) ─── */}
       {thread.branches.length > 1 && (

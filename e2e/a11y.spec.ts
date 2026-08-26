@@ -57,15 +57,25 @@ test.describe('accessibility', () => {
     await expect(firstSession).toHaveAttribute('aria-current', 'page')
 
     const collapseToggle = sidebar.getByRole('button', { name: 'Collapse sidebar' })
+    const taskButtons = ['Inbox', 'Build workspace', 'Launch checklist'].map((name) =>
+      sidebar.getByRole('button', { name, exact: true }),
+    )
+    const createTask = sidebar.getByRole('button', { name: 'Create task' })
     // The Archive toggle sits between the search box and the session list in
-    // DOM/tab order, so the first session is reached AFTER it.
+    // DOM/tab order, after the new workspace task controls.
     const archiveToggle = sidebar.getByRole('button', { name: 'Archive' })
 
-    await test.step('Tab walks skip link → collapse toggle → New Chat → search → archive → first session', async () => {
+    await test.step('Tab walks through workspace tasks, chat controls, and the first session', async () => {
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(skipLink)
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(collapseToggle)
+      await page.keyboard.press('Tab')
+      await expectVisibleFocusRing(createTask)
+      for (const taskButton of taskButtons) {
+        await page.keyboard.press('Tab')
+        await expectVisibleFocusRing(taskButton)
+      }
       await page.keyboard.press('Tab')
       await expectVisibleFocusRing(newChat)
       await page.keyboard.press('Tab')
@@ -76,13 +86,19 @@ test.describe('accessibility', () => {
       await expectVisibleFocusRing(firstSession)
     })
 
-    await test.step('Shift+Tab walks back up the sidebar (archive → search → …)', async () => {
+    await test.step('Shift+Tab walks back through the workspace controls', async () => {
       await page.keyboard.press('Shift+Tab')
       await expect(archiveToggle).toBeFocused()
       await page.keyboard.press('Shift+Tab')
       await expect(searchInput).toBeFocused()
       await page.keyboard.press('Shift+Tab')
       await expect(newChat).toBeFocused()
+      for (const taskButton of [...taskButtons].reverse()) {
+        await page.keyboard.press('Shift+Tab')
+        await expect(taskButton).toBeFocused()
+      }
+      await page.keyboard.press('Shift+Tab')
+      await expect(createTask).toBeFocused()
       await page.keyboard.press('Shift+Tab')
       await expect(collapseToggle).toBeFocused()
       await page.keyboard.press('Shift+Tab')

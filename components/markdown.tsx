@@ -3,7 +3,7 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { CopyIcon, CheckIcon, CodeIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import type { Element } from 'hast'
 import rehypeHighlight from 'rehype-highlight'
@@ -121,11 +121,11 @@ function markdownUrlTransform(url: string, key: string, node: Element): string {
  * is escaped and displayed literally - the NFR-3 security property holds.
  */
 export default function Markdown({ content, sessionId = null }: MarkdownProps) {
-  // The components map must keep a stable identity across renders: with
-  // react-markdown's default `passKeys`, an inline object would change every
-  // element type's identity on each re-render and force React to remount the
-  // whole tree — including DiagramCard, resetting its viewer state. Memoize it
-  // so only a sessionId change recreates it.
+  // Keep the renderer map stable even when the first session is created after
+  // the reply starts. Recreating it remounts DiagramCard and destroys an open
+  // portal viewer; the ref keeps citation actions on the current session.
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
   const components = useMemo(
     () => ({
       pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -137,7 +137,7 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
           try {
             return (
               <CitationDrawer
-                sessionId={sessionId}
+                sessionId={sessionIdRef.current}
                 documentName={decodeURIComponent(encodedName)}
                 section={section}
               />
@@ -177,7 +177,7 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
         return <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
       },
     }),
-    [sessionId],
+    [],
   )
 
   return (

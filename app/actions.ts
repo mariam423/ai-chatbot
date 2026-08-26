@@ -26,6 +26,7 @@ import {
   type ChatSessionSummary,
   CustomAgentThemeSchema,
   type CustomAgentSummary,
+  type WorkspaceTask,
 } from '@/lib/types'
 
 /**
@@ -37,6 +38,17 @@ import {
  */
 
 const SessionIdSchema = z.string().min(1).max(100)
+const WorkspaceTaskNameSchema = z.string().trim().min(1).max(80)
+
+const DEFAULT_WORKSPACE_TASKS: WorkspaceTask[] = [
+  { id: 'inbox', name: 'Inbox' },
+  { id: 'build', name: 'Build workspace' },
+  { id: 'launch', name: 'Launch checklist' },
+]
+
+function taskSummary(task: { id: string; name: string }): WorkspaceTask {
+  return { id: task.id, name: task.name }
+}
 
 // Bounded variant of ChatMessageSchema for the persistence boundary: ids and
 // content are capped so a client cannot push an unbounded payload into the DB
@@ -101,6 +113,126 @@ const RenameSessionInputSchema = z.object({
   sessionId: z.string().min(1).max(100),
   title: z.string().trim().min(1).max(48),
 })
+
+// ─── Workspace tasks ───
+
+/**
+ * Load the current user's workspace tasks and active task. Existing users are
+ * lazily seeded with the original default tasks so this feature is additive.
+ */
+export async function getWorkspaceTasks(): Promise<
+  { ok: true; tasks: WorkspaceTask[]; activeTaskId: string | null } | { ok: false; error: string }
+> {
+  const userId = await getCurrentUserId()
+  if (!userId) {
+    return {
+      ok: true,
+      tasks: DEFAULT_WORKSPACE_TASKS,
+      activeTaskId: DEFAULT_WORKSPACE_TASKS[0]!.id,
+    }
+  }
+
+  try {
+    let tasks = await prisma.workspaceTask.findMany({
+      where: { userId },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    })
+    if (tasks.length === 0) {
+      for (const [position, task] of DEFAULT_WORKSPACE_TASKS.entries()) {
+        await prisma.workspaceTask.upsert({
+          where: { id: `${userId}-${task.id}` },
+          create: { id: `${userId}-${task.id}`, userId, name: task.name, position },
+          update: {},
+        })
+      }
+      tasks = await prisma.workspaceTask.findMany({
+        where: { userId },
+        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+      })
+    }
+
+    const preference = await prisma.userPreference.findUnique({
+      where: { userId },
+      select: { activeWorkspaceTaskId: true },
+    })
+    const activeTaskId = tasks.some((task) => task.id === preference?.activeWorkspaceTaskId)
+      ? preference!.activeWorkspaceTaskId
+      : (tasks[0]?.id ?? null)
+    if (activeTaskId !== preference?.activeWorkspaceTaskId) {
+      await prisma.userPreference.upsert({
+        where: { userId },
+        create: { userId, activeWorkspaceTaskId: activeTaskId },
+        update: { activeWorkspaceTaskId: activeTaskId },
+      })
+    }
+
+    return { ok: true, tasks: tasks.map(taskSummary), activeTaskId }
+  } catch {
+    return { ok: false, error: 'Could not load workspace tasks.' }
+  }
+}
+
+/** Create one task for the current user and make it active. */
+export async function createWorkspaceTask(input: {
+  name: string
+}): Promise<
+  { ok: true; task: WorkspaceTask; activeTaskId: string } | { ok: false; error: string }
+> {
+  const parsed = z.object({ name: WorkspaceTaskNameSchema }).safeParse(input)
+  if (!parsed.success) return { ok: false, error: 'Invalid workspace task.' }
+  const userId = await getCurrentUserId()
+  if (!userId) {
+    const task = { id: `local-task-${Date.now()}`, name: parsed.data.name }
+    return { ok: true, task, activeTaskId: task.id }
+  }
+
+  try {
+    const lastTask = await prisma.workspaceTask.findFirst({
+      where: { userId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    })
+    const task = await prisma.workspaceTask.create({
+      data: {
+        userId,
+        name: parsed.data.name,
+        position: (lastTask?.position ?? -1) + 1,
+      },
+    })
+    await prisma.userPreference.upsert({
+      where: { userId },
+      create: { userId, activeWorkspaceTaskId: task.id },
+      update: { activeWorkspaceTaskId: task.id },
+    })
+    return { ok: true, task: taskSummary(task), activeTaskId: task.id }
+  } catch {
+    return { ok: false, error: 'Could not create workspace task.' }
+  }
+}
+
+/** Persist the active task after verifying it belongs to the current user. */
+export async function setActiveWorkspaceTask(
+  taskId: string,
+): Promise<{ ok: true; activeTaskId: string } | { ok: false; error: string }> {
+  if (!SessionIdSchema.safeParse(taskId).success) {
+    return { ok: false, error: 'Invalid workspace task.' }
+  }
+  const userId = await getCurrentUserId()
+  if (!userId) return { ok: false, error: 'Not authenticated.' }
+
+  try {
+    const task = await prisma.workspaceTask.findFirst({ where: { id: taskId, userId } })
+    if (!task) return { ok: false, error: 'Workspace task not found.' }
+    await prisma.userPreference.upsert({
+      where: { userId },
+      create: { userId, activeWorkspaceTaskId: task.id },
+      update: { activeWorkspaceTaskId: task.id },
+    })
+    return { ok: true, activeTaskId: task.id }
+  } catch {
+    return { ok: false, error: 'Could not update active workspace task.' }
+  }
+}
 
 /** Create a new empty session owned by the current user. */
 export async function createChatSession(): Promise<

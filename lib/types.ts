@@ -152,6 +152,15 @@ export const CustomAgentThemeSchema = z.enum(['emerald', 'sapphire', 'violet', '
 
 export type CustomAgentTheme = z.infer<typeof CustomAgentThemeSchema>
 
+/** Workspace tool exposed in the chat header. */
+export type WorkspaceTool = 'terminal' | 'files' | 'preview' | 'publish'
+
+/** Local workspace task shown above the conversation list. */
+export interface WorkspaceTask {
+  id: string
+  name: string
+}
+
 export interface CustomAgentSummary {
   id: string
   name: string

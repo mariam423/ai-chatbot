@@ -59,9 +59,9 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   Nginx/ALB/uptime monitors. It runs a lightweight Prisma database check and
   returns `200` for healthy or `503` for degraded readiness.
 - **`app/actions.ts`** — Server Actions for session/message persistence,
-  sidebar listing, rename/pin/archive, per-user custom assistants, preferences,
-  prompt presets, and long-term memory records. Inputs are Zod-validated and
-  results use `{ ok }` discriminated unions.
+  sidebar listing, rename/pin/archive, per-user custom assistants, workspace
+  task persistence, preferences, prompt presets, and long-term memory records.
+  Inputs are Zod-validated and results use `{ ok }` discriminated unions.
 - **`app/dashboard/page.tsx`** + **`lib/dashboard.ts`** — Authenticated usage
   and analytics dashboard with token/message quota, subscription status,
   custom-assistant management, and an ADMIN-only platform metrics tab.
@@ -72,7 +72,16 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   local choice exists) and carries generation tuning (temperature/max
   completion tokens) into `Chat`. The active custom assistant supplies scoped
   `--accent-*` variables for its persisted emerald/sapphire/violet/obsidian/
-  amber visual theme.
+  amber visual theme. The header also exposes responsive Terminal, Files,
+  Preview, and Publish workspace controls using `lucide-react`, plus a
+  server-backed daily quota badge from `getBillingStatus`. Workspace tasks are
+  loaded from the user-scoped `WorkspaceTask` table and the active task is
+  restored from `UserPreference.activeWorkspaceTaskId`; anonymous mode keeps a
+  local fallback. The desktop sidebar and mobile drawer share this persisted
+  task state. Header tool buttons open the responsive `WorkspacePanel`: Terminal
+  provides a constrained navigation/chat command console, Files reuses the
+  session-scoped document uploader, Preview renders the latest assistant
+  response, and Publish links to the authenticated custom-assistant dashboard.
 - **`app/settings/page.tsx`** — Settings UI (Profile, Model & Generation,
   API Key, Google Calendar, System Prompt Presets). The Model & Generation
   section picks a preferred default model (from `lib/models.ts`) and has
@@ -81,6 +90,9 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   being persisted via `updateUserPreferences`; `chat.tsx` forwards them to
   `/api/chat`, which validates them again and applies them to the upstream
   body (`temperature` / `max_tokens`).
+- **`components/workspace-panel.tsx`** — Responsive Terminal, Files, Preview,
+  and Publish panel implementations used by the chat shell. It deliberately
+  does not expose arbitrary server-side shell execution to browser clients.
 - **`components/chat.tsx`** — Chat state/orchestration for restore, send,
   retry, regenerate, stop, clear, document attachments, video frame state,
   SSE consumption, and persistence. Normal deltas are coalesced into
@@ -297,8 +309,11 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   trailing touch→mouse events can't instantly close the viewer. `prefers-`
   `reduced-motion` skips entrance motion.
 - **`components/sidebar.tsx`** — Accessible desktop session list and mobile
-  drawer with search, pagination, rename, delete, pin, archive, and theme
-  controls.
+  drawer with a persisted Tasks organizer above the conversation list, search,
+  pagination, rename, delete, pin, archive, and theme controls. Task rows use
+  `aria-pressed` so their active state remains distinct from the conversation
+  list's `aria-current` markers; collapsed mode keeps task and conversation
+  controls available as icon-only actions.
 - **`components/skill-picker.tsx`** — Per-session skill toggle dropdown in the
   chat header. It lists all eight registered skills with switches; toggling
   persists the override to `ChatSession.enabledSkills` (via

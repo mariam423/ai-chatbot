@@ -84,6 +84,80 @@ test('sidebar lists the conversation and New Chat resets the thread', async ({
   })
 })
 
+test('shows workspace tools, quota usage, and task controls', async ({ page, isMobile }) => {
+  test.skip(isMobile)
+
+  await page.goto('/')
+  await page.evaluate(() => localStorage.removeItem('chat.sidebarCollapsed'))
+  await page.reload()
+
+  await test.step('header exposes the workspace tools and quota badge', async () => {
+    for (const tool of ['terminal', 'files', 'preview', 'publish']) {
+      const button = page.getByTestId(`workspace-${tool}`)
+      await expect(button).toBeVisible()
+      await expect(button).toHaveAttribute('aria-pressed', 'false')
+      await button.click()
+      await expect(button).toHaveAttribute('aria-pressed', 'true')
+      const panel = page.getByTestId('workspace-panel')
+      await expect(panel).toContainText(tool[0]!.toUpperCase() + tool.slice(1))
+      if (tool === 'terminal')
+        await expect(panel.getByTestId('terminal-output')).toContainText('terminal ready')
+      if (tool === 'files') await expect(panel).toContainText('Session documents')
+      if (tool === 'preview') await expect(panel).toContainText('No assistant response')
+      if (tool === 'publish') {
+        await expect(panel).toContainText('Publish an assistant')
+        await expect(
+          panel.getByRole('link', { name: /Open publishing workspace/ }),
+        ).toHaveAttribute('href', '/dashboard#custom-agents')
+      }
+      await panel
+        .getByRole('button', {
+          name: `Close ${tool[0]!.toUpperCase() + tool.slice(1)} workspace panel`,
+        })
+        .click()
+      await expect(button).toHaveAttribute('aria-pressed', 'false')
+      await expect(panel).toBeHidden()
+    }
+    await expect(page.getByTestId('quota-badge')).toBeVisible()
+    await expect(page.getByTestId('quota-badge')).toContainText(/Quota|Daily quota/)
+  })
+
+  await test.step('tasks can be selected and created above conversations', async () => {
+    const sidebar = page.getByRole('complementary', { name: 'Conversations' })
+    await expect(sidebar.getByRole('heading', { name: 'Tasks' })).toBeVisible()
+    const buildTask = sidebar.getByRole('button', { name: 'Build workspace', exact: true })
+    await buildTask.click()
+    await expect(buildTask).toHaveAttribute('aria-pressed', 'true')
+
+    await sidebar.getByRole('button', { name: 'Create task' }).click()
+    await expect(sidebar.getByRole('button', { name: 'New task 4', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await expect(sidebar.getByRole('heading', { name: 'Conversations' })).toBeVisible()
+  })
+})
+
+test('workspace controls open usable panels on mobile', async ({ page, isMobile }) => {
+  test.skip(!isMobile)
+
+  await page.goto('/')
+  for (const tool of ['terminal', 'files', 'preview', 'publish']) {
+    const button = page.getByTestId(`workspace-${tool}`)
+    await expect(button).toBeVisible()
+    await button.click()
+    const panel = page.getByTestId('workspace-panel')
+    await expect(panel).toBeVisible()
+    await expect(panel).toContainText(tool[0]!.toUpperCase() + tool.slice(1))
+    await panel
+      .getByRole('button', {
+        name: `Close ${tool[0]!.toUpperCase() + tool.slice(1)} workspace panel`,
+      })
+      .click()
+    await expect(panel).toBeHidden()
+  }
+})
+
 test('toggles dark mode and persists it across reloads', async ({ page, isMobile }) => {
   test.skip(isMobile)
 
@@ -317,20 +391,20 @@ test('searches conversations and resets on clear', async ({ page, isMobile }) =>
     await typeSearch(page, searchInput, uniqueTitle)
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeVisible()
     // Unique title → exactly one match (no Show-more li for a 1-result page).
-    await expect(sidebar.locator('li')).toHaveCount(1)
+    await expect(sidebar.getByTestId('conversation-list').locator('li')).toHaveCount(1)
   })
 
   await test.step('search is case-insensitive', async () => {
     await typeSearch(page, searchInput, uniqueTitle.toLowerCase())
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeVisible()
-    await expect(sidebar.locator('li')).toHaveCount(1)
+    await expect(sidebar.getByTestId('conversation-list').locator('li')).toHaveCount(1)
   })
 
   await test.step('a search with no matches shows the no-results state', async () => {
     await typeSearch(page, searchInput, 'zzz-no-such-session')
     await expect(sidebar.getByText('No conversations found.')).toBeVisible()
     await expect(sidebar.getByText(uniqueTitle, { exact: true })).toBeHidden()
-    await expect(sidebar.locator('li')).toHaveCount(0)
+    await expect(sidebar.getByTestId('conversation-list').locator('li')).toHaveCount(0)
   })
 
   await test.step('clearing the search restores the list', async () => {

@@ -1,5 +1,6 @@
 'use client'
 
+import { FolderKanban, ListTodo, Plus } from 'lucide-react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
   CheckIcon,
@@ -21,7 +22,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import type { ChatSessionSummary } from '@/lib/types'
+import type { ChatSessionSummary, WorkspaceTask } from '@/lib/types'
 
 const SIDEBAR_WIDTH_EXPANDED = 256
 const SIDEBAR_WIDTH_COLLAPSED = 64
@@ -29,6 +30,10 @@ const STORAGE_KEY = 'chat.sidebarCollapsed'
 
 interface SidebarProps {
   sessions: ChatSessionSummary[]
+  tasks: WorkspaceTask[]
+  activeTaskId: string
+  onSelectTask: (id: string) => void
+  onCreateTask: () => void
   activeSessionId: string | null
   theme: 'light' | 'dark'
   search: string
@@ -51,6 +56,10 @@ interface SidebarProps {
 
 interface SidebarContentProps {
   sessions: ChatSessionSummary[]
+  tasks: WorkspaceTask[]
+  activeTaskId: string
+  onSelectTask: (id: string) => void
+  onCreateTask: () => void
   activeSessionId: string | null
   showArchived: boolean
   theme: 'light' | 'dark'
@@ -331,6 +340,10 @@ function SessionItem({
 
 function SidebarContent({
   sessions,
+  tasks,
+  activeTaskId,
+  onSelectTask,
+  onCreateTask,
   activeSessionId,
   showArchived,
   theme,
@@ -389,6 +402,58 @@ function SidebarContent({
 
   return (
     <>
+      {/* Workspace tasks */}
+      {!collapsed && (
+        <section className="px-3 pt-3" aria-label="Workspace tasks">
+          <div className="mb-1 flex items-center justify-between px-1">
+            <h2 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-[var(--text-tertiary)]">
+              <FolderKanban size={12} strokeWidth={1.8} aria-hidden="true" />
+              <span>Tasks</span>
+            </h2>
+            <button
+              type="button"
+              onClick={onCreateTask}
+              aria-label="Create task"
+              title="Create task"
+              className="flex size-6 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-emerald-400"
+            >
+              <Plus size={13} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </div>
+          <ul className="space-y-0.5" aria-label="Workspace tasks">
+            {tasks.map((task) => {
+              const active = task.id === activeTaskId
+              return (
+                <li key={task.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTask(task.id)}
+                    aria-pressed={active}
+                    className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-xs transition-colors"
+                    style={{
+                      background: active ? 'var(--accent-soft)' : 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      border: active ? '1px solid var(--accent-medium)' : '1px solid transparent',
+                    }}
+                  >
+                    <ListTodo
+                      size={13}
+                      strokeWidth={active ? 2 : 1.6}
+                      className={active ? 'text-emerald-400' : 'text-[var(--text-muted)]'}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{task.name}</span>
+                    {active && (
+                      <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                    )}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
       {/* New Chat button */}
       <div className="p-3">
         <motion.button
@@ -432,7 +497,10 @@ function SidebarContent({
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto px-3 pb-3"
+              data-testid="conversation-viewport"
+            >
               <div className="relative pb-2">
                 <label htmlFor="session-search" className="sr-only">
                   Search conversations
@@ -489,7 +557,7 @@ function SidebarContent({
                 }
 
                 return (
-                  <ul className="space-y-0.5">
+                  <ul className="space-y-0.5" data-testid="conversation-list">
                     {/* Pinned section */}
                     {hasPinned && (
                       <>
@@ -582,9 +650,54 @@ function SidebarContent({
         )}
       </AnimatePresence>
 
-      {/* Collapsed session list — icon-only */}
+      {/* Collapsed workspace tasks and session list — icon-only */}
       {collapsed && (
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+          <h2 className="sr-only">Tasks</h2>
+          <ul
+            className="mb-2 space-y-0.5 border-b pb-2"
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            {tasks.map((task) => (
+              <li key={task.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectTask(task.id)}
+                  aria-pressed={task.id === activeTaskId}
+                  aria-label={task.name}
+                  title={task.name}
+                  className="flex size-10 items-center justify-center rounded-xl transition-colors"
+                  style={{
+                    background: task.id === activeTaskId ? 'var(--accent-soft)' : 'transparent',
+                    border:
+                      task.id === activeTaskId
+                        ? '1px solid var(--accent-medium)'
+                        : '1px solid transparent',
+                  }}
+                >
+                  <ListTodo
+                    size={14}
+                    strokeWidth={task.id === activeTaskId ? 2 : 1.6}
+                    className={
+                      task.id === activeTaskId ? 'text-emerald-400' : 'text-[var(--text-muted)]'
+                    }
+                    aria-hidden="true"
+                  />
+                </button>
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                onClick={onCreateTask}
+                aria-label="Create task"
+                title="Create task"
+                className="flex size-10 items-center justify-center rounded-xl text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-input)] hover:text-emerald-400"
+              >
+                <Plus size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
           <h2 className="sr-only">Conversations</h2>
           <ul className="space-y-0.5">
             {sessions.map((session) => {
@@ -687,6 +800,10 @@ function SidebarContent({
 
 export default function Sidebar({
   sessions,
+  tasks,
+  activeTaskId,
+  onSelectTask,
+  onCreateTask,
   activeSessionId,
   theme,
   search,
@@ -795,6 +912,10 @@ export default function Sidebar({
 
   const contentProps = {
     sessions,
+    tasks,
+    activeTaskId,
+    onSelectTask,
+    onCreateTask,
     activeSessionId,
     showArchived,
     theme,
