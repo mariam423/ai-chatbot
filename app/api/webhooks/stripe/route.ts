@@ -4,6 +4,7 @@ import { guardRoute, ROUTE_GUARDS, clientIp } from '@/lib/security'
 import { logSecurityEvent } from '@/lib/audit'
 import { verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { parsePlanKey } from '@/lib/billing/plans'
+import { DEFAULT_USER_ROLE } from '@/lib/roles'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -63,14 +64,35 @@ export async function POST(request: Request) {
     object.metadata && typeof object.metadata === 'object'
       ? (object.metadata as Record<string, unknown>)
       : {}
-  const userId =
+  const explicitUserId =
     typeof object.client_reference_id === 'string'
       ? object.client_reference_id
       : typeof metadata.userId === 'string'
         ? metadata.userId
-        : null
+        : typeof metadata.user_id === 'string'
+          ? metadata.user_id
+          : null
+  const customerId = typeof object.customer === 'string' ? object.customer : null
+  const subscriptionId = typeof object.id === 'string' ? object.id : null
 
   try {
+    // Subscription events may not contain Checkout's client_reference_id.
+    // Resolve the user from the stable Stripe ids saved at checkout time so
+    // renewals, cancellations, and dashboard-triggered updates are applied.
+    let userId = explicitUserId
+    if (!userId && (customerId || subscriptionId)) {
+      const matched = await prisma.user.findFirst({
+        where: {
+          OR: [
+            ...(customerId ? [{ stripeCustomerId: customerId }] : []),
+            ...(subscriptionId ? [{ stripeSubscriptionId: subscriptionId }] : []),
+          ],
+        },
+        select: { id: true },
+      })
+      userId = matched?.id ?? null
+    }
+
     switch (event.type) {
       case 'checkout.session.completed': {
         if (!userId) return NextResponse.json({ received: true })
@@ -78,7 +100,8 @@ export async function POST(request: Request) {
           where: { id: userId },
           data: {
             plan: 'pro',
-            stripeCustomerId: typeof object.customer === 'string' ? object.customer : null,
+            role: 'PRO',
+            stripeCustomerId: customerId,
             stripeSubscriptionId:
               typeof object.subscription === 'string' ? object.subscription : null,
           },
@@ -90,12 +113,19 @@ export async function POST(request: Request) {
         if (!userId) return NextResponse.json({ received: true })
         const status = typeof object.status === 'string' ? object.status : ''
         const active = ['active', 'trialing'].includes(status)
+        const updateData = {
+          plan: active ? 'pro' : parsePlanKey('free'),
+          role: active ? 'PRO' : DEFAULT_USER_ROLE,
+          // A deleted subscription must be cleared so the portal cannot be
+          // opened against a stale customer subscription. For updates, retain
+          // the current subscription id when Stripe supplied one.
+          stripeSubscriptionId:
+            event.type === 'customer.subscription.deleted' ? null : subscriptionId,
+          ...(customerId ? { stripeCustomerId: customerId } : {}),
+        }
         await prisma.user.update({
           where: { id: userId },
-          data: {
-            plan: active ? 'pro' : parsePlanKey('free'),
-            stripeSubscriptionId: typeof object.id === 'string' ? object.id : null,
-          },
+          data: updateData,
         })
         break
       }

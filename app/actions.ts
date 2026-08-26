@@ -1,5 +1,6 @@
 'use server'
 
+import { headers } from 'next/headers'
 import { z } from 'zod'
 import { Prisma } from '../generated/client'
 import { prisma } from '@/lib/db'
@@ -8,7 +9,7 @@ import { isValidSkillId } from '@/lib/skills/registry'
 import { exchangeGoogleAccessToken, parseGoogleServiceAccountKey } from '@/lib/skills/tools'
 import { ModelKeySchema } from '@/lib/models'
 import { getMaxOutputTokens } from '@/lib/llm-config'
-import { sanitizeInput } from '@/lib/security'
+import { checkBillingRateLimit, clientIpFromHeaders, sanitizeInput } from '@/lib/security'
 import { logSecurityEvent } from '@/lib/audit'
 import { decryptField, encryptField } from '@/lib/field-encryption'
 import { getPlan, isOverDailyLimit, PLANS } from '@/lib/billing/plans'
@@ -780,6 +781,8 @@ export async function getBillingStatus(): Promise<
       },
     }
   }
+  const throttled = await checkBillingRateLimit('status', clientIpFromHeaders(await headers()))
+  if (!throttled.ok) return throttled
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } })
     const today = new Date().toISOString().slice(0, 10)
@@ -808,20 +811,28 @@ export async function upgradeToPro(): Promise<
 > {
   const userId = await getCurrentUserId()
   if (!userId) return { ok: false, error: 'You must be signed in to upgrade.' }
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-  const result = await createStripeCheckoutSession({
-    customerId: user?.stripeCustomerId ?? null,
-    userId,
-    email: user?.email ?? '',
-  })
-  if (!result.ok) {
-    return {
-      ok: false,
-      error: result.error ?? 'Could not start checkout.',
-      notConfigured: result.notConfigured,
+  const throttled = await checkBillingRateLimit('checkout', clientIpFromHeaders(await headers()))
+  if (!throttled.ok) return throttled
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) return { ok: false, error: 'Could not load your billing account.' }
+    const result = await createStripeCheckoutSession({
+      customerId: user.stripeCustomerId ?? null,
+      userId,
+      email: user.email,
+    })
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: result.error ?? 'Could not start checkout.',
+        notConfigured: result.notConfigured,
+      }
     }
+    return { ok: true, url: result.data!.url, notConfigured: result.notConfigured }
+  } catch {
+    return { ok: false, error: 'Could not start checkout.' }
   }
-  return { ok: true, url: result.data!.url, notConfigured: result.notConfigured }
 }
 
 /** Open the Stripe billing portal so the user can manage/cancel their plan. */
@@ -831,6 +842,8 @@ export async function openBillingPortal(): Promise<
 > {
   const userId = await getCurrentUserId()
   if (!userId) return { ok: false, error: 'You must be signed in to manage billing.' }
+  const throttled = await checkBillingRateLimit('portal', clientIpFromHeaders(await headers()))
+  if (!throttled.ok) return throttled
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } })
     const customerId = user?.stripeCustomerId

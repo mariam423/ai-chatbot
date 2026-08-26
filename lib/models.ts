@@ -33,6 +33,9 @@ export const MODEL_OPTIONS = [
   {
     key: 'kimi-k3',
     label: 'Kimi K3',
+    // Verified OpenRouter catalog slug for Kimi K3. This is a paid model,
+    // not a `:free` route, so 402/429/404 responses intentionally use the
+    // provider fallback sequence in /api/chat.
     model: 'moonshotai/kimi-k3',
     envVar: 'MODEL_KIMI_K3',
     vision: true,
@@ -164,7 +167,7 @@ export function resolveModel(
     return VISION_FALLBACK_MODELS[provider]
   }
   if (selected.envVar) {
-    const configured = process.env[selected.envVar]
+    const configured = process.env[selected.envVar]?.trim()
     if (configured) return configured
   }
   const providerModel =

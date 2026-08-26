@@ -37,6 +37,7 @@
     "components/**/*.ts",
     "components/**/*.tsx",
     "lib/**/*.ts",
+    "types/**/*.d.ts",
     "vitest.config.ts",
     "playwright.config.ts",
     "e2e/**/*.ts",

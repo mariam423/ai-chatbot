@@ -20,6 +20,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
  */
 
 const STRIPE_API = 'https://api.stripe.com/v1'
+const STRIPE_REQUEST_TIMEOUT_MS = 10_000
 
 function isConfigured(): boolean {
   return Boolean(process.env.STRIPE_SECRET_KEY)
@@ -31,14 +32,30 @@ function appUrl(): string {
 
 async function stripeFetch(path: string, params: Record<string, string>): Promise<Response> {
   const body = new URLSearchParams(params)
-  return fetch(`${STRIPE_API}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body,
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), STRIPE_REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(`${STRIPE_API}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 2_000) return false
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 export interface BillingResult<T> {
@@ -79,13 +96,14 @@ export async function createCheckoutSession(input: {
     }
     const response = await stripeFetch('/checkout/sessions', params)
     if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      return {
-        ok: false,
-        error: `Stripe checkout failed (${response.status}). ${detail.slice(0, 200)}`,
-      }
+      // Do not echo Stripe's response body: it may contain account metadata or
+      // provider diagnostics that are not useful to the browser.
+      return { ok: false, error: `Stripe checkout failed (${response.status}).` }
     }
-    const session = (await response.json()) as { id: string; url: string }
+    const session = (await response.json()) as { id?: unknown; url?: unknown }
+    if (typeof session.id !== 'string' || !isHttpsUrl(session.url)) {
+      return { ok: false, error: 'Stripe returned an invalid checkout session.' }
+    }
     return { ok: true, data: { url: session.url, sessionId: session.id } }
   } catch {
     return { ok: false, error: 'Could not reach Stripe checkout.' }
@@ -106,13 +124,12 @@ export async function createBillingPortalSession(input: {
       return_url: `${appUrl()}/settings`,
     })
     if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      return {
-        ok: false,
-        error: `Stripe portal failed (${response.status}). ${detail.slice(0, 200)}`,
-      }
+      return { ok: false, error: `Stripe portal failed (${response.status}).` }
     }
-    const session = (await response.json()) as { url: string }
+    const session = (await response.json()) as { url?: unknown }
+    if (!isHttpsUrl(session.url)) {
+      return { ok: false, error: 'Stripe returned an invalid billing portal session.' }
+    }
     return { ok: true, data: { url: session.url } }
   } catch {
     return { ok: false, error: 'Could not reach Stripe billing portal.' }
@@ -132,22 +149,24 @@ export function verifyStripeWebhookSignature(
   const secret = process.env.STRIPE_WEBHOOK_SECRET
   if (!secret || !signatureHeader) return false
 
-  const parts = Object.fromEntries(
-    signatureHeader.split(',').map((part) => {
-      const [key, ...rest] = part.trim().split('=')
-      return [key, rest.join('=')]
-    }),
-  )
-  const timestamp = parts['t']
-  const signature = parts['v1']
-  if (!timestamp || !signature) return false
+  const parts = signatureHeader.split(',').map((part) => {
+    const [key, ...rest] = part.trim().split('=')
+    return { key, value: rest.join('=') }
+  })
+  const timestamp = parts.find((part) => part.key === 't')?.value
+  const signatures = parts
+    .filter((part) => part.key === 'v1' && part.value)
+    .map((part) => part.value)
+  if (!timestamp || signatures.length === 0) return false
 
   // Reject signatures older than 5 minutes (Stripe's documented tolerance).
   const ageSeconds = Math.abs(Date.now() / 1000 - Number(timestamp))
   if (!Number.isFinite(ageSeconds) || ageSeconds > 300) return false
 
   const expected = createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest('hex')
-  const a = Buffer.from(signature)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
+  const expectedBuffer = Buffer.from(expected)
+  return signatures.some((signature) => {
+    const candidate = Buffer.from(signature)
+    return candidate.length === expectedBuffer.length && timingSafeEqual(candidate, expectedBuffer)
+  })
 }

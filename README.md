@@ -101,6 +101,34 @@ AUTH_SECRET=your-secret
 AUTH_TRUST_HOST=true
 ```
 
+Google and GitHub sign-in are enabled independently when each provider has
+both credentials configured. During local development, `DEV_OAUTH_MOCK=true`
+(the default outside production) enables both provider buttons with placeholder
+credentials so the login UI can be exercised before OAuth apps are registered.
+Those placeholders are not valid OAuth credentials and must be replaced for a
+real sign-in flow; production never enables them automatically. Auth.js accepts
+the standard `AUTH_*` names and the app's aliases below:
+
+```env
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+GITHUB_ID=your-github-oauth-client-id
+GITHUB_SECRET=your-github-oauth-client-secret
+```
+
+Register these callback URLs with the providers:
+
+- `https://your-domain.example/api/auth/callback/google`
+- `https://your-domain.example/api/auth/callback/github`
+
+The login page discovers configured providers from `/api/auth/providers`, so an
+unconfigured social provider is not shown. On first OAuth sign-in, the verified
+email is linked to an existing credentials user when possible; otherwise a new
+`FREE` account and provider `Account` row are created. The JWT carries the
+stable Prisma user id plus the current role/plan. Stripe upgrades synchronize
+that role to `PRO`, while cancellations restore `FREE`; `ADMIN` is reserved for
+operator-managed accounts.
+
 ### Data-at-rest encryption (recommended in production)
 
 Sensitive `UserPreference` fields — the user's API key and the Google
@@ -120,6 +148,26 @@ AUTH_DISABLED=true
 ```
 
 Do not enable `AUTH_DISABLED` in production.
+
+### Stripe subscription billing (optional)
+
+Set a Stripe secret, webhook signing secret, and recurring Pro price to enable
+checkout and the billing portal in Settings:
+
+```env
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_PRO=price_...
+```
+
+`upgradeToPro` and `openBillingPortal` are authenticated server actions with
+per-IP flood limits and bounded provider errors. Stripe webhooks are accepted
+only after HMAC signature and timestamp verification, are rate-limited by IP,
+and handle `checkout.session.completed`,
+`customer.subscription.updated`, and `customer.subscription.deleted`.
+Subscription events resolve users by Checkout metadata/reference id first and
+fall back to the stored Stripe customer or subscription id. Do not expose
+Stripe secret values to client code.
 
 ### Model selector overrides
 
@@ -144,7 +192,7 @@ Configure one or more Streamable HTTP MCP servers with a JSON array. Keep creden
 MCP_SERVERS_JSON='[{"id":"weather","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer your-token"}}]'
 ```
 
-The agent validates server configuration, discovers available tools, applies request timeouts, bounds tool responses, and executes only discovered tools.
+The agent validates server configuration, discovers available tools, applies request timeouts, bounds tool responses, and validates each call against the discovered JSON Schema before invoking it.
 
 ### Optional web search adapter
 
@@ -210,7 +258,7 @@ When `MCP_SERVERS_JSON` is configured, the chat route discovers tools from the c
 mcp__<server-id>__<tool-name>
 ```
 
-MCP failures are returned to the agent as bounded tool errors so a single unavailable integration does not crash the entire chat request.
+MCP failures are returned to the agent as bounded tool errors so a single unavailable integration does not crash the entire chat request. Required fields, primitive types, and `additionalProperties: false` are enforced before remote invocation.
 
 ### 4. Document RAG and citations
 

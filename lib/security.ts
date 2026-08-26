@@ -105,6 +105,45 @@ export const AUTH_GUARDS: Record<
 
 /** The throttled error shared by all auth server actions. */
 export const AUTH_RATE_LIMIT_ERROR = 'Too many attempts. Please wait a minute and try again.'
+export const BILLING_RATE_LIMIT_ERROR =
+  'Too many billing requests. Please wait a minute and try again.'
+
+/** Rate limits for authenticated Stripe mutations exposed as server actions. */
+export type BillingGuardKey = 'status' | 'checkout' | 'portal'
+
+export const BILLING_GUARDS: Record<
+  BillingGuardKey,
+  { name: string; limit: number; windowMs: number }
+> = {
+  status: { name: 'billing:status', limit: 60, windowMs: 60_000 },
+  checkout: { name: 'billing:checkout', limit: 10, windowMs: 60_000 },
+  portal: { name: 'billing:portal', limit: 20, windowMs: 60_000 },
+}
+
+/**
+ * Throttle billing redirects by IP after the caller has been authenticated.
+ * Billing actions are server actions rather than Request-backed routes, so
+ * they use the same shared store through `clientIpFromHeaders`.
+ */
+export async function checkBillingRateLimit(
+  guard: BillingGuardKey,
+  ip: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const config = BILLING_GUARDS[guard]
+  const result = await rateLimit(`${config.name}:ip:${ip}`, {
+    limit: config.limit,
+    windowMs: config.windowMs,
+  })
+  if (!result.ok) {
+    logSecurityEvent('billing_throttled', {
+      guard,
+      ip,
+      retryAfterSeconds: result.retryAfterSeconds,
+    })
+    return { ok: false, error: BILLING_RATE_LIMIT_ERROR }
+  }
+  return { ok: true }
+}
 
 /**
  * Throttle an auth server action by client IP (register, password reset).

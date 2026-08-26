@@ -16,6 +16,11 @@ model User {
   image         String?
   passwordHash  String?
   emailVerified DateTime?
+  // Application role: FREE is the default; active Stripe subscriptions are
+  // synchronized to PRO. ADMIN is reserved for operator-managed accounts.
+  // SQLite has no native enum support, so lib/roles.ts validates this value at
+  // every application boundary.
+  role          String    @default("FREE")
   // SaaS plan: "free" | "pro". Set via the Stripe billing webhook when the
   // user completes checkout / updates their subscription (see lib/billing).
   plan                    String   @default("free")
@@ -52,6 +57,7 @@ model Account {
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
   @@map("accounts")
 }
 

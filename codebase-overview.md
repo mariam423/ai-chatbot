@@ -125,11 +125,13 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   browser. No-op by default.
 - **`app/api/webhooks/stripe/route.ts`** — Signature-verified Stripe webhook
   (`STRIPE_WEBHOOK_SECRET`; unverified → 401, unconfigured → 501). Handles
-  `checkout.session.completed` (upgrade → pro, stores customer/subscription
-  ids) and `customer.subscription.updated`/`deleted` (downgrade → free).
-  Guarded by a generous per-IP flood brake (signature verification is the
-  real auth; the CSRF check is defense in depth — Stripe's server-to-server
-  calls carry no Origin).
+  `checkout.session.completed` (upgrade → pro/PRO, stores customer/subscription
+  ids) and `customer.subscription.updated`/`deleted` (synchronizes plan and
+  role; deletion clears the subscription id). Subscription events can resolve
+  the user from metadata/reference id or stored Stripe ids. Guarded by a
+  generous per-IP flood brake (signature verification is the real auth; the
+  CSRF check is defense in depth — Stripe's server-to-server calls carry no
+  Origin).
 - **`lib/security.ts`** — Shared guardrails: `checkCsrf`
   (Origin/Referer vs `NEXT_PUBLIC_APP_URL`; absent Origin allowed for
   non-browser traffic), `sanitizeInput` (control-char strip preserving
@@ -148,14 +150,17 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   the shared rate-limit store via `clientIpFromHeaders` — server actions
   have no `Request`, so the IP comes from `next/headers`.
   It re-exports `rateLimit`/`rateLimitResponse` from `lib/rate-limit.ts`.
-- **`app/actions/auth.ts` + `lib/auth.ts` (credentials)** — Auth throttles:
+- **`app/actions/auth.ts` + `lib/auth.ts` (credentials + OAuth)** — Auth throttles:
   `registerUser`, `requestPasswordReset`, and `resetPassword` call
   `checkAuthRateLimit` first (per-IP, before any DB/bcrypt work; reset-request
   is IP-only so an attacker can't burn a victim's reset quota). The
   credentials `authorize` calls `checkLoginRateLimit(clientIp(request), email)`
   before the bcrypt compare — a throttled attempt returns null (the same
   generic failure as a wrong password), and the per-account cap stops targeted
-  guessing while the per-IP cap stops floods.
+  guessing while the per-IP cap stops floods. Google/GitHub providers are
+  enabled only when configured; the OAuth sign-in callback upserts the user and
+  provider account into Prisma, links verified-email sign-ins to an existing
+  user, and seeds the JWT with the stable user id, `FREE`/`PRO`/`ADMIN` role, and plan.
 - **`lib/rate-limit.ts`** — The shared rate-limit store behind
   `guardRoute`. A fixed-window counter (slides forward on expiry) behind a
   narrow `RateLimitStore` interface: `MemoryRateLimitStore` (per-process
@@ -176,9 +181,11 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`lib/billing/stripe.ts`** — SDK-free Stripe REST client (plain fetch):
   `createCheckoutSession`, `createBillingPortalSession`, and
   `verifyStripeWebhookSignature` (HMAC + timing-safe compare + 5-minute skew
-  window). All helpers env-gated; when `STRIPE_SECRET_KEY` is unset they
-  return `{ ok: false, notConfigured: true }` and the settings UI hides
-  billing.
+  window). Requests have a timeout and validate returned HTTPS redirect URLs;
+  provider bodies are not echoed to clients. All helpers are env-gated; when
+  `STRIPE_SECRET_KEY` is unset they return `{ ok: false, notConfigured: true }`.
+  Authenticated checkout/portal actions are rate-limited through
+  `BILLING_GUARDS` in `lib/security.ts`.
 - **`lib/analytics.ts`** + **`lib/use-analytics.ts`** — Env-gated tracking:
   PostHog capture (`POSTHOG_API_KEY`/`POSTHOG_HOST`) or `ANALYTICS_DEBUG`
   console logging; otherwise a complete no-op (the app never phones home by
@@ -256,7 +263,11 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   `enabledSkills`. "Use all" clears the override back to defaults.
 - **Auth hardening (OWASP A07/A02)** — `registerUser` returns a generic
   error when the email is taken (no account-enumeration oracle); login and
-  password-reset failures are already generic. The NextAuth cookie policy is
+  password-reset failures are already generic. Google/GitHub providers are
+  enabled only when configured, and the login UI discovers them from
+  `/api/auth/providers`. OAuth identities are persisted in `Account` rows and
+  linked to existing users by verified email; new users default to `FREE`.
+  The NextAuth cookie policy is
   left to `@auth/core`'s protocol-derived defaults (httpOnly, sameSite=lax,
   `secure` + `__Secure-`/`__Host-` prefixes over https) and documented in
   `lib/auth.ts`; HTTPS is enforced by the HSTS header in `next.config.ts`.
@@ -343,14 +354,21 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`prisma/schema.prisma`** — `ChatSession` owns `ChatMessage[]` and
   `Document[]`. `DocumentChunk` stores bounded extracted text and a JSON vector
   embedding. `MemoryRecord` stores user-scoped preferences, entities, and
-  summaries. `User` carries the SaaS billing state (`plan`, `stripeCustomerId`,
-  `stripeSubscriptionId`, daily `usageCount`/`usageDate`). Document and user
+  summaries. `Account` links Google/GitHub identities to `User`; new users
+  default to the `FREE` role; `ADMIN` is operator-managed. `User` carries the SaaS billing state (`role`,
+  `plan`, `stripeCustomerId`, `stripeSubscriptionId`, daily
+  `usageCount`/`usageDate`). Document and user
   relations cascade appropriately.
 - **`prisma/migrations/20260822100000_add_documents/migration.sql`** — Creates
   the document and chunk tables and retrieval indexes.
 - **`prisma/migrations/20260822120000_add_memory/migration.sql`** — Creates
   user preferences and long-term memory tables and brings session metadata
   columns into the migration history.
+- **`prisma/migrations/20260826000000_add_user_role/migration.sql`** — Adds
+  the role column and OAuth account user index.
+- **`prisma/migrations/20260826120000_migrate_user_roles/migration.sql`** —
+  Migrates legacy `USER` rows to `FREE` and makes `FREE` the SQLite default;
+  active Stripe plans use `PRO`, while canceled subscriptions return to `FREE`.
 - Generated Prisma output is in `generated/` and ignored by Git. Run
   `npx prisma generate` after schema changes.
 
@@ -401,7 +419,8 @@ N]` labels.
   stored embeddings, memory records, localStorage payloads, and upload metadata.
 - All app credentials remain server-side. MCP configuration is optional and
   uses server-side headers from `MCP_SERVERS_JSON`; tool calls are bounded and
-  unavailable servers are skipped during discovery.
+  validated against discovered JSON Schema, and unavailable servers are skipped
+  during discovery.
 - Web search and audio operations default to mock adapters when no provider is
   configured. The interfaces are replaceable without changing the agent loop.
   Skill tools follow the same pattern: `weather_lookup` calls an optional
