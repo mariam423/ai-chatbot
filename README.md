@@ -1,488 +1,301 @@
-# Advanced AI Chatbot & Autonomous Agent
+<div align="center">
 
-A production-oriented Next.js chatbot with streaming responses, bounded autonomous agent workflows, Model Context Protocol integrations, document-grounded RAG, multimodal analysis, structured outputs, and cross-session memory.
+# AI Chatbot
 
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![React 19](https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06b6d4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Prisma](https://img.shields.io/badge/Prisma-7-2d3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
-[![Vitest](https://img.shields.io/badge/Vitest-134_tests-6e9f18?logo=vitest&logoColor=white)](https://vitest.dev/)
+### A production-grade, streaming AI chatbot with branching conversations, document RAG, voice input, and a custom glassmorphism UI — built on Next.js 16 and deployed on Vercel.
 
-## Highlights
+<p align="center">
+  <a href="https://github.com/mariam423/ai-chatbot/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/mariam423/ai-chatbot?style=for-the-badge&color=10b981" alt="License" />
+  </a>
+  <a href="https://github.com/mariam423/ai-chatbot/stargazers">
+    <img src="https://img.shields.io/github/stars/mariam423/ai-chatbot?style=for-the-badge&color=fbbf24" alt="Stars" />
+  </a>
+  <a href="https://github.com/mariam423/ai-chatbot/issues">
+    <img src="https://img.shields.io/github/issues/mariam423/ai-chatbot?style=for-the-badge" alt="Issues" />
+  </a>
+</p>
 
-- **Multi-Agent Workflows** - Bounded planning and sequential tool execution with retained execution memory.
-- **MCP Integration** - Discover and call tools from configured Streamable HTTP MCP servers.
-- **Dynamic Model Switching** - Switch models from the chat header with server-side model resolution and environment overrides.
-- **Streaming Chat** - OpenAI-compatible SSE streaming with responsive word-sized rendering and abort support.
-- **Voice assistant** - Use Web Speech or the MediaRecorder → Whisper-compatible STT fallback, and read assistant replies aloud with server TTS or browser SpeechSynthesis.
-- **Video and Media Analysis** - Extract browser-side video keyframes and attach JPEG, PNG, MP3, and WAV media for multimodal requests.
-- **Interactive RAG Citations** - Upload documents, retrieve relevant chunks, and open exact source excerpts from citation badges.
-- **Dynamic Recharts Visualization** - Render validated time-series chart data as interactive Recharts line charts.
-- **Structured Outputs** - Strict JSON schemas for tables, charts, code snippets, and citation responses.
-- **Cross-Session Long-Term Memory** - Persist authenticated user preferences, entities, and bounded conversation summaries.
-- **Authentication and Persistence** - NextAuth-based auth, Prisma-backed sessions/messages, document metadata, and memory.
-- **Custom assistant themes** - Private assistants can use emerald, sapphire, violet, obsidian, or amber accents that follow the active chat.
-- **Transactional notifications** - Server-only Resend/SendGrid delivery with a safe local console fallback for welcome and subscription lifecycle emails.
-- **Chat exports** - Export the active conversation as timestamped Markdown, JSON, plain text, or a native print/PDF transcript with assistant and model metadata.
-- **Embeddable assistants** - Generate signed iframe or script snippets for private custom-assistant widgets with token expiry, origin checks, CORS, and isolated UI.
-- **Accessible Chat UI** - Responsive sidebar, mobile drawer, keyboard navigation, theme switching, retry, stop, regenerate, and copy-code actions.
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-16.3-black?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js 16" />
+  <img src="https://img.shields.io/badge/React-19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React 19" />
+  <img src="https://img.shields.io/badge/Prisma-7.9-2D3748?style=for-the-badge&logo=prisma&logoColor=white" alt="Prisma 7" />
+  <img src="https://img.shields.io/badge/PostgreSQL-Neon-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL on Neon" />
+  <img src="https://img.shields.io/badge/NextAuth-5.0-000?style=for-the-badge&logo=nextauth&logoColor=white" alt="NextAuth 5" />
+  <img src="https://img.shields.io/badge/TailwindCSS-4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind 4" />
+  <img src="https://img.shields.io/badge/Deployed-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel" />
+</p>
 
-## Tech Stack
+<br />
 
-- **Frontend:** Next.js 16 App Router, React 19, TypeScript, Tailwind CSS v4, Framer Motion
-- **AI transport:** OpenAI-compatible Chat Completions API with SSE streaming
-- **Default provider:** OpenRouter, with support for other OpenAI-compatible endpoints
-- **Agent tools:** Built-in tools plus optional MCP Streamable HTTP servers
-- **RAG:** Prisma-persisted document chunks with deterministic local vector embeddings and cosine retrieval
-- **Visualization:** Recharts
-- **Database:** SQLite through Prisma 7 and the LibSQL adapter
-- **Validation:** Zod at API, upload, media, tool, structured-output, storage, and persistence boundaries
-- **Testing:** Vitest unit/integration suites and Playwright end-to-end tests
+> _A real-world SaaS template that goes beyond the demo: production security headers (OWASP A05), streaming LLM responses, error-fallback model routing, encrypted user secrets, and a polished glassmorphic interface._
 
-## Quick Start
+</div>
+
+---
+
+## 📸 Visual Demo
+
+A short GIF speaks louder than a thousand words. To add one to your README:
+
+1. Record a screen capture of the live app (Chrome DevTools → Settings → "Open DevTools" → More Tools → "Recorder" works well, or use [`loom.com`](https://www.loom.com) / [`obsidian.gg`](https://obsidian.gg)).
+2. Export as a GIF or MP4. Aim for **under 10 MB** for fast loading on GitHub.
+3. Drop the file at `public/demo.gif` (or a CDN-hosted URL).
+4. Replace the placeholder below with:
+
+```markdown
+![AI Chatbot Demo](./public/demo.gif)
+```
+
+```markdown
+<!-- Replace this block with your demo -->
+<p align="center">
+  <em>🎬 Drop your demo GIF at <code>public/demo.gif</code> and replace this section.</em>
+</p>
+```
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+| --- | --- |
+| 🎨 **Glassmorphism UI** | Layered translucent surfaces (`backdrop-blur` + custom CSS variables `--glass-bg`, `--glass-border`) with a Cyber Emerald & Obsidian Gold design system — Inter for body, Space Grotesk for headings. |
+| 🔐 **Secure Authentication** | NextAuth v5 (Auth.js) with email/password (bcrypt-hashed) plus Google & GitHub OAuth. Account linking, password reset tokens, and email verification are first-class. |
+| 🗄️ **Serverless Postgres on Neon** | Branching, branching, forking data backed by Neon. The `@prisma/adapter-pg` driver adapter means a single connection pool per process — works identically on Vercel Serverless and local dev. |
+| 🤖 **Multi-Model AI Routing** | OpenRouter integration (200+ models behind one API key) with per-provider fallbacks for `404`/`402`/`429` errors. Vision inputs auto-route to vision-capable models. |
+| 🌿 **Branching Conversations** | Fork any assistant reply, share a prefix across multiple branches, and persist them across sessions (composite key `sessionId + branchId + id`). |
+| 📄 **Document RAG** | Upload PDFs / text, get them chunked + embedded (stored as serialized vectors), and retrieve them as context for the model. Citations are linked back inline. |
+| 🛠️ **Skills & Custom Agents** | A pluggable skill system (weather, web search, diagrams via Kroki, Google Calendar scheduling) plus user-created custom agents with their own system prompts and tool selections. |
+| 🎙️ **Voice & Speech** | Browser Web Speech API for in-app TTS, server-side `/api/transcribe` for browsers without it, and a `TTS_MODEL` adapter override for paid providers. |
+| 🔒 **Security Headers** | Production-only CSP, HSTS, `frame-ancestors 'none'`, and the rest of the OWASP A05 set — verified by the e2e suite against a real production build. |
+| 🧩 **Embeddable Widget** | Ship the chat in any external site via `app/embed-widget.js` (Streamable-HTTP iframe wrapper). |
+| 💳 **Stripe Billing** | Pro tier unlocks unlimited daily LLM usage; webhooks sync the plan on `User.plan`. |
+
+---
+
+## 🧱 Tech Stack
+
+### Core
+- **[Next.js 16.3](https://nextjs.org)** (App Router, RSC, Server Actions)
+- **[React 19](https://react.dev)** + TypeScript
+- **[Tailwind CSS 4](https://tailwindcss.com)** + custom CSS variables
+- **[Framer Motion 13](https://www.framer.com/motion/)** for transitions
+
+### Data Layer
+- **[PostgreSQL](https://www.postgresql.org)** hosted on **[Neon](https://neon.tech)**
+- **[Prisma 7.9](https://www.prisma.io)** with the `@prisma/adapter-pg` driver adapter
+- AES-256-GCM field encryption for sensitive `UserPreference` rows
+
+### AI & Integrations
+- **[OpenRouter](https://openrouter.ai)** as the primary LLM gateway
+- **Optional providers:** Google Gemini (direct OpenAI-compatible endpoint), OpenAI, Groq, Together, Ollama
+- **[NextAuth v5](https://authjs.dev)** for credentials + OAuth (Google, GitHub)
+- **[Stripe](https://stripe.com)** for subscriptions
+- **[Resend](https://resend.com)** or SendGrid for transactional email
+- Optional: PostHog analytics, Redis (Upstash, ElastiCache) for shared rate limits
+
+### Tooling
+- ESLint 9, Prettier 3, TypeScript 6
+- Vitest (unit + integration), Playwright (e2e, runs against the production build)
+- GitHub Actions CI
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js 20 or newer
-- npm
-- An OpenRouter API key or another OpenAI-compatible API key
+- **Node.js ≥ 20** (Node 22 LTS recommended — Next 16 + Prisma 7 require modern Node)
+- **npm** (or pnpm / yarn — `pnpm` is what the maintainer uses)
+- A **Neon** account (free tier is enough): <https://neon.tech>
+- An **OpenRouter** API key: <https://openrouter.ai/keys>
+- A **Google** and/or **GitHub** OAuth app (only if you want social sign-in)
 
-### Installation
+### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/mariam423/ai-chatbot.git
+cd ai-chatbot
+```
+
+### 2. Install dependencies
+
+```bash
 npm install
 ```
 
-The install hook generates the Prisma client. Create the local environment file and configure an LLM provider:
+The `postinstall` hook runs `prisma generate` automatically.
+
+### 3. Configure environment variables
 
 ```bash
 cp .env.example .env.local
 ```
 
-At minimum, set `OPENROUTER_API_KEY` in `.env.local`. Then apply the local database migrations:
+Open `.env.local` and fill in the required values. See the **[Environment Variables](#-environment-variables)** section below for the full reference.
+
+### 4. Apply the database schema to Neon
 
 ```bash
-npx prisma migrate dev
+npx prisma db push
 ```
 
-Start the development server:
+> Use `npx prisma migrate dev --name init` instead if you prefer a migration history over `db push`. The schema lives at `prisma/schema.prisma` and is dialect-agnostic for the application layer.
+
+### 5. Run the development server
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+The app is now live at **<http://localhost:3000>**.
 
-## Environment Setup
+You can sign up with email + password to start chatting, or click the Google / GitHub buttons (after you wire up OAuth credentials in step 3).
 
-### Required LLM configuration
+### Useful scripts
 
-OpenRouter is the default provider:
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Start the Next.js dev server with HMR |
+| `npm run build` | Production build (runs the same code path Vercel will use) |
+| `npm run start` | Serve the production build locally |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint + Prettier check + typecheck |
+| `npm run format` | Auto-format with Prettier |
+| `npm run test` | Vitest unit + integration tests |
+| `npm run test:e2e` | Playwright e2e (boots the prod build, exercises real CSP) |
+| `npm run check` | Typecheck + tests in one shot |
 
-```env
-OPENROUTER_API_KEY=sk-or-v1-your-key
-```
+---
 
-The route uses `https://openrouter.ai/api/v1` and the default model `stealth/ox-alpha` (a genuinely free, vision-capable OpenRouter route — 0-cost, verified live — so the app works even on a zero-credit key) when no overrides are provided. Image/video/audio attachments automatically route to a vision-capable model (`stealth/ox-alpha` on OpenRouter, which is free AND multimodal).
+## 🔐 Environment Variables
 
-For another OpenAI-compatible provider, use:
+> **Never commit `.env.local`.** It's already covered by `.gitignore`.
 
-```env
-OPENAI_API_KEY=your-api-key
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
-```
-
-Provider and model settings are server-side. API keys are never sent to the browser.
-
-### Database and authentication
-
-```env
-DATABASE_URL="file:./prisma/dev.db"
-AUTH_SECRET=your-secret
-AUTH_TRUST_HOST=true
-```
-
-Google and GitHub sign-in are enabled independently when each provider has
-both credentials configured. During local development, `DEV_OAUTH_MOCK=true`
-(the default outside production) enables both provider buttons with placeholder
-credentials so the login UI can be exercised before OAuth apps are registered.
-Those placeholders are not valid OAuth credentials and must be replaced for a
-real sign-in flow; production never enables them automatically. Auth.js accepts
-the standard `AUTH_*` names and the app's aliases below:
-
-```env
-GOOGLE_CLIENT_ID=your-google-oauth-client-id
-GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
-GITHUB_ID=your-github-oauth-client-id
-GITHUB_SECRET=your-github-oauth-client-secret
-```
-
-Register these callback URLs with the providers:
-
-- `https://your-domain.example/api/auth/callback/google`
-- `https://your-domain.example/api/auth/callback/github`
-
-The login page discovers configured providers from `/api/auth/providers`, so an
-unconfigured social provider is not shown. On first OAuth sign-in, the verified
-email is linked to an existing credentials user when possible; otherwise a new
-`FREE` account and provider `Account` row are created. The JWT carries the
-stable Prisma user id plus the current role/plan. Stripe upgrades synchronize
-that role to `PRO`, while cancellations restore `FREE`; `ADMIN` is reserved for
-operator-managed accounts.
-
-### Data-at-rest encryption (recommended in production)
-
-Sensitive `UserPreference` fields — the user's API key and the Google
-service-account private key used by `schedule_block` — are encrypted at rest
-with AES-256-GCM when an `ENCRYPTION_KEY` is configured:
-
-```env
-ENCRYPTION_KEY=your-long-random-secret
-```
-
-Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. Any string works (sha256-derived to a 256-bit key), but **set it once and keep it stable** — rotating it makes previously encrypted values undecryptable (they degrade to empty, not garbage). Without a key, sensitive fields are stored in plaintext with a one-time server warning (local dev). Legacy plaintext rows keep working after the key is introduced.
-
-For local development or automated browser tests without authentication, you can enable the explicit bypass mode:
-
-```env
-AUTH_DISABLED=true
-```
-
-Do not enable `AUTH_DISABLED` in production.
-
-### Transactional email (optional)
-
-The server can send welcome, Pro activation, and cancellation notifications through Resend or SendGrid without adding an SDK dependency:
-
-```env
-RESEND_API_KEY=re_...
-RESEND_EMAIL_FROM=notifications@yourdomain.com
-# Or use SendGrid:
-# SENDGRID_API_KEY=SG....
-# SENDGRID_EMAIL_FROM=notifications@yourdomain.com
-```
-
-Resend takes precedence when both keys are present. With no provider configured, local development prints a short preview to the server console; production skips delivery safely. Provider failures never fail signup or Stripe webhook processing.
-
-### Stripe subscription billing (optional)
-
-Set a Stripe secret, webhook signing secret, and recurring Pro price to enable
-checkout and the billing portal in Settings:
-
-```env
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_PRICE_PRO=price_...
-```
-
-`upgradeToPro` and `openBillingPortal` are authenticated server actions with
-per-IP flood limits and bounded provider errors. Stripe webhooks are accepted
-only after HMAC signature and timestamp verification, are rate-limited by IP,
-and handle `checkout.session.completed`,
-`customer.subscription.updated`, and `customer.subscription.deleted`.
-Subscription events resolve users by Checkout metadata/reference id first and
-fall back to the stored Stripe customer or subscription id. Do not expose
-Stripe secret values to client code.
-
-### Model selector overrides
-
-The chat header exposes stable model keys. Provider-specific model IDs can be overridden without changing client code:
-
-```env
-MODEL_QWEN_3_6=qwen/qwen3.5-397b-a17b
-MODEL_DEEPSEEK_V4_FLASH=deepseek/deepseek-v4-flash
-MODEL_KIMI_K3=moonshotai/kimi-k3
-MODEL_GPT_5_6=openai/gpt-5.6
-```
-
-You can also set `OPENROUTER_APP_NAME` to send an optional `X-Title` header to OpenRouter.
-
-If a chosen model fails with a 404 (dead/deprecated slug), 402 (low-credit pre-authorization), or 429 (model-scoped rate limit), the chat route automatically retries once with that provider's backup model instead of surfacing the error to the UI. The backups are `stealth/ox-alpha` (OpenRouter — free, so it rescues even a zero-credit key, where a paid backup would 402 identically; overridable via `FALLBACK_MODEL`), `gemini-2.5-flash-lite` (direct Gemini; `GEMINI_FALLBACK_MODEL`), and `gpt-4o-mini` (OpenAI; `OPENAI_FALLBACK_MODEL`). On OpenRouter the same model backs the "Provider default" selection. The retry never fires when the backup model is already the selection.
-
-### Optional MCP servers
-
-Configure one or more Streamable HTTP MCP servers with a JSON array. Keep credentials in server-only environment variables:
-
-```env
-MCP_SERVERS_JSON='[{"id":"weather","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer your-token"}}]'
-```
-
-The agent validates server configuration, discovers available tools, applies request timeouts, bounds tool responses, and validates each call against the discovered JSON Schema before invoking it.
-
-### Optional web search adapter
-
-The built-in web search tool uses a configurable server-side adapter. Without these variables, it returns a clearly marked mock result:
-
-```env
-WEB_SEARCH_URL=https://search-provider.example/api/search
-WEB_SEARCH_API_KEY=your-search-provider-key
-```
-
-### Context compression
-
-Conversation history is compressed before each upstream request. The system prompt, document context, memory, and visual instructions are reserved first:
-
-```env
-MAX_HISTORY_MESSAGES=20
-MAX_CONTEXT_TOKENS=8000
-```
-
-### Completion length (cost control)
-
-Every provider request carries an explicit `max_tokens` cap (see `lib/llm-config.ts` → `resolveMaxTokens`): the per-user **Max Completion Tokens** slider in Settings wins when set, otherwise the conservative default below applies. The cap is what keeps low-credit keys alive — OpenRouter pre-authorizes the request against `max_tokens` and rejects the key with `402 Insufficient Balance` when the pre-auth exceeds the remaining balance (verified live: omitting the field made OpenRouter pre-authorize ~16,000 tokens and 402 a key that could only afford ~2,500; an explicit tiny cap pre-authorizes cents and streams).
-
-```env
-MAX_OUTPUT_TOKENS=200
-```
-
-Defaults to 200. The per-user **Max Completion Tokens** slider overrides it when set.
-
-This cap is deliberately **not** sent to `/audio/transcriptions` — the OpenAI-compatible STT API has no `max_tokens` parameter (whisper is billed by audio duration, and strict providers reject unknown fields with a 400).
-
-### Voice assistant
-
-The composer microphone prefers the browser Web Speech API. When it is unavailable, the existing MediaRecorder path posts a bounded clip to `/api/transcribe`, which uses the configured OpenAI-compatible provider and `TRANSCRIBE_MODEL` (default `whisper-1`). Assistant bubbles include a speaker control that tries `/api/speak` with `TTS_MODEL`/`TTS_VOICE`, then falls back to the browser's local `SpeechSynthesis` API. TTS is best-effort and does not affect chat persistence or provider fallback behavior.
-
-### Embeddable custom assistants
-
-From the Dashboard custom-assistant panel, enter an optional allowed site origin and generate either an iframe or script snippet. The generated token is signed with `AUTH_SECRET`, scoped to the assistant owner and id, expires after 30 days, and is never a provider credential. Requests go through `/api/embed/chat`, which validates the token, origin, input bounds, and a per-assistant rate limit before streaming. `/embed/[agentId]` is intentionally minimal for iframe use; iframes should include `allow="microphone"` when voice input is desired. Keep generated snippets private and rotate `AUTH_SECRET` to revoke existing tokens.
-
-The settings page (**Model & Generation → Max Completion Tokens**) shows the effective default (`200 (server default)`) so users can see what applies before they override it with the slider.
-
-## Feature Walkthrough
-
-### 1. Chat, assistants, and model switching
-
-1. Start a new chat or select an existing session from the sidebar.
-2. Choose **Default assistant** or a private custom assistant in the header. Custom assistants apply their saved system prompt, baseline model, selected tools, and visual theme.
-3. Choose a model from the chat header.
-4. Enter a message and send it.
-5. Responses stream over SSE and render incrementally.
-6. Use Stop, Retry, Regenerate, Clear, or the model selector as needed.
-7. Use the export control in the chat toolbar to download Markdown, JSON, plain text, or print a PDF-ready transcript. Exports include the assistant identity, timestamps, and served-model provenance.
-
-The selected model key is persisted locally as `chat.model`; the actual provider model ID is resolved on the server.
-
-### 2. Autonomous agent tools
-
-Requests that imply external retrieval, calculation, plotting, transcription, or media inspection can activate the bounded agent workflow. The agent:
-
-1. Sends a non-streaming planning request with available function tools.
-2. Executes returned built-in or MCP tool calls sequentially.
-3. Adds each assistant and tool result to execution memory.
-4. Repeats for a maximum of four planning steps.
-5. Sends one final streamed request containing the tool results.
-
-Built-in tools include web search, safe arithmetic evaluation, chart-point normalization, image inspection, and audio mock adapters. Arbitrary Python or JavaScript execution is intentionally not enabled in the server process.
-
-### 3. MCP server integration
-
-When `MCP_SERVERS_JSON` is configured, the chat route discovers tools from the configured servers. MCP tools are converted to OpenAI-compatible function definitions and namespaced as:
-
-```text
-mcp__<server-id>__<tool-name>
-```
-
-MCP failures are returned to the agent as bounded tool errors so a single unavailable integration does not crash the entire chat request. Required fields, primitive types, and `additionalProperties: false` are enforced before remote invocation.
-
-### 4. Document RAG and citations
-
-1. Attach a PDF, TXT, Markdown, CSV, XLSX, or DOCX file from the message composer.
-2. The server validates the extension, MIME type, size, and session ownership.
-3. Text is extracted, chunked, embedded, and stored in Prisma.
-4. Relevant chunks are retrieved for subsequent questions in that session.
-5. The model receives bounded context with labels such as:
-
-   ```text
-   [Document: handbook.txt, section 2]
-   ```
-
-6. Click a citation badge in an assistant response to open the exact stored chunk and source metadata in the citation drawer.
-
-Raw uploaded files are not exposed to the model or returned to the client after processing.
-
-### 5. Video and media analysis
-
-The media control accepts:
-
-- MP4 and WebM video, sampled into a maximum of six resized JPEG keyframes in the browser
-- JPEG and PNG images
-- MP3 and WAV audio data URLs within configured size limits
-
-Only request-scoped frame or media data is sent to `/api/chat`; original video binaries are never persisted. Vision and audio behavior depends on the selected provider model. Audio uses the provider's `input_audio` content shape when supported.
-
-### 6. Structured responses and charts
-
-The route detects or accepts structured-output modes for:
-
-- Tables
-- Time-series charts
-- Code snippets
-- Document citations
-
-Responses are requested with an OpenAI-compatible strict JSON schema and validated with Zod. Valid chart envelopes render as interactive Recharts line charts. Valid code responses continue through the existing highlighted code blocks and copy action. Invalid structured output falls back to the raw response instead of discarding the answer.
-
-### 7. Cross-session memory
-
-For authenticated users, the application stores bounded memory records for:
-
-- Explicit preferences such as response style
-- Key entities such as the user's preferred name
-- Recent conversation summaries
-
-Relevant memory is injected into future system prompts as untrusted personalization context. Memory is not enabled for anonymous requests when authentication is active.
-
-## Project Structure
-
-```text
-app/
-  api/chat/route.ts          Validated streaming chat and agent orchestration
-  api/speak/route.ts         Server TTS adapter with browser fallback
-  api/embed/chat/route.ts    Token-authenticated embeddable assistant stream
-  api/citation/route.ts      Session-owned citation lookup
-  api/upload/route.ts        Document upload, extraction, and persistence
-  actions.ts                 Session, preference, and persistence actions
-components/
-  chat-app.tsx               Application shell and model selector
-  audio-input.tsx            Web Speech / MediaRecorder STT control
-  speech-button.tsx          Server TTS / SpeechSynthesis response control
-  embed-generator.tsx        Signed iframe/script snippet generator
-  embed-chat.tsx             Lightweight iframe chat surface
-  chat.tsx                   Chat state, streaming, uploads, and persistence
-  citation-drawer.tsx        Interactive RAG source drawer
-  markdown.tsx               Markdown, code, and citation rendering
-  media-upload.tsx           Video, image, and audio attachments
-  structured-response.tsx    Recharts and structured response rendering
-lib/
-  agent.ts                   Bounded multi-step agent loop
-  agent-tools.ts             Built-in tool definitions and dispatch
-  mcp-client.ts              MCP Streamable HTTP client
-  memory.ts                  Long-term memory persistence and formatting
-  rag.ts                     Local embeddings and document retrieval
-  structured-output.ts       Structured schemas and response rendering
-  video.ts                   Browser-side video frame extraction
-prisma/
-  schema.prisma              Database models
-  migrations/                Checked-in database migrations
-tests/                       Vitest unit and integration suites
-e2e/                         Playwright end-to-end suites
-```
-
-## Development Commands
+The minimum set you need to boot the app locally:
 
 ```bash
-npm run dev          # Start the Next.js development server
-npm run build        # Create the production build
-npm run start        # Serve the production build
-npm run typecheck    # Run strict TypeScript checking
-npm test             # Run the Vitest suite
-npm run test:watch   # Run Vitest in watch mode
-npm run test:e2e     # Run Playwright end-to-end tests
-npm run check        # Run typecheck and all Vitest tests
-npm run lint         # Run ESLint, Prettier check, and TypeScript checking
-npm run format       # Format the repository with Prettier
+# --- Database (Neon Postgres) ---
+# Get this from: https://console.neon.tech → your project → Connection Details
+# Use the *pooled* connection string for Vercel deployments.
+DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxxxx.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
+# --- LLM provider: OpenRouter (https://openrouter.ai/keys) ---
+OPENROUTER_API_KEY="sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# --- Authentication (NextAuth v5) ---
+# Generate with: openssl rand -base64 32
+AUTH_SECRET="your-long-random-secret-here"
 ```
 
-The end-to-end suite builds and starts the production app through Playwright. It does not require a live LLM key because chat requests are mocked in the tests.
+A complete `.env.example` is checked into the repo with every supported option. Highlights:
 
-## Deployment runbook
+| Variable | Required? | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | ✅ | Postgres connection string (Neon pooled URL in prod) |
+| `OPENROUTER_API_KEY` | ✅ | Primary LLM gateway key |
+| `AUTH_SECRET` | ✅ | NextAuth session signing |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` | ⬜ | Optional direct-provider fallbacks |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | ⬜ | Google OAuth |
+| `GITHUB_ID` / `GITHUB_SECRET` | ⬜ | GitHub OAuth |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_PRO` | ⬜ | Billing (Pro tier) |
+| `RESEND_API_KEY` / `RESEND_EMAIL_FROM` | ⬜ | Transactional email |
+| `ENCRYPTION_KEY` | ⬜ | AES-256-GCM key for encrypted user secrets (generate once, keep stable) |
+| `REDIS_URL` | ⬜ | Shared rate-limit store across serverless instances |
+| `NEXT_PUBLIC_APP_URL` | ⬜ | Public app URL (Stripe return URLs, OG tags) |
 
-For a production single-host deployment on AWS EC2, use the checked-in PM2,
-Nginx, deploy, and Certbot instructions in
-[`AWS_EC2_DEPLOYMENT.md`](./AWS_EC2_DEPLOYMENT.md). The public readiness check
-is `GET /api/health` and returns `503` when the database is unavailable.
+> **Tip:** When you copy `.env.example` to `.env.local`, only the required keys need real values to boot. Optional features (billing, OAuth, email) stay disabled silently until you add them.
 
-### Rate limiting
+---
 
-Every API route runs through a fixed-window rate limiter (60-second windows that slide forward on expiry). Exceeding a cap returns `429` with a `Retry-After` header (seconds until the window resets) and a JSON body:
+## ☁️ Deploying to Vercel
 
-```json
-{ "error": "Too many requests. Please slow down and try again shortly." }
+This project is optimized for a one-click deploy on Vercel.
+
+### 1. Import the repository
+
+1. Go to <https://vercel.com/new>.
+2. Select **`mariam423/ai-chatbot`** from the GitHub import list.
+3. Vercel will auto-detect it as a Next.js project — no framework preset changes needed.
+
+### 2. Add environment variables
+
+In **Project Settings → Environment Variables**, add every key from your `.env.local` (at minimum `DATABASE_URL`, `OPENROUTER_API_KEY`, `AUTH_SECRET`).
+
+> ⚠️ **Use Neon's _pooled_ connection string** (the one with `?pgbouncer=true&...`) for the `DATABASE_URL` environment variable. Serverless functions open many short-lived connections — the pooler keeps the count under Neon's limit.
+
+### 3. Deploy
+
+Click **Deploy**. The first build will:
+
+- Run `npm install` (the `postinstall` hook runs `prisma generate`)
+- Run `next build`
+- Generate a preview URL
+
+### 4. After the first deploy
+
+- Set `NEXT_PUBLIC_APP_URL` to your production URL (used by Stripe, OG tags, and email links).
+- Configure OAuth callback URLs in your Google/GitHub apps:
+  - Google: `https://YOUR-DOMAIN.vercel.app/api/auth/callback/google`
+  - GitHub: `https://YOUR-DOMAIN.vercel.app/api/auth/callback/github`
+- Configure the Stripe webhook to point at `https://YOUR-DOMAIN.vercel.app/api/webhooks/stripe` and copy the signing secret to `STRIPE_WEBHOOK_SECRET`.
+
+That's it — every push to `main` redeploys automatically.
+
+---
+
+## 🧪 Testing
+
+```bash
+npm run check         # typecheck + vitest
+npm run test:e2e      # full Playwright suite against the prod build
 ```
 
-| Endpoint               | Cap (per minute) | Scope                            | Override                |
-| ---------------------- | ---------------- | -------------------------------- | ----------------------- |
-| `/api/chat`            | 120              | signed-in user (per-IP fallback) | `CHAT_RATE_LIMIT`       |
-| `/api/transcribe`      | 60               | client IP                        | `TRANSCRIBE_RATE_LIMIT` |
-| `/api/upload`          | 60               | client IP                        | `UPLOAD_RATE_LIMIT`     |
-| `/api/citation`        | 120              | client IP                        | — (fixed)               |
-| `/api/skills`          | 600              | client IP                        | — (fixed)               |
-| `/api/webhooks/stripe` | 600              | client IP                        | — (fixed)               |
+The e2e suite boots `next start` and exercises the real production CSP, so it's the highest-confidence test surface. New features should ship with at least one vitest unit test for the data layer and one Playwright spec for the user-visible flow.
 
-The auth entry points (server actions / the credentials provider) are throttled too, through the same Redis-capable store, keyed by client IP:
+---
 
-| Auth surface                   | Cap (per minute)          | Scope                     |
-| ------------------------------ | ------------------------- | ------------------------- |
-| Registration (`registerUser`)  | 5                         | client IP                 |
-| Login (`credentials` provider) | 20 per IP, 10 per account | client IP + account email |
-| Password reset request         | 5                         | client IP                 |
-| Password reset completion      | 10                        | client IP                 |
+## 📁 Project Structure
 
-Login caps are checked **before** the bcrypt comparison; registration and reset throttles fire **before** any DB/bcrypt work. A throttled login returns the same generic failure as a wrong password (no leak of which limit tripped). These caps live in the `AUTH_GUARDS` map in `lib/security.ts` — the auth counterpart to the `ROUTE_GUARDS` table above.
-
-Operational notes:
-
-- An unset override variable falls back to the default in the table — the cap is never silently disabled. (The `defaultLimit` is part of the guard config; see `lib/security.ts`.)
-- `/api/chat` buckets by the signed-in user id when authenticated and falls back to the client IP for anonymous traffic (e.g. `AUTH_DISABLED` mode).
-- The webhook cap is a generous flood brake — signature verification (`STRIPE_WEBHOOK_SECRET`) is the real auth, and Stripe delivers bursts and retries with backoff.
-- The client IP is read from the first `X-Forwarded-For` entry, then `X-Real-IP`, then `unknown` — put a trusted proxy in front of the app if you need real client IPs. Server actions read the same headers via `next/headers` (`clientIpFromHeaders`), so the same trust model applies.
-
-### Redis-backed limits (multi-instance)
-
-By default the buckets live in memory per process: a restart resets them, and each instance of a load-balanced deployment counts separately (effectively multiplying the cap by the instance count). Point `REDIS_URL` at any Redis-compatible service to share one counter across all instances and survive restarts:
-
-```env
-REDIS_URL=rediss://default:password@host:6379
+```
+ai-chatbot/
+├── app/                    # Next.js App Router (pages, layouts, server actions, /api routes)
+│   ├── api/                # Route handlers: chat, upload, transcribe, speak, auth, stripe…
+│   ├── dashboard/          # Analytics & session insights
+│   ├── embed/              # Embeddable widget routes
+│   ├── login/              # Auth UI
+│   └── settings/           # User preferences, custom agents, API keys
+├── components/             # Client components (chat shell, sidebar, message bubble…)
+├── lib/                    # Shared server logic (db, llm-config, rag, billing, skills…)
+├── prisma/                 # schema.prisma (Postgres dialect)
+├── public/                 # Static assets (drop demo.gif here!)
+├── tests/                  # Vitest specs
+├── e2e/                    # Playwright specs
+└── scripts/                # Operational scripts
 ```
 
-- Accepts `redis://`, `rediss://` (TLS), or a Unix socket — Upstash, Redis Cloud, ElastiCache, Valkey/Dragonfly, or self-hosted all work.
-- Buckets are fixed-window counters incremented with a single atomic Lua script (`INCR` + `PEXPIRE` + `PTTL`), so concurrent instances never race on the same bucket.
-- The client is fail-fast (lazy connect, no reconnect queue, bounded per-command retries). If Redis is unreachable at runtime the limiter degrades to a shared in-memory fallback and logs `[rate-limit] …` warnings — requests are never blocked by the limiter's infrastructure, but limits become per-instance until Redis recovers.
-- Without `REDIS_URL` the limiter stays in per-process memory — right for local dev and single-instance deploys, but restarts reset buckets and scaling out splits the caps.
+---
 
-## Security and Runtime Boundaries
+## 🤝 Contributing
 
-- API credentials remain on the server.
-- Uploads, media data, document chunks, citations, MCP calls, and tool arguments are validated and bounded.
-- RAG retrieval and citation lookup are scoped to the current session and authenticated user.
-- Document content and long-term memory are treated as untrusted context, not instructions — the system prompt explicitly says to ignore instructions found inside them (prompt-injection boundary).
-- Arbitrary server-side code execution is not supported (the arithmetic tool is a whitelisted expression subset).
-- MCP credentials are read only from server-side environment configuration.
-- Video binaries and request-scoped image/audio attachments are not persisted.
+Issues and pull requests are welcome. For substantial changes, please open an issue first to discuss the design.
 
-### Security headers (production builds)
+1. Fork the repo and create a feature branch (`git checkout -b feat/my-feature`)
+2. Run `npm run check` and `npm run test:e2e` locally
+3. Open a PR with a clear description of the change and any new env vars
 
-The app ships `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` on every response, plus — on production builds — a Content-Security-Policy (`default-src 'self'`, `script-src 'self' 'unsafe-inline'` for the inline bootstrap scripts, `frame-ancestors 'none'`, `object-src 'none'`) and HSTS (`Strict-Transport-Security`, 1 year). The e2e suite runs the production build, so the CSP is exercised on every CI run. See `next.config.ts`.
+---
 
-### SSRF guard
+## 📄 License
 
-Outbound fetches to operator-configured endpoints — web search (`WEB_SEARCH_URL`), MCP servers (`MCP_SERVERS_JSON`), `diagram_render` (`DIAGRAM_RENDER_URL`), and `weather_lookup` (`WEATHER_API_URL`) — are validated by `lib/ssrf.ts` before connecting: http(s) only, and the destination must not be a private, loopback, link-local, or reserved IP (IPv4 + IPv6, including IPv4-mapped forms). Hostnames are resolved and rejected if **any** address is blocked (DNS-rebinding defense). The LLM base URL is deliberately exempt so self-hosted local models (e.g. Ollama) keep working.
+This project is licensed under the **MIT License** — see the [LICENSE](./LICENSE) file for details.
 
-### Data-at-rest encryption
+---
 
-`UserPreference.apiKey` and `UserPreference.googleServiceAccountKey` (a private key) are stored as AES-256-GCM envelopes (`v1:<iv>:<tag>:<ct>`) keyed by `ENCRYPTION_KEY` — see the environment setup above. Reads decrypt transparently; pre-encryption plaintext rows pass through; undecryptable rows (rotated key, tampering) degrade to empty rather than surfacing ciphertext, and log a structured `decryption_failed` event.
+<div align="center">
 
-### Security audit logging
+**Built with care by <a href="https://github.com/mariam423">@mariam423</a>.**
+If this project helped you, a ⭐ is the best way to say thanks.
 
-`lib/audit.ts` emits structured one-line JSON security events to the server console: CSRF blocks, unauthorized access, rate-limit trips, auth throttles, ownership violations, webhook signature failures (always, outside tests), and successful logins (opt-in via `SECURITY_AUDIT_LOG=true`). Events carry only ids, IPs, and status codes — never bodies, headers, or secrets.
-
-### Auth hardening
-
-- Registration and password-reset server actions are rate-limited per IP; login is capped per IP **and** per account (see the Rate limiting table above).
-- Registration returns a generic error when an email is already registered — signup can't be used to enumerate accounts. Login and reset failures are generic too; a throttled login is indistinguishable from a wrong password.
-- Passwords are bcrypt-hashed (cost 12, min 8 chars); reset tokens are stored SHA-256-hashed and single-use with a 1-hour TTL. NextAuth cookies use the protocol-derived secure defaults (`httpOnly`, `sameSite=lax`, `__Secure-`/`__Host-` prefixes over https).
-- CI runs `npm audit --audit-level=high` on every PR (the repo pins a patched `deepmerge-ts` via `overrides` to keep the audit clean on Prisma 7).
-
-## Documentation
-
-- [`codebase-overview.md`](./codebase-overview.md) - Architecture, data flow, boundaries, and tradeoffs
-- [`PRD.md`](./PRD.md) - Product requirements and traceability checklist
-- [`.env.example`](./.env.example) - Environment variable template
-
-## License
-
-No license has been specified for this repository yet.
+</div>
