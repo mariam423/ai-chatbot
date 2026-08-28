@@ -4,7 +4,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
+  
+
 }
 
 /// A registered user. Password is hashed with bcrypt. Optional fields
