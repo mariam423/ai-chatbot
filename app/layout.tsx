@@ -1,7 +1,8 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, Space_Grotesk } from 'next/font/google'
 import SessionProvider from '@/components/session-provider'
 import { JSON_LD } from '@/lib/seo'
+import { ServiceWorkerRegistrar } from './sw-init'
 import './globals.css'
 
 // Premium typography (Cyber Emerald & Obsidian Gold design system): Inter for
@@ -22,6 +23,7 @@ const spaceGrotesk = Space_Grotesk({
 const APP_NAME = process.env.APP_NAME ?? 'Chatbot'
 const APP_DESCRIPTION =
   'A streaming AI chatbot with branching conversations, skills, document RAG, and voice input — built with Next.js.'
+const THEME_COLOR = '#059669' // matches --accent in globals.css (Cyber Emerald)
 
 export const metadata: Metadata = {
   title: {
@@ -31,6 +33,22 @@ export const metadata: Metadata = {
   description: APP_DESCRIPTION,
   applicationName: APP_NAME,
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
+  // PWA manifest — served from /public. Next.js will resolve the icon URLs
+  // relative to metadataBase so they're absolute in the generated <head>.
+  manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [
+      { url: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512x512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' }],
+  },
+  appleWebApp: {
+    capable: true,
+    title: APP_NAME,
+    statusBarStyle: 'black-translucent',
+  },
+  formatDetection: { telephone: false },
   openGraph: {
     type: 'website',
     title: APP_NAME,
@@ -46,6 +64,16 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+}
+
+// `viewport` is exported separately from `metadata` in Next.js 13+.
+// Theme color and viewport-fit live here so iOS/Android pick them up.
+export const viewport: Viewport = {
+  themeColor: THEME_COLOR,
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
 }
 
 // Applied before first paint to avoid a light-mode flash for dark-mode users.
@@ -66,6 +94,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
         />
+        {/* PWA: explicit manifest link as a belt-and-braces fallback — the
+            `metadata.manifest` field above already injects this for App
+            Router pages, but some crawlers prefer a literal <link>. */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta name="theme-color" content={THEME_COLOR} />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content={APP_NAME} />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512x512.png" />
       </head>
       <body className={`${inter.variable} ${spaceGrotesk.variable}`}>
         <SessionProvider>
@@ -73,6 +113,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Skip to content
           </a>
           {children}
+          <ServiceWorkerRegistrar />
         </SessionProvider>
       </body>
     </html>

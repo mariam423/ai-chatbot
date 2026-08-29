@@ -21,22 +21,43 @@ import { sendWelcomeEmail } from '@/lib/email'
  */
 const useDevelopmentOAuthMocks =
   process.env.NODE_ENV !== 'production' && process.env.DEV_OAUTH_MOCK !== 'false'
+
+// `.trim()` guards against an env var that's set to a single space
+// ("AUTH_GITHUB_ID= ") which would otherwise pass the truthiness check and
+// be sent to GitHub as a "valid" client id, producing a confusing error
+// at runtime rather than a clean skip.
+const trim = (v: string | undefined) => v?.trim() || undefined
+
 const googleClientId =
-  process.env.GOOGLE_CLIENT_ID ||
-  process.env.AUTH_GOOGLE_ID ||
+  trim(process.env.GOOGLE_CLIENT_ID) ||
+  trim(process.env.AUTH_GOOGLE_ID) ||
   (useDevelopmentOAuthMocks ? 'mock-google-client-id' : undefined)
 const googleClientSecret =
-  process.env.GOOGLE_CLIENT_SECRET ||
-  process.env.AUTH_GOOGLE_SECRET ||
+  trim(process.env.GOOGLE_CLIENT_SECRET) ||
+  trim(process.env.AUTH_GOOGLE_SECRET) ||
   (useDevelopmentOAuthMocks ? 'mock-google-client-secret' : undefined)
 const githubClientId =
-  process.env.GITHUB_ID ||
-  process.env.AUTH_GITHUB_ID ||
+  trim(process.env.GITHUB_ID) ||
+  trim(process.env.AUTH_GITHUB_ID) ||
   (useDevelopmentOAuthMocks ? 'mock-github-client-id' : undefined)
 const githubClientSecret =
-  process.env.GITHUB_SECRET ||
-  process.env.AUTH_GITHUB_SECRET ||
+  trim(process.env.GITHUB_SECRET) ||
+  trim(process.env.AUTH_GITHUB_SECRET) ||
   (useDevelopmentOAuthMocks ? 'mock-github-client-secret' : undefined)
+
+// One-line boot diagnostic so missing env vars are visible in Vercel
+// function logs without having to reproduce locally.
+if (process.env.NODE_ENV === 'production') {
+  // eslint-disable-next-line no-console
+  console.info(
+    '[auth] oauth providers active:',
+    {
+      google: Boolean(googleClientId && googleClientSecret),
+      github: Boolean(githubClientId && githubClientSecret),
+    },
+    '— set AUTH_GOOGLE_ID/SECRET and AUTH_GITHUB_ID/SECRET to enable.',
+  )
+}
 
 type AppPlan = 'free' | 'pro'
 export type AppRole = UserRole
