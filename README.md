@@ -303,7 +303,7 @@ This project runs on **Next.js 16.3**, which deprecates the `middleware.ts` file
 ### What changed
 
 - `middleware.ts` at the project root was renamed to `proxy.ts` (using `git mv` to preserve history).
-- The exported function name and `config.matcher` are **unchanged** — only the file name changed.
+- The exported function was renamed from `middleware` to `proxy` to match Next.js 16's expected export name. (A default export also works.) The `config.matcher` is unchanged.
 - The proxy still reads the NextAuth session cookie directly (rather than calling `auth()`) to stay on the Edge runtime and avoid loading Prisma + bcryptjs, which are Node-only.
 
 ### Adding new proxy rules
