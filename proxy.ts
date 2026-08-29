@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 /**
- * Lightweight middleware that checks for a NextAuth session token.
+ * Lightweight proxy that checks for a NextAuth session token.
+ *
+ * In Next.js 16 the file convention moved from `middleware.ts` to `proxy.ts`
+ * and the exported function is now expected to be named `proxy` (or be the
+ * default export). The runtime is still the Edge runtime, so we keep the
+ * implementation Node-free.
  *
  * We intentionally avoid importing `auth()` from `lib/auth.ts` here because
  * that module pulls in Prisma + bcryptjs, which are Node-only and break the
@@ -13,7 +18,7 @@ import type { NextRequest } from 'next/server'
  * Set AUTH_DISABLED=true in .env to bypass auth entirely (useful for e2e tests
  * and local development before OAuth credentials are configured).
  */
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // Allow NextAuth API routes, login page, and static assets through.
