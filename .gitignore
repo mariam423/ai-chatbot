@@ -5,6 +5,10 @@ coverage/
 .DS_Store
 .env
 .env.local
+.env.local.save
+.env.local.save.*
+*.save
+*.save.*
 .next/
 test-results/
 playwright-report/
@@ -13,3 +17,5 @@ blob-report/
 *.db
 *.db-journal
 generated/
+# TypeScript incremental build info
+*.tsbuildinfo
