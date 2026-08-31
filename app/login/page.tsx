@@ -79,16 +79,21 @@ export default function LoginPage() {
         email,
         password,
         redirect: false,
+        callbackUrl: '/',
       })
 
-      if (result?.error) {
+      // `ok: true` is the authoritative success signal — `error` is undefined
+      // on success, but `url` may still be the login page (the page's own
+      // referer) which would make the previous `!result?.error` check pass
+      // while the server actually redirected nowhere useful. Trust `ok`.
+      if (result?.ok) {
+        navigate('/')
+        router.refresh()
+      } else {
         setError(
           mode === 'login' ? 'Invalid email or password.' : 'Account created. Please sign in.',
         )
         if (mode === 'signup') setMode('login')
-      } else {
-        navigate('/')
-        router.refresh()
       }
     } catch {
       setError('Something went wrong. Please try again.')
