@@ -669,8 +669,9 @@ export default function SettingsPage() {
           <p className="mb-3 text-xs text-[var(--text-tertiary)]">
             Provide your own provider API key to use your personal quota instead of the shared key.
             OpenRouter (<span className="font-mono">sk-or-…</span>), Gemini (
-            <span className="font-mono">AIza…</span>), and OpenAI (<span className="font-mono">sk-…</span>
-            ) keys are detected automatically. Stored encrypted at rest.
+            <span className="font-mono">AIza…</span>), and OpenAI (
+            <span className="font-mono">sk-…</span>) keys are detected automatically. Stored
+            encrypted at rest.
           </p>
           <div className="relative">
             <label htmlFor="settings-apikey" className="sr-only">

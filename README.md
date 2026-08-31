@@ -66,25 +66,25 @@ A full-featured AI chatbot built on the Next.js 16 App Router, with everything n
 
 ### Core framework
 
-| Layer | Technology | Notes |
-| --- | --- | --- |
-| Framework | **[Next.js 16.3](https://nextjs.org)** | App Router, RSC, Server Actions, and the new `proxy.ts` convention. |
-| UI | **[React 19](https://react.dev)** + **TypeScript 6** | Server components by default; client components marked with `'use client'`. |
-| Styling | **[Tailwind CSS 4](https://tailwindcss.com)** | Plus a token system of CSS variables (`--bg-deep`, `--accent`, `--gold`, …) for the Cyber Emerald & Obsidian Gold design system. |
-| Animation | **[Framer Motion 13](https://www.framer.com/motion/)** | Page transitions, ambient glows, micro-interactions. |
-| Fonts | **Inter** + **Space Grotesk** | Self-hosted at build time via `next/font`. |
+| Layer     | Technology                                             | Notes                                                                                                                            |
+| --------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Framework | **[Next.js 16.3](https://nextjs.org)**                 | App Router, RSC, Server Actions, and the new `proxy.ts` convention.                                                              |
+| UI        | **[React 19](https://react.dev)** + **TypeScript 6**   | Server components by default; client components marked with `'use client'`.                                                      |
+| Styling   | **[Tailwind CSS 4](https://tailwindcss.com)**          | Plus a token system of CSS variables (`--bg-deep`, `--accent`, `--gold`, …) for the Cyber Emerald & Obsidian Gold design system. |
+| Animation | **[Framer Motion 13](https://www.framer.com/motion/)** | Page transitions, ambient glows, micro-interactions.                                                                             |
+| Fonts     | **Inter** + **Space Grotesk**                          | Self-hosted at build time via `next/font`.                                                                                       |
 
 ### Data & backend
 
-| Layer | Technology | Notes |
-| --- | --- | --- |
-| Database | **[PostgreSQL on Neon](https://neon.tech)** | Branching, serverless-friendly. |
-| ORM | **[Prisma 7.9](https://www.prisma.io)** | With the `@prisma/adapter-pg` driver adapter for a single connection pool per process. |
-| Encryption | **AES-256-GCM** | Field-level encryption for sensitive `UserPreference` rows. |
-| Auth | **[Auth.js v5](https://authjs.dev)** | Credentials + Google + GitHub, JWT sessions. |
-| Payments | **[Stripe](https://stripe.com)** | Webhooks sync `User.plan`. |
-| Email | **[Resend](https://resend.com)** or SendGrid | Transactional email. |
-| Rate limiting | **Redis** (optional) | Shared store across serverless instances. |
+| Layer         | Technology                                   | Notes                                                                                  |
+| ------------- | -------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Database      | **[PostgreSQL on Neon](https://neon.tech)**  | Branching, serverless-friendly.                                                        |
+| ORM           | **[Prisma 7.9](https://www.prisma.io)**      | With the `@prisma/adapter-pg` driver adapter for a single connection pool per process. |
+| Encryption    | **AES-256-GCM**                              | Field-level encryption for sensitive `UserPreference` rows.                            |
+| Auth          | **[Auth.js v5](https://authjs.dev)**         | Credentials + Google + GitHub, JWT sessions.                                           |
+| Payments      | **[Stripe](https://stripe.com)**             | Webhooks sync `User.plan`.                                                             |
+| Email         | **[Resend](https://resend.com)** or SendGrid | Transactional email.                                                                   |
+| Rate limiting | **Redis** (optional)                         | Shared store across serverless instances.                                              |
 
 ### PWA
 
@@ -159,17 +159,17 @@ The app is now live at **<http://localhost:3000>**. Sign up with email + passwor
 
 ### Available scripts
 
-| Script | What it does |
-| --- | --- |
-| `npm run dev` | Start the Next.js dev server with HMR |
-| `npm run build` | Production build (same code path Vercel uses) |
-| `npm run start` | Serve the production build locally |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run lint` | ESLint + Prettier check + typecheck |
-| `npm run format` | Auto-format with Prettier |
-| `npm run test` | Vitest unit + integration tests |
-| `npm run test:e2e` | Playwright e2e (boots the prod build, exercises real CSP) |
-| `npm run check` | Typecheck + tests in one shot |
+| Script              | What it does                                              |
+| ------------------- | --------------------------------------------------------- |
+| `npm run dev`       | Start the Next.js dev server with HMR                     |
+| `npm run build`     | Production build (same code path Vercel uses)             |
+| `npm run start`     | Serve the production build locally                        |
+| `npm run typecheck` | `tsc --noEmit`                                            |
+| `npm run lint`      | ESLint + Prettier check + typecheck                       |
+| `npm run format`    | Auto-format with Prettier                                 |
+| `npm run test`      | Vitest unit + integration tests                           |
+| `npm run test:e2e`  | Playwright e2e (boots the prod build, exercises real CSP) |
+| `npm run check`     | Typecheck + tests in one shot                             |
 
 ### Deploying to Vercel
 
@@ -189,11 +189,11 @@ Authentication is handled by **Auth.js v5 (NextAuth)** and exposed through the A
 
 ### Supported providers
 
-| Provider | Mode | When it's active |
-| --- | --- | --- |
-| **Email + Password** | `Credentials` | Always available. Passwords are bcrypt-hashed and stored in the `users` table. |
-| **Google OAuth** | `Google` | Active when both `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` (or the `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` aliases) are set. |
-| **GitHub OAuth** | `GitHub` | Active when both `AUTH_GITHUB_ID` and `AUTH_GITHUB_SECRET` (or the `GITHUB_ID` / `GITHUB_SECRET` aliases) are set. |
+| Provider             | Mode          | When it's active                                                                                                                 |
+| -------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Email + Password** | `Credentials` | Always available. Passwords are bcrypt-hashed and stored in the `users` table.                                                   |
+| **Google OAuth**     | `Google`      | Active when both `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` (or the `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` aliases) are set. |
+| **GitHub OAuth**     | `GitHub`      | Active when both `AUTH_GITHUB_ID` and `AUTH_GITHUB_SECRET` (or the `GITHUB_ID` / `GITHUB_SECRET` aliases) are set.               |
 
 The login page ([`app/login/page.tsx`](./app/login/page.tsx)) fetches enabled providers from `/api/auth/providers` and renders only the buttons that are actually registered, so missing env vars simply hide the buttons — the app boots cleanly either way.
 
@@ -201,15 +201,15 @@ The login page ([`app/login/page.tsx`](./app/login/page.tsx)) fetches enabled pr
 
 ### Required environment variables
 
-| Variable | Required? | Purpose | How to obtain |
-| --- | --- | --- | --- |
-| `AUTH_SECRET` | ✅ | NextAuth session signing. | `npx auth secret` or `openssl rand -base64 32` |
-| `AUTH_TRUST_HOST` | recommended | `true` when behind a proxy / Vercel. | — |
-| `AUTH_GOOGLE_ID` _or_ `GOOGLE_CLIENT_ID` | ⬜ for the button | Google OAuth client ID. | [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials |
-| `AUTH_GOOGLE_SECRET` _or_ `GOOGLE_CLIENT_SECRET` | ⬜ for the button | Google OAuth client secret. | Same screen as above. |
-| `AUTH_GITHUB_ID` _or_ `GITHUB_ID` | ⬜ for the button | GitHub OAuth client ID. | [GitHub Developer Settings](https://github.com/settings/developers) → New OAuth App |
-| `AUTH_GITHUB_SECRET` _or_ `GITHUB_SECRET` | ⬜ for the button | GitHub OAuth client secret. | Same screen as above. |
-| `AUTH_DISABLED` | ⬜ | `true` bypasses all auth (e2e tests, local dev before OAuth is configured). | — |
+| Variable                                         | Required?         | Purpose                                                                     | How to obtain                                                                            |
+| ------------------------------------------------ | ----------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`                                    | ✅                | NextAuth session signing.                                                   | `npx auth secret` or `openssl rand -base64 32`                                           |
+| `AUTH_TRUST_HOST`                                | recommended       | `true` when behind a proxy / Vercel.                                        | —                                                                                        |
+| `AUTH_GOOGLE_ID` _or_ `GOOGLE_CLIENT_ID`         | ⬜ for the button | Google OAuth client ID.                                                     | [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials |
+| `AUTH_GOOGLE_SECRET` _or_ `GOOGLE_CLIENT_SECRET` | ⬜ for the button | Google OAuth client secret.                                                 | Same screen as above.                                                                    |
+| `AUTH_GITHUB_ID` _or_ `GITHUB_ID`                | ⬜ for the button | GitHub OAuth client ID.                                                     | [GitHub Developer Settings](https://github.com/settings/developers) → New OAuth App      |
+| `AUTH_GITHUB_SECRET` _or_ `GITHUB_SECRET`        | ⬜ for the button | GitHub OAuth client secret.                                                 | Same screen as above.                                                                    |
+| `AUTH_DISABLED`                                  | ⬜                | `true` bypasses all auth (e2e tests, local dev before OAuth is configured). | —                                                                                        |
 
 Both naming conventions are accepted — the lookup is `AUTH_<PROVIDER>_*` first, then the legacy alias.
 
@@ -244,26 +244,26 @@ The app is a fully installable Progressive Web App. Once installed, it launches 
 
 ### Installing the app
 
-| Platform | How to install |
-| --- | --- |
-| **Chrome / Edge (desktop)** | Click the **install icon** in the address bar, or open the browser menu and choose "Install AI Chatbot". |
-| **Android (Chrome)** | Tap the browser menu → "Install app" (or "Add to Home screen"). The app appears in the launcher with the emerald icon. |
-| **iOS / iPadOS (Safari)** | Tap **Share → Add to Home Screen**. iOS doesn't surface the install icon, but the manifest and Apple-specific meta tags make the home-screen experience work. |
-| **ChromeOS** | The install icon appears in the address bar; the app installs like a native app. |
+| Platform                    | How to install                                                                                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chrome / Edge (desktop)** | Click the **install icon** in the address bar, or open the browser menu and choose "Install AI Chatbot".                                                      |
+| **Android (Chrome)**        | Tap the browser menu → "Install app" (or "Add to Home screen"). The app appears in the launcher with the emerald icon.                                        |
+| **iOS / iPadOS (Safari)**   | Tap **Share → Add to Home Screen**. iOS doesn't surface the install icon, but the manifest and Apple-specific meta tags make the home-screen experience work. |
+| **ChromeOS**                | The install icon appears in the address bar; the app installs like a native app.                                                                              |
 
 PWA install requires **HTTPS** — Vercel provides this automatically. Localhost also works for testing in Chrome with DevTools overrides.
 
 ### What's included
 
-| File | Purpose |
-| --- | --- |
-| [`public/manifest.webmanifest`](./public/manifest.webmanifest) | PWA manifest — name, icons, theme color, display mode, shortcuts. |
-| [`public/sw/service-worker.js`](./public/sw/service-worker.js) | Vanilla service worker. Smart caching strategy (see below). |
-| [`app/offline/page.tsx`](./app/offline/page.tsx) | Static offline fallback page, served when no cached copy of a navigation exists. |
-| [`app/sw-init.tsx`](./app/sw-init.tsx) | Client component that registers the SW on `load` with a `serviceWorker in navigator` guard. Renders nothing. |
-| `public/icons/icon-192x192.png` | PWA icon (192×192, maskable). |
-| `public/icons/icon-512x512.png` | PWA icon (512×512, maskable). |
-| `app/layout.tsx` | Injects the manifest `<link>`, `theme-color` meta, Apple-specific tags, and the SW registrar. |
+| File                                                           | Purpose                                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`public/manifest.webmanifest`](./public/manifest.webmanifest) | PWA manifest — name, icons, theme color, display mode, shortcuts.                                            |
+| [`public/sw/service-worker.js`](./public/sw/service-worker.js) | Vanilla service worker. Smart caching strategy (see below).                                                  |
+| [`app/offline/page.tsx`](./app/offline/page.tsx)               | Static offline fallback page, served when no cached copy of a navigation exists.                             |
+| [`app/sw-init.tsx`](./app/sw-init.tsx)                         | Client component that registers the SW on `load` with a `serviceWorker in navigator` guard. Renders nothing. |
+| `public/icons/icon-192x192.png`                                | PWA icon (192×192, maskable).                                                                                |
+| `public/icons/icon-512x512.png`                                | PWA icon (512×512, maskable).                                                                                |
+| `app/layout.tsx`                                               | Injects the manifest `<link>`, `theme-color` meta, Apple-specific tags, and the SW registrar.                |
 
 ### Offline capabilities
 
@@ -275,13 +275,13 @@ The service worker caches the app shell on install, so the login page and any pr
 
 ### Caching strategy
 
-| Request type | Strategy | Why |
-| --- | --- | --- |
-| `/_next/static/*` | **Cache-first** | Hashed assets are immutable; network only on first visit. |
-| Navigations (`request.mode === 'navigate'`) | **Network-first**, fall back to cache, then `/offline` | Always show fresh content when online; degrade gracefully when not. |
-| Other same-origin GETs | **Stale-while-revalidate** | Show cached copy instantly, refresh from network in the background. |
-| `/api/*` | **Bypassed** | NextAuth, streaming LLM responses, and Stripe webhooks are never cached. |
-| Cross-origin requests | **Bypassed** | LLM image replies, analytics beacons, and other third-party traffic go straight to the network. |
+| Request type                                | Strategy                                               | Why                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `/_next/static/*`                           | **Cache-first**                                        | Hashed assets are immutable; network only on first visit.                                       |
+| Navigations (`request.mode === 'navigate'`) | **Network-first**, fall back to cache, then `/offline` | Always show fresh content when online; degrade gracefully when not.                             |
+| Other same-origin GETs                      | **Stale-while-revalidate**                             | Show cached copy instantly, refresh from network in the background.                             |
+| `/api/*`                                    | **Bypassed**                                           | NextAuth, streaming LLM responses, and Stripe webhooks are never cached.                        |
+| Cross-origin requests                       | **Bypassed**                                           | LLM image replies, analytics beacons, and other third-party traffic go straight to the network. |
 
 Cache names are versioned (`static-v1.0.0`, `runtime-v1.0.0`) and pruned on `activate`, so every deploy evicts stale caches automatically.
 

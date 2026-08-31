@@ -21,7 +21,10 @@ const PRECACHE_URLS = [OFFLINE_URL, '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => cache.addAll(PRECACHE_URLS)).then(() => self.skipWaiting())
+    caches
+      .open(STATIC_CACHE)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then(() => self.skipWaiting()),
   )
 })
 
@@ -30,10 +33,10 @@ self.addEventListener('activate', (event) => {
     (async () => {
       const keys = await caches.keys()
       await Promise.all(
-        keys.filter((k) => k !== STATIC_CACHE && k !== RUNTIME_CACHE).map((k) => caches.delete(k))
+        keys.filter((k) => k !== STATIC_CACHE && k !== RUNTIME_CACHE).map((k) => caches.delete(k)),
       )
       await self.clients.claim()
-    })()
+    })(),
   )
 })
 
@@ -66,9 +69,11 @@ self.addEventListener('fetch', (event) => {
           return fresh
         } catch {
           const cached = await caches.match(request)
-          return cached || (await caches.match(OFFLINE_URL)) || new Response('Offline', { status: 503 })
+          return (
+            cached || (await caches.match(OFFLINE_URL)) || new Response('Offline', { status: 503 })
+          )
         }
-      })()
+      })(),
     )
     return
   }
@@ -83,8 +88,8 @@ self.addEventListener('fetch', (event) => {
             const copy = response.clone()
             caches.open(STATIC_CACHE).then((cache) => cache.put(request, copy))
             return response
-          })
-      )
+          }),
+      ),
     )
     return
   }
@@ -102,7 +107,7 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => cached)
       return cached || network
-    })
+    }),
   )
 })
 

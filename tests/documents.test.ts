@@ -19,7 +19,8 @@ function storedZip(entries: Record<string, string>): Uint8Array {
   const central: Uint8Array[] = []
   let offset = 0
   const u16 = (value: number) => new Uint8Array([value & 255, (value >>> 8) & 255])
-  const u32 = (value: number) => new Uint8Array([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255])
+  const u32 = (value: number) =>
+    new Uint8Array([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255])
   const join = (...parts: Uint8Array[]) => {
     const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
     let cursor = 0
@@ -32,15 +33,57 @@ function storedZip(entries: Record<string, string>): Uint8Array {
   for (const [name, content] of Object.entries(entries)) {
     const nameBytes = encoder.encode(name)
     const data = encoder.encode(content)
-    const local = join(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0), u32(0), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), nameBytes, data)
+    const local = join(
+      u32(0x04034b50),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(0),
+      u32(data.length),
+      u32(data.length),
+      u16(nameBytes.length),
+      u16(0),
+      nameBytes,
+      data,
+    )
     chunks.push(local)
-    const directory = join(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0), u32(0), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), nameBytes)
+    const directory = join(
+      u32(0x02014b50),
+      u16(20),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(0),
+      u32(data.length),
+      u32(data.length),
+      u16(nameBytes.length),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(0),
+      u32(offset),
+      nameBytes,
+    )
     central.push(directory)
     offset += local.length
   }
   const centralBytes = join(...central)
   const body = join(...chunks, centralBytes)
-  const end = join(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length), u32(centralBytes.length), u32(body.length - centralBytes.length), u16(0))
+  const end = join(
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(central.length),
+    u16(central.length),
+    u32(centralBytes.length),
+    u32(body.length - centralBytes.length),
+    u16(0),
+  )
   return join(body, end)
 }
 
@@ -74,15 +117,29 @@ describe('document processing', () => {
 
   it('extracts DOCX paragraphs and XLSX cell values without external parsers', () => {
     const docx = storedZip({
-      'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>Hello DOCX</w:t></w:r></w:p><w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p></w:body></w:document>',
+      'word/document.xml':
+        '<w:document><w:body><w:p><w:r><w:t>Hello DOCX</w:t></w:r></w:p><w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p></w:body></w:document>',
     })
-    expect(extractDocumentText('brief.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', docx)).toContain('Hello DOCX\nSecond paragraph')
+    expect(
+      extractDocumentText(
+        'brief.docx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        docx,
+      ),
+    ).toContain('Hello DOCX\nSecond paragraph')
 
     const xlsx = storedZip({
       'xl/sharedStrings.xml': '<sst><si><t>Name</t></si><si><t>Ada</t></si></sst>',
-      'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row><c t="s"><v>0</v></c></row><row><c t="s"><v>1</v></c><c><v>42</v></c></row></sheetData></worksheet>',
+      'xl/worksheets/sheet1.xml':
+        '<worksheet><sheetData><row><c t="s"><v>0</v></c></row><row><c t="s"><v>1</v></c><c><v>42</v></c></row></sheetData></worksheet>',
     })
-    expect(extractDocumentText('table.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xlsx)).toContain('Name\nAda\t42')
+    expect(
+      extractDocumentText(
+        'table.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        xlsx,
+      ),
+    ).toContain('Name\nAda\t42')
   })
 
   it('creates bounded overlapping chunks', () => {

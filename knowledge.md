@@ -50,7 +50,7 @@ agent scaffold (`.agents/`) and tests that validate both.
   `MAX_CONTEXT_TOKENS`). Deterministic FIFO, no extra LLM calls.
 - `lib/storage.ts` — versioned localStorage thread persistence (loadThread/
   saveThread/clearThread/normalizeThread); payload is `{ version: 3, branches,
-  active }` with optional per-message `model`/`modelOverridden` (which model
+active }` with optional per-message `model`/`modelOverridden` (which model
   served a reply, and whether it was swapped) — validated with Zod at the
   storage boundary. Legacy unversioned data (a bare array) and v1/v2 payloads
   are migrated on first load and written back in the current format;

@@ -21,7 +21,7 @@ if (!connectionString) {
   throw new Error(
     'DATABASE_URL is not set. Configure it in .env.local (local dev) or ' +
       'in your hosting provider environment (Vercel → Project Settings ' +
-      '→ Environment Variables) before starting the app.'
+      '→ Environment Variables) before starting the app.',
   )
 }
 
