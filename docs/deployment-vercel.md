@@ -15,19 +15,19 @@ In **Project Settings → Environment Variables**, add the keys from your `.env.
 
 **Scope matters.** Vercel lets you set variables per environment (Production, Preview, Development). Make sure each variable is enabled for at least **Production** — Preview-only variables will be invisible to the production deployment.
 
-| Variable | Scope | Notes |
-| --- | --- | --- |
-| `DATABASE_URL` | Production, Preview | **Use the Neon's _pooled_ connection string** (the one with `?pgbouncer=true&...`). Serverless functions open many short-lived connections — the pooler keeps the count under Neon's limit. |
-| `OPENROUTER_API_KEY` | Production, Preview | Primary LLM gateway. |
-| `AUTH_SECRET` | Production, Preview | Generate with `npx auth secret` or `openssl rand -base64 32`. |
-| `AUTH_TRUST_HOST` | Production | `true` — required for NextAuth to trust the Vercel proxy headers. |
-| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Production | Both required to enable the Google button. |
-| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | Production | Both required to enable the GitHub button. |
-| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_PRO` | Production | Only if you're enabling the Pro tier. |
-| `RESEND_API_KEY` / `RESEND_EMAIL_FROM` | Production | Only if you're sending transactional email. |
-| `ENCRYPTION_KEY` | Production | **Generate once and keep stable** — rotating it invalidates existing ciphertext. |
-| `REDIS_URL` | Production, Preview | Optional. Without it, rate limits are per-process. |
-| `NEXT_PUBLIC_APP_URL` | Production | Set to your final production URL after the first deploy. |
+| Variable                                                           | Scope               | Notes                                                                                                                                                                                       |
+| ------------------------------------------------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                     | Production, Preview | **Use the Neon's _pooled_ connection string** (the one with `?pgbouncer=true&...`). Serverless functions open many short-lived connections — the pooler keeps the count under Neon's limit. |
+| `OPENROUTER_API_KEY`                                               | Production, Preview | Primary LLM gateway.                                                                                                                                                                        |
+| `AUTH_SECRET`                                                      | Production, Preview | Generate with `npx auth secret` or `openssl rand -base64 32`.                                                                                                                               |
+| `AUTH_TRUST_HOST`                                                  | Production          | `true` — required for NextAuth to trust the Vercel proxy headers.                                                                                                                           |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`                            | Production          | Both required to enable the Google button.                                                                                                                                                  |
+| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`                            | Production          | Both required to enable the GitHub button.                                                                                                                                                  |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_PRO` | Production          | Only if you're enabling the Pro tier.                                                                                                                                                       |
+| `RESEND_API_KEY` / `RESEND_EMAIL_FROM`                             | Production          | Only if you're sending transactional email.                                                                                                                                                 |
+| `ENCRYPTION_KEY`                                                   | Production          | **Generate once and keep stable** — rotating it invalidates existing ciphertext.                                                                                                            |
+| `REDIS_URL`                                                        | Production, Preview | Optional. Without it, rate limits are per-process.                                                                                                                                          |
+| `NEXT_PUBLIC_APP_URL`                                              | Production          | Set to your final production URL after the first deploy.                                                                                                                                    |
 
 ## 3. Redeploy
 
@@ -43,10 +43,10 @@ Set `NEXT_PUBLIC_APP_URL` to your production URL (used by Stripe return URLs, OG
 
 Add the following callback URLs to your OAuth apps:
 
-| Provider | Callback URL |
-| --- | --- |
-| Google | `https://<your-domain>/api/auth/callback/google` |
-| GitHub | `https://<your-domain>/api/auth/callback/github` |
+| Provider | Callback URL                                     |
+| -------- | ------------------------------------------------ |
+| Google   | `https://<your-domain>/api/auth/callback/google` |
+| GitHub   | `https://<your-domain>/api/auth/callback/github` |
 
 For Preview deployments, also add the wildcard pattern or each preview URL (e.g. `https://ai-chatbot-git-feature-branch.vercel.app/api/auth/callback/google`).
 
@@ -89,10 +89,10 @@ Every push to `main` triggers a new production deployment. Pull requests get the
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-| --- | --- | --- |
-| Build fails on `prisma generate` | `DATABASE_URL` is missing or unreachable. | Confirm the variable is set for the **Production** scope and the connection string works from your local machine with `npx prisma db push`. |
-| OAuth buttons missing on the login page | The corresponding `AUTH_<PROVIDER>_*` (or legacy alias) variables are not set. | Check the Vercel function logs for the `[auth] oauth providers active: ...` line. |
-| OAuth callback returns 404 | The callback URL in the OAuth app doesn't match your deployment URL. | Update the callback URL in Google / GitHub to match exactly, including the scheme and path. |
-| "Application error: a server-side exception has occurred" on first load | A required env var is missing in the **Preview** scope but present in **Production**. | Check the function logs for the specific error and add the variable to the relevant scope. |
-| PWA install icon doesn't appear | The service worker failed to register. | Check DevTools → Application → Service Workers for an error message. The most common cause is serving the site over HTTP instead of HTTPS (Vercel always serves HTTPS, so this should not happen in production). |
+| Symptom                                                                 | Likely cause                                                                          | Fix                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Build fails on `prisma generate`                                        | `DATABASE_URL` is missing or unreachable.                                             | Confirm the variable is set for the **Production** scope and the connection string works from your local machine with `npx prisma db push`.                                                                      |
+| OAuth buttons missing on the login page                                 | The corresponding `AUTH_<PROVIDER>_*` (or legacy alias) variables are not set.        | Check the Vercel function logs for the `[auth] oauth providers active: ...` line.                                                                                                                                |
+| OAuth callback returns 404                                              | The callback URL in the OAuth app doesn't match your deployment URL.                  | Update the callback URL in Google / GitHub to match exactly, including the scheme and path.                                                                                                                      |
+| "Application error: a server-side exception has occurred" on first load | A required env var is missing in the **Preview** scope but present in **Production**. | Check the function logs for the specific error and add the variable to the relevant scope.                                                                                                                       |
+| PWA install icon doesn't appear                                         | The service worker failed to register.                                                | Check DevTools → Application → Service Workers for an error message. The most common cause is serving the site over HTTP instead of HTTPS (Vercel always serves HTTPS, so this should not happen in production). |

@@ -132,10 +132,7 @@ export async function POST(request: Request) {
         // Stripe can emit several inactive subscription.updated events while
         // a cancellation settles. Send the lifecycle notification once, on
         // the definitive deleted event, to avoid duplicate emails.
-        if (
-          updatedUser?.email &&
-          event.type === 'customer.subscription.deleted'
-        ) {
+        if (updatedUser?.email && event.type === 'customer.subscription.deleted') {
           void sendSubscriptionCancelledEmail(updatedUser.email)
         }
         break

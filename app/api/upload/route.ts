@@ -34,10 +34,15 @@ function isAllowedMime(
   if (extension === 'txt') return mime === '' || mime === 'text/plain'
   if (extension === 'md') return mime === '' || mime === 'text/markdown' || mime === 'text/plain'
   if (extension === 'xlsx') {
-    return mime === '' || mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    return (
+      mime === '' || mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
   }
   if (extension === 'docx') {
-    return mime === '' || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    return (
+      mime === '' ||
+      mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )
   }
   return (
     mime === '' ||
@@ -75,7 +80,8 @@ export async function POST(request: Request) {
     return errorResponse('The document exceeds the 20 MB limit.', 413)
 
   const extension = getDocumentExtension(file.name)
-  if (!extension) return errorResponse('Only PDF, TXT, MD, CSV, XLSX, and DOCX files are supported.')
+  if (!extension)
+    return errorResponse('Only PDF, TXT, MD, CSV, XLSX, and DOCX files are supported.')
   if (!isAllowedMime(extension, file.type)) {
     return errorResponse('The file type does not match its extension.')
   }

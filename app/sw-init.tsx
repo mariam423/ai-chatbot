@@ -17,12 +17,10 @@ export function ServiceWorkerRegistrar() {
 
     // Defer registration so the initial load isn't blocked.
     const onLoad = () => {
-      navigator.serviceWorker
-        .register('/sw/service-worker.js', { scope: '/' })
-        .catch((err) => {
-          // Non-fatal — log only. The app still works as a normal website.
-          console.warn('[pwa] service worker registration failed:', err)
-        })
+      navigator.serviceWorker.register('/sw/service-worker.js', { scope: '/' }).catch((err) => {
+        // Non-fatal — log only. The app still works as a normal website.
+        console.warn('[pwa] service worker registration failed:', err)
+      })
     }
 
     if (document.readyState === 'complete') {

@@ -15,7 +15,8 @@ interface FileUploadProps {
   disabled?: boolean
 }
 
-const ACCEPT = '.pdf,.txt,.md,.csv,.xlsx,.docx,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const ACCEPT =
+  '.pdf,.txt,.md,.csv,.xlsx,.docx,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 export default function FileUpload({
   sessionId,
