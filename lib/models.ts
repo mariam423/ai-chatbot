@@ -6,7 +6,13 @@ import type { LlmProvider } from '@/lib/llm-config'
  * image/video/audio content in a chat-completions request (used to auto-route
  * media payloads to a vision-capable model — see `resolveModel` and
  * `VISION_FALLBACK_MODELS`). Text-only options (and the provider default,
- * which resolves to the stable DeepSeek text model) are NOT vision-capable.
+ * which resolves to the stable free OpenRouter text model) are NOT
+ * vision-capable.
+ *
+ * Model slugs are pinned to the currently-live OpenRouter catalog (verified
+ * 2026-08-31 against `/api/v1/models` with the project's OPENROUTER_API_KEY).
+ * A model that 404s on this list will trigger the chat route's retry-with-
+ * fallback path — keeping the slugs accurate here avoids that round-trip.
  */
 export const MODEL_OPTIONS = [
   {
@@ -18,22 +24,30 @@ export const MODEL_OPTIONS = [
   },
   {
     key: 'qwen-3-6',
-    label: 'Qwen 3.6',
-    model: 'qwen/qwen3.5-397b-a17b',
+    label: 'Qwen 3.8 Flash',
+    // Verified live on OpenRouter (2026-08-31). Replaces the dead
+    // `qwen/qwen3.5-397b-a17b` slug, which now 404s. Paid route — the
+    // free-tier key 402s here, and the chat route's retry-with-fallback
+    // path hands the request to the free minimax/minimax-m3:free default.
+    model: 'qwen/qwen3.8-flash',
     envVar: 'MODEL_QWEN_3_6',
     vision: true,
   },
   {
     key: 'deepseek-v4-flash',
     label: 'DeepSeek V4 Flash',
-    model: 'deepseek/deepseek-v4-flash',
+    // Verified live on OpenRouter (2026-08-31). Replaces the dead
+    // `deepseek/deepseek-v4-flash` slug, which now 404s. This is the
+    // vision-capable revision of the same family. Paid route — same
+    // fallback behavior as the others when the key has no credit.
+    model: 'deepseek/deepseek-v4-flash-vision-exp',
     envVar: 'MODEL_DEEPSEEK_V4_FLASH',
-    vision: false,
+    vision: true,
   },
   {
     key: 'kimi-k3',
     label: 'Kimi K3',
-    // Verified OpenRouter catalog slug for Kimi K3. This is a paid model,
+    // Verified live on OpenRouter (2026-08-31). This is a paid model,
     // not a `:free` route, so 402/429/404 responses intentionally use the
     // provider fallback sequence in /api/chat.
     model: 'moonshotai/kimi-k3',
@@ -43,22 +57,24 @@ export const MODEL_OPTIONS = [
   {
     key: 'gpt-5-6',
     label: 'GPT-5.6',
-    model: 'openai/gpt-5.6',
+    // Verified live on OpenRouter (2026-08-31). Replaces the dead
+    // `openai/gpt-5.6` slug, which now 404s. `gpt-5.6-luna` is the
+    // currently-routable OpenAI 5.6 family member.
+    model: 'openai/gpt-5.6-luna',
     envVar: 'MODEL_GPT_5_6',
     vision: true,
   },
   {
     key: 'gemini-2-flash',
-    label: 'Gemini 2.5 Flash Lite',
-    // OpenRouter id — the cheapest live Gemini route (Gemini 2.0 was fully
-    // removed from OpenRouter's catalog; there is no free Gemini slug, so this
-    // is the stable non-preview flash-lite). The tiny explicit max_tokens cap
-    // (see lib/llm-config.ts) keeps its pre-authorization cost near zero, so it
-    // works even on low-credit keys. When the request routes via Google's
-    // direct OpenAI-compatible endpoint (`geminiModel` below, GEMINI_API_KEY),
-    // the plain model name is used.
-    model: 'google/gemini-2.5-flash-lite',
-    geminiModel: 'gemini-2.5-flash-lite',
+    label: 'Gemini 3.5 Flash Lite',
+    // Verified live on OpenRouter (2026-08-31). Replaces the dead
+    // `google/gemini-2.5-flash-lite` slug, which now 404s. The tiny
+    // explicit max_tokens cap (see lib/llm-config.ts) keeps its
+    // pre-authorization cost near zero, so it works even on low-credit keys.
+    // When the request routes via Google's direct OpenAI-compatible endpoint
+    // (`geminiModel` below, GEMINI_API_KEY), the plain model name is used.
+    model: 'google/gemini-3.5-flash-lite',
+    geminiModel: 'gemini-3.5-flash-lite',
     envVar: 'MODEL_GEMINI_2_FLASH',
     vision: true,
   },
@@ -77,13 +93,16 @@ export type ModelKey = z.infer<typeof ModelKeySchema>
  *   slug), 402 (low-credit pre-auth), or 429 (model-scoped rate limit), the
  *   route retries once with this id instead of failing the chat.
  *
- * `stealth/ox-alpha` is a genuinely free OpenRouter route (pricing 0/0) and
- * is vision-capable, so it doubles as the default chat model AND the vision
- * fallback on OpenRouter — the only class of model that streams on a
- * zero-credit key (paid models 402 against the pre-authorization even with
- * the tiny cap; verified live).
+ * Verified live (2026-08-31). The free-tier key in this project works with
+ * `:free` OpenRouter routes only — the previous `stealth/ox-alpha` default
+ * was retired and 404s, and the official `z-ai/glm-5.3-flash` default
+ * streams its reply into `delta.reasoning` (a reasoning-only model), which
+ * the app's content extractor never sees. `minimax/minimax-m3:free` is the
+ * stable free-tier OpenRouter route that streams `delta.content` and accepts
+ * image inputs, so it doubles as the default chat model AND the vision
+ * fallback on OpenRouter.
  */
-export const DEFAULT_OPENROUTER_FALLBACK_MODEL = 'stealth/ox-alpha'
+export const DEFAULT_OPENROUTER_FALLBACK_MODEL = 'minimax/minimax-m3:free'
 
 /**
  * Resolve the OpenRouter fallback model (provider default + error retry):
