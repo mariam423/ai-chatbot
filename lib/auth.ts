@@ -48,7 +48,6 @@ const githubClientSecret =
 // One-line boot diagnostic so missing env vars are visible in Vercel
 // function logs without having to reproduce locally.
 if (process.env.NODE_ENV === 'production') {
-  // eslint-disable-next-line no-console
   console.info(
     '[auth] oauth providers active:',
     {

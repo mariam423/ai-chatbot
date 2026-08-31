@@ -16,9 +16,9 @@ export default function OfflinePage() {
       }}
     >
       <div>
-        <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>You're offline</h1>
+        <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>You&apos;re offline</h1>
         <p style={{ opacity: 0.7 }}>
-          This page hasn't been cached yet. Reconnect to the internet and try again.
+          This page hasn&apos;t been cached yet. Reconnect to the internet and try again.
         </p>
       </div>
     </main>

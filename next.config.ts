@@ -48,6 +48,22 @@ const nextConfig: NextConfig = {
         headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
       },
       {
+        // Service worker is hosted under /sw/ so it sits out of Next.js's
+        // hashed asset pipeline. The max-scope default for a script at
+        // /sw/service-worker.js is /sw/ — we register it with scope '/', so
+        // we must send Service-Worker-Allowed: '/' to widen that. Without
+        // it the browser rejects registration on every page (logged as
+        // SecurityError in the console, breaking PWA install).
+        source: '/sw/:path*',
+        headers: [
+          { key: 'Service-Worker-Allowed', value: '/' },
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=0, must-revalidate',
+          },
+        ],
+      },
+      {
         source: '/((?!embed(?:/|$)).*)',
         headers: [
           { key: 'X-Frame-Options', value: 'DENY' },

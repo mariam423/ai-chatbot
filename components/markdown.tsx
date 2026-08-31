@@ -3,7 +3,7 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { CopyIcon, CheckIcon, CodeIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import type { Element } from 'hast'
 import rehypeHighlight from 'rehype-highlight'
@@ -125,7 +125,9 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
   // the reply starts. Recreating it remounts DiagramCard and destroys an open
   // portal viewer; the ref keeps citation actions on the current session.
   const sessionIdRef = useRef(sessionId)
-  sessionIdRef.current = sessionId
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+  }, [sessionId])
   const components = useMemo(
     () => ({
       pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
