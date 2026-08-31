@@ -62,7 +62,13 @@ export async function registerUser(input: {
     void sendWelcomeEmail(normalisedEmail, name).catch(() => undefined)
 
     return { ok: true }
-  } catch {
+  } catch (err) {
+    // Log internally so Vercel function logs surface the real Prisma error
+    // (duplicate key, FK violation, Neon reachability, etc.) — the user still
+    // sees a generic message so we never leak internal state through a UI
+    // error banner. This is the diagnostic path: tail the deployment logs
+    // and grep for "[registerUser]" when "Could not create the account" hits.
+    console.error('[registerUser] failed for', normalisedEmail, err)
     return { ok: false, error: 'Could not create account. Please try again.' }
   }
 }
