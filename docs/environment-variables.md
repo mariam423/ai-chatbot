@@ -14,14 +14,14 @@ Everything else is optional — features that depend on a missing variable stay 
 
 ## Quick reference
 
-| Variable              | Required?   | Purpose                                                                                                                            | How to obtain                                                   |
-| --------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `DATABASE_URL`        | ✅          | Postgres connection string. **Use the Neon's _pooled_ URL in production** (the one with `?pgbouncer=true&...`).                    | <https://console.neon.tech> → your project → Connection Details |
-| `OPENROUTER_API_KEY`  | ✅          | Primary LLM gateway key.                                                                                                           | <https://openrouter.ai/keys>                                    |
-| `AUTH_SECRET`         | ✅          | NextAuth session signing.                                                                                                          | `npx auth secret` or `openssl rand -base64 32`                  |
-| `AUTH_TRUST_HOST`     | recommended | `true` when behind a proxy / Vercel.                                                                                               | —                                                               |
-| `NEXT_PUBLIC_APP_URL` | recommended | Public app URL (Stripe return URLs, OG tags, email links).                                                                         | Your deployment URL                                             |
-| `ENCRYPTION_KEY`      | recommended | AES-256-GCM key for encrypted `UserPreference` rows. **Generate once, keep stable** — rotating it invalidates existing ciphertext. | `openssl rand -base64 32`                                       |
+| Variable              | Required?   | Purpose                                                                                                                                                                    | How to obtain                                                   |
+| --------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `DATABASE_URL`        | ✅          | Postgres connection string. **Use the Neon's _pooled_ URL in production** (the one with `?pgbouncer=true&...`).                                                            | <https://console.neon.tech> → your project → Connection Details |
+| `OPENROUTER_API_KEY`  | ✅          | Primary LLM gateway key.                                                                                                                                                   | <https://openrouter.ai/keys>                                    |
+| `AUTH_SECRET`         | ✅          | NextAuth session signing.                                                                                                                                                  | `npx auth secret` or `openssl rand -base64 32`                  |
+| `AUTH_TRUST_HOST`     | recommended | `true` when behind a proxy / Vercel. (The app now hardcodes `trustHost: true` in `lib/auth.ts`, so this is only needed if you also want to disable that behavior locally.) | —                                                               |
+| `NEXT_PUBLIC_APP_URL` | recommended | Public app URL (Stripe return URLs, OG tags, email links).                                                                                                                 | Your deployment URL                                             |
+| `ENCRYPTION_KEY`      | recommended | AES-256-GCM key for encrypted `UserPreference` rows. **Generate once, keep stable** — rotating it invalidates existing ciphertext.                                         | `openssl rand -base64 32`                                       |
 
 ## OAuth / Auth.js
 

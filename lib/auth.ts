@@ -188,6 +188,12 @@ async function persistOAuthIdentity(
  *   npx auth secret
  */
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  // Required for deployments behind a proxy (Vercel, Netlify, etc.). Without
+  // it, @auth/core can't derive the request protocol from x-forwarded-* headers
+  // and the secure session cookie isn't set with the right attributes —
+  // causing the cookie to be dropped on HTTPS, which then makes `proxy.ts`
+  // redirect signed-in users back to /login.
+  trustHost: true,
   providers: [
     ...socialProviders,
 
