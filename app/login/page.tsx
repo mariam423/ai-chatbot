@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { getProviders, signIn } from 'next-auth/react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useViewTransitionRouter } from '@/hooks/use-view-transition-router'
-import { registerUser } from '@/app/actions/auth'
+import { registerUser, signInWithCredentials } from '@/app/actions/auth'
 
 type Mode = 'login' | 'signup'
 
@@ -73,30 +73,42 @@ export default function LoginPage() {
           setLoading(false)
           return
         }
+        // After successful register, fall through to sign in.
       }
 
-      const result = await signIn('credentials', {
-        email,
-        password,
-        redirect: false,
-        callbackUrl: '/',
-      })
-
-      // `ok: true` is the authoritative success signal — `error` is undefined
-      // on success, but `url` may still be the login page (the page's own
-      // referer) which would make the previous `!result?.error` check pass
-      // while the server actually redirected nowhere useful. Trust `ok`.
-      if (result?.ok) {
-        navigate('/')
-        router.refresh()
+      // Hand off to the server action. It does the credentials signin and
+      // (on success) throws a NEXT_REDIRECT that the framework converts into
+      // a 302 + Set-Cookie in a single response. That avoids the "session
+      // cookie set on a separate request" race that lets the proxy redirect
+      // us back to /login before the browser has stored the cookie.
+      const formData = new FormData()
+      formData.set('email', email)
+      formData.set('password', password)
+      formData.set('callbackUrl', '/')
+      await signInWithCredentials(undefined, formData)
+      // If we got here without an error, navigate to home.
+      navigate('/')
+      router.refresh()
+    } catch (err) {
+      // Server-action error result comes back as a normal Error with the
+      // message field set; NextAuth-style NEXT_REDIRECT errors must be
+      // re-thrown so the framework can perform the redirect.
+      if (err && typeof err === 'object' && 'digest' in err) {
+        const digest = String((err as { digest?: string }).digest ?? '')
+        if (digest.startsWith('NEXT_REDIRECT')) throw err
+      }
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.'
+      // The server action returns { error: 'Invalid email or password.' }.
+      // When called as a plain function (not via useFormState), the throw
+      // surfaces the message we set.
+      if (message.includes('Invalid email or password')) {
+        setError(message)
       } else {
         setError(
           mode === 'login' ? 'Invalid email or password.' : 'Account created. Please sign in.',
         )
-        if (mode === 'signup') setMode('login')
       }
-    } catch {
-      setError('Something went wrong. Please try again.')
+      if (mode === 'signup') setMode('login')
     } finally {
       setLoading(false)
     }
