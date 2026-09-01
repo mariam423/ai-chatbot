@@ -55,10 +55,13 @@ jobs:
           echo "STRIPE_WEBHOOK_SECRET=whsec_e2e_testing" >> .env
       - name: Apply database migrations
         run: npx prisma migrate deploy
+      # Direct CLI install — `playwright-community/install-browsers@main` was
+      # the canonical action but the upstream repo is no longer resolvable
+      # (`Unable to resolve action playwright-community/install-browsers,
+      # repository not found`). The CLI below installs the same browsers
+      # AND their system deps, which is what the action used to do.
       - name: Install Playwright browsers
-        uses: playwright-community/install-browsers@main
-        with:
-          with-deps: true
+        run: npx playwright install --with-deps chromium
       - name: Run E2E suite (builds + starts the production app)
         run: npm run test:e2e
       - name: Upload Playwright report on failure

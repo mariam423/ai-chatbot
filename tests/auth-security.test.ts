@@ -1,10 +1,7 @@
-import { execSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { headers } from 'next/headers'
 import bcrypt from 'bcryptjs'
+import { makeInMemoryPrisma } from './_prisma-mock'
 
 // next/headers can't run outside a request scope — mock it so the auth server
 // actions can derive the client IP for their rate-limit buckets, and the test
@@ -13,31 +10,25 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(),
 }))
 
-// lib/db.ts reads DATABASE_URL at import time, so the temp DB must exist and
-// the env var be set BEFORE the actions module is (dynamically) imported.
-const dir = mkdtempSync(join(tmpdir(), 'chat-auth-'))
-const dbPath = join(dir, 'test.db')
+// `lib/auth` transitively imports `lib/db`, which would try to open a
+// real connection without a working `DATABASE_URL`. Use the in-memory
+// prisma stub — these tests don't assert on the persisted row, only
+// on the throttle response shape.
+const prismaFixture = makeInMemoryPrisma()
+vi.mock('../lib/db', () => ({ prisma: prismaFixture.prisma }))
 
 let auth: typeof import('../app/actions/auth')
 const headersMock = vi.mocked(headers)
 
-beforeAll(() => {
-  process.env.DATABASE_URL = `file:${dbPath}`
-  execSync('npx prisma db push --accept-data-loss', {
-    stdio: 'pipe',
-    env: process.env,
-  })
-})
-
 beforeEach(async () => {
+  prismaFixture.reset()
   auth = await import('../app/actions/auth')
   headersMock.mockReset()
   headersMock.mockResolvedValue(new Headers({ 'x-forwarded-for': '203.0.113.55' }))
 })
 
 afterAll(() => {
-  delete process.env.DATABASE_URL
-  rmSync(dir, { recursive: true, force: true })
+  // nothing to clean up — no temp DB was provisioned for this suite.
 })
 
 describe('auth server-action rate limits (per-IP)', () => {
