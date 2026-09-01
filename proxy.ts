@@ -1,24 +1,32 @@
+import NextAuth from 'next-auth'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 /**
- * Lightweight proxy that checks for a NextAuth session token.
+ * Edge-runtime proxy that gates every non-public route on a valid NextAuth
+ * session. In Next.js 16 the file convention moved from `middleware.ts` to
+ * `proxy.ts` and the exported function is now expected to be named `proxy`
+ * (or be the default export).
  *
- * In Next.js 16 the file convention moved from `middleware.ts` to `proxy.ts`
- * and the exported function is now expected to be named `proxy` (or be the
- * default export). The runtime is still the Edge runtime, so we keep the
- * implementation Node-free.
+ * We use a dedicated NextAuth instance here instead of importing from
+ * `lib/auth.ts` — that file pulls in Prisma + bcryptjs, which are Node-only
+ * and break the Edge runtime. NextAuth's own cookie reader handles the
+ * production `__Secure-` prefix and the development `next-auth.session-token`
+ * cookie transparently, so we don't have to duplicate the logic.
  *
- * We intentionally avoid importing `auth()` from `lib/auth.ts` here because
- * that module pulls in Prisma + bcryptjs, which are Node-only and break the
- * Edge runtime. Instead we read the JWT cookie directly — it's a standard
- * `next-auth.session-token` (or `__Secure-next-auth.session-token` in prod)
- * cookie whose presence means the user is signed in.
- *
- * Set AUTH_DISABLED=true in .env to bypass auth entirely (useful for e2e tests
- * and local development before OAuth credentials are configured).
+ * Set `AUTH_DISABLED=true` in .env to bypass auth entirely (useful for e2e
+ * tests and local development before OAuth credentials are configured).
  */
-export function proxy(req: NextRequest) {
+const { auth: edgeAuth } = NextAuth({
+  // Cookie name is derived from the request URL — same logic as `lib/auth.ts`
+  // but without Prisma/bcryptjs so it stays Edge-compatible.
+  secret: process.env.AUTH_SECRET,
+  trustHost: true,
+  session: { strategy: 'jwt' },
+  providers: [],
+})
+
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // Allow NextAuth API routes, login page, and static assets through.
@@ -41,13 +49,11 @@ export function proxy(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // Check for the NextAuth session cookie. In development the cookie name
-  // is `next-auth.session-token`; in production it is prefixed with `__Secure-`.
-  const token =
-    req.cookies.get('next-auth.session-token')?.value ??
-    req.cookies.get('__Secure-next-auth.session-token')?.value
-
-  if (!token) {
+  // `edgeAuth()` reads the JWT cookie and returns the decoded session, or
+  // null when the cookie is missing / invalid. NextAuth v5 handles the
+  // `__Secure-` prefix automatically based on the request protocol.
+  const session = await edgeAuth()
+  if (!session) {
     const loginUrl = new URL('/login', req.nextUrl.origin)
     loginUrl.searchParams.set('callbackUrl', pathname)
     return NextResponse.redirect(loginUrl)
