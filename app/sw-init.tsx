@@ -34,16 +34,24 @@ export function ServiceWorkerRegistrar() {
       })
     }
 
-    const onIdle =
-      'requestIdleCallback' in window
-        ? window.requestIdleCallback(register, { timeout: 5_000 })
-        : window.setTimeout(register, 1500)
+    let cancelIdle: (() => void) | null = null
+    // `requestIdleCallback` and `cancelIdleCallback` aren't in the lib.dom
+    // types for older TS targets, so we read them off `window` cast as
+    // `any`. The runtime check stays correct: `'requestIdleCallback' in
+    // window` returns false in Safari and any other browser missing the API.
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    if (typeof w.requestIdleCallback === 'function') {
+      const handle = w.requestIdleCallback(register, { timeout: 5_000 })
+      cancelIdle = () => w.cancelIdleCallback?.(handle)
+    } else {
+      const handle = window.setTimeout(register, 1500)
+      cancelIdle = () => window.clearTimeout(handle)
+    }
     return () => {
-      if ('requestIdleCallback' in window && typeof onIdle === 'number') {
-        window.cancelIdleCallback(onIdle)
-      } else {
-        window.clearTimeout(onIdle)
-      }
+      cancelIdle?.()
     }
   }, [])
 

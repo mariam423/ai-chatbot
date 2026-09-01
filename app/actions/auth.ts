@@ -184,3 +184,62 @@ export async function resetPassword(input: {
     return { ok: false, error: 'Could not reset password. Please try again.' }
   }
 }
+
+/**
+ * Server action: validate credentials and create a session, then redirect
+ * to the post-login destination. Implemented as a server action (rather
+ * than `signIn('credentials', { redirect: false })` on the client) so the
+ * `__Secure-authjs.session-token` cookie is set on the *first* response
+ * alongside the 302 to the destination — the browser can't drop the cookie
+ * between two round-trips, and the post-login navigation never sees a
+ * window where the proxy would 307 it back to /login.
+ *
+ * Returns a serializable error result instead of throwing so the client
+ * form can show the message inline; the success path always redirects.
+ */
+export async function signInWithCredentials(
+  _prevState: { error?: string } | undefined,
+  formData: FormData,
+): Promise<{ error?: string }> {
+  const email = String(formData.get('email') ?? '')
+    .toLowerCase()
+    .trim()
+  const password = String(formData.get('password') ?? '')
+  const callbackUrl = String(formData.get('callbackUrl') ?? '/')
+
+  if (!email || !password) {
+    return { error: 'Please enter your email and password.' }
+  }
+
+  // Validate inputs at the action boundary (the client form has its own
+  // checks, but server actions are public entry points).
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: 'Please enter a valid email address.' }
+  }
+  if (password.length < 8) {
+    return { error: 'Password must be at least 8 characters.' }
+  }
+
+  const { signIn } = await import('@/lib/auth')
+  try {
+    // `signIn` from NextAuth throws a `NEXT_REDIRECT` error on success —
+    // that is how the framework redirects. We let it propagate so the
+    // browser receives the 302 + Set-Cookie in a single response.
+    await signIn('credentials', {
+      email,
+      password,
+      redirect: true,
+      redirectTo: callbackUrl || '/',
+    })
+    // Unreachable: signIn either redirects or throws.
+    return {}
+  } catch (err) {
+    // NextAuth's `redirect` mechanism uses thrown errors with a specific
+    // digest. Re-throw those so the framework can handle them.
+    if (err && typeof err === 'object' && 'digest' in err) {
+      const digest = String((err as { digest?: string }).digest ?? '')
+      if (digest.startsWith('NEXT_REDIRECT')) throw err
+    }
+    return { error: 'Invalid email or password.' }
+  }
+}
