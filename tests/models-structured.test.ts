@@ -13,10 +13,10 @@ describe('model registry', () => {
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
     // Free-first: the OpenRouter default is the genuinely free
-    // `stealth/ox-alpha` (0-cost and vision-capable), which also streams on a
-    // zero-credit key — verified live against OpenRouter.
-    expect(resolveModel()).toBe('stealth/ox-alpha')
-    expect(resolveModel(undefined, 'gemini')).toBe('gemini-2.5-flash-lite')
+    // `minimax/minimax-m3:free` route (0-cost, vision-capable, streams
+    // `delta.content`) — verified live against OpenRouter 2026-08-31.
+    expect(resolveModel()).toBe('minimax/minimax-m3:free')
+    expect(resolveModel(undefined, 'gemini')).toBe('gemini-3.5-flash-lite')
     expect(resolveModel(undefined, 'openai')).toBe('gpt-4o-mini')
     expect(DEFAULT_MODEL_KEY).toBe('provider-default')
     vi.unstubAllEnvs()
@@ -27,16 +27,17 @@ describe('model registry', () => {
     vi.stubEnv('OPENAI_MODEL', undefined)
     vi.stubEnv('FALLBACK_MODEL', undefined)
     // Default is the free vision-capable route; the provider default uses it.
-    expect(getOpenRouterFallbackModel()).toBe('stealth/ox-alpha')
-    expect(resolveModel()).toBe('stealth/ox-alpha')
+    expect(getOpenRouterFallbackModel()).toBe('minimax/minimax-m3:free')
+    expect(resolveModel()).toBe('minimax/minimax-m3:free')
     // FALLBACK_MODEL env override flows through to both callers.
     vi.stubEnv('FALLBACK_MODEL', 'custom/backup')
     expect(getOpenRouterFallbackModel()).toBe('custom/backup')
     expect(resolveModel()).toBe('custom/backup')
-    // The vision fallback is independent — media on a text-only option still
-    // routes to the vision-capable model, not the override.
-    expect(resolveModel('deepseek-v4-flash', 'openrouter', { vision: true })).toBe(
-      'stealth/ox-alpha',
+    // The vision fallback is independent — media on the text-only default
+    // (provider-default has vision: false) still routes to the
+    // vision-capable model, not the FALLBACK_MODEL override.
+    expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
+      'minimax/minimax-m3:free',
     )
     vi.unstubAllEnvs()
   })
@@ -46,8 +47,8 @@ describe('model registry', () => {
     vi.stubEnv('GEMINI_FALLBACK_MODEL', undefined)
     vi.stubEnv('OPENAI_FALLBACK_MODEL', undefined)
     // Every provider has a backup id valid on its own endpoint.
-    expect(getProviderFallbackModel('openrouter')).toBe('stealth/ox-alpha')
-    expect(getProviderFallbackModel('gemini')).toBe('gemini-2.5-flash-lite')
+    expect(getProviderFallbackModel('openrouter')).toBe('minimax/minimax-m3:free')
+    expect(getProviderFallbackModel('gemini')).toBe('gemini-3.5-flash-lite')
     expect(getProviderFallbackModel('openai')).toBe('gpt-4o-mini')
     // Per-provider env overrides flow through.
     vi.stubEnv('FALLBACK_MODEL', 'custom/or-backup')
@@ -63,28 +64,34 @@ describe('model registry', () => {
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
     vi.stubEnv('MODEL_GEMINI_2_FLASH', '')
-    // Text-only selection (DeepSeek) + vision → provider vision fallback.
-    expect(resolveModel('deepseek-v4-flash', 'openrouter', { vision: true })).toBe(
-      'stealth/ox-alpha',
+    vi.stubEnv('MODEL_DEEPSEEK_V4_FLASH', undefined)
+    // Provider default is text-only (vision: false); media on it routes to
+    // the provider's vision fallback. The fallback is the free OpenRouter
+    // `:free` route (minimax/minimax-m3:free) which is vision-capable and
+    // also the chat-route error fallback.
+    expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
+      'minimax/minimax-m3:free',
     )
     // Provider default + vision → the free vision-capable default itself
-    // (stealth/ox-alpha is vision-capable, so the default satisfies media).
-    expect(resolveModel(undefined, 'openrouter', { vision: true })).toBe('stealth/ox-alpha')
-    expect(resolveModel(undefined, 'gemini', { vision: true })).toBe('gemini-2.5-flash-lite')
-    expect(resolveModel('deepseek-v4-flash', 'gemini', { vision: true })).toBe(
-      'gemini-2.5-flash-lite',
+    // (minimax/minimax-m3:free is vision-capable, so the default satisfies media).
+    expect(resolveModel(undefined, 'openrouter', { vision: true })).toBe('minimax/minimax-m3:free')
+    expect(resolveModel(undefined, 'gemini', { vision: true })).toBe('gemini-3.5-flash-lite')
+    expect(resolveModel('provider-default', 'gemini', { vision: true })).toBe(
+      'gemini-3.5-flash-lite',
     )
     // Vision-capable selections are kept, even with media present.
-    expect(resolveModel('gpt-5-6', 'openrouter', { vision: true })).toBe('openai/gpt-5.6')
+    expect(resolveModel('gpt-5-6', 'openrouter', { vision: true })).toBe('openai/gpt-5.6-luna')
     expect(resolveModel('gemini-2-flash', 'openrouter', { vision: true })).toBe(
-      'google/gemini-2.5-flash-lite',
+      'google/gemini-3.5-flash-lite',
     )
-    // No media → the text-only selection stands.
-    expect(resolveModel('deepseek-v4-flash', 'openrouter')).toBe('deepseek/deepseek-v4-flash')
-    // The vision swap beats a MODEL_* env override on a text-only option.
+    // No media → a vision-capable selection stands as-is.
+    expect(resolveModel('deepseek-v4-flash', 'openrouter')).toBe(
+      'deepseek/deepseek-v4-flash-vision-exp',
+    )
+    // The vision swap beats a MODEL_* env override on the text-only default.
     vi.stubEnv('MODEL_DEEPSEEK_V4_FLASH', 'custom/deepseek')
-    expect(resolveModel('deepseek-v4-flash', 'openrouter', { vision: true })).toBe(
-      'stealth/ox-alpha',
+    expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
+      'minimax/minimax-m3:free',
     )
     vi.unstubAllEnvs()
   })
@@ -111,13 +118,13 @@ describe('model registry', () => {
     vi.stubEnv('MODEL_GEMINI_2_FLASH', '')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
-    // Via OpenRouter the live, cheapest Gemini slug is sent (Gemini 2.0 is
-    // gone from the catalog — verified live).
-    expect(resolveModel('gemini-2-flash', 'openrouter')).toBe('google/gemini-2.5-flash-lite')
+    // Via OpenRouter the live, cheapest Gemini slug is sent (Gemini 2.5 is
+    // gone from the catalog — verified live 2026-08-31).
+    expect(resolveModel('gemini-2-flash', 'openrouter')).toBe('google/gemini-3.5-flash-lite')
     // Via the direct Google OpenAI-compatible endpoint the plain name is sent.
-    expect(resolveModel('gemini-2-flash', 'gemini')).toBe('gemini-2.5-flash-lite')
+    expect(resolveModel('gemini-2-flash', 'gemini')).toBe('gemini-3.5-flash-lite')
     // The provider default falls back to a Gemini model on the direct endpoint.
-    expect(resolveModel(undefined, 'gemini')).toBe('gemini-2.5-flash-lite')
+    expect(resolveModel(undefined, 'gemini')).toBe('gemini-3.5-flash-lite')
     // envVar override still wins for the Gemini option.
     vi.stubEnv('MODEL_GEMINI_2_FLASH', 'custom/gemini')
     expect(resolveModel('gemini-2-flash', 'gemini')).toBe('custom/gemini')

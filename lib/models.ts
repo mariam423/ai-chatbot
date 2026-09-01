@@ -119,13 +119,14 @@ export function getOpenRouterFallbackModel(): string {
  * Stable error-fallback model per provider — what the chat route retries
  * with when the chosen model returns 404 (dead/deprecated slug), 402
  * (low-credit pre-auth), or 429 (model-scoped rate limit). Each id is valid
- * on its own provider's endpoint: the free OpenRouter route (FALLBACK_MODEL
- * override), the plain Gemini name on the direct endpoint, and a cheap OpenAI
+ * on its own provider's endpoint: the free OpenRouter `:free` route
+ * (FALLBACK_MODEL override), the plain Gemini name on the direct endpoint
+ * (`gemini-3.5-flash-lite` — verified live 2026-08-31), and a cheap OpenAI
  * model elsewhere.
  */
 export const PROVIDER_FALLBACK_MODELS: Record<LlmProvider, string> = {
   openrouter: DEFAULT_OPENROUTER_FALLBACK_MODEL,
-  gemini: 'gemini-2.5-flash-lite',
+  gemini: 'gemini-3.5-flash-lite',
   openai: 'gpt-4o-mini',
 }
 
@@ -146,12 +147,16 @@ export function getProviderFallbackModel(provider: LlmProvider): string {
  * Stable vision-capable fallback model per provider, used when the request
  * carries image/video/audio media and the selected option is not flagged
  * vision-capable (text-only options and the provider default). These ids are
- * curated stable routes — free on OpenRouter (`stealth/ox-alpha`), the plain
- * Gemini name on the direct endpoint, and a cheap OpenAI model elsewhere.
+ * curated stable routes — the free OpenRouter `:free` route (also the
+ * chat-route error fallback — `minimax/minimax-m3:free` is the verified-live
+ * `delta.content` streamer, vision-capable, on the project's free-tier key),
+ * the plain Gemini name on the direct endpoint (`gemini-3.5-flash-lite`,
+ * verified live 2026-08-31 — the older `gemini-2.5-flash-lite` 404s), and
+ * a cheap OpenAI model elsewhere.
  */
 export const VISION_FALLBACK_MODELS: Record<LlmProvider, string> = {
-  openrouter: 'stealth/ox-alpha',
-  gemini: 'gemini-2.5-flash-lite',
+  openrouter: DEFAULT_OPENROUTER_FALLBACK_MODEL,
+  gemini: 'gemini-3.5-flash-lite',
   openai: 'gpt-4o-mini',
 }
 
@@ -195,13 +200,13 @@ export function resolveModel(
     providerModel ??
     process.env.MODEL_NAME ??
     process.env.OPENAI_MODEL ??
-    // Stable primary defaults — the OpenRouter default is the free, live
-    // `stealth/ox-alpha` (zero-cost and vision-capable, so the provider
-    // default also satisfies media requests; FALLBACK_MODEL overrides it);
-    // media requests auto-switch to the vision fallback above when a
-    // text-only option is selected.
+    // Stable primary defaults — the OpenRouter default is the verified-live
+    // free `:free` route `minimax/minimax-m3:free` (zero-cost, vision-capable,
+    // and `delta.content` streams, so the provider default also satisfies
+    // media requests; FALLBACK_MODEL overrides it). Media requests on a
+    // text-only option auto-switch to the vision fallback above.
     (provider === 'gemini'
-      ? 'gemini-2.5-flash-lite'
+      ? 'gemini-3.5-flash-lite'
       : provider === 'openrouter'
         ? getOpenRouterFallbackModel()
         : 'gpt-4o-mini')

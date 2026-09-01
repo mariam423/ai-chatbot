@@ -51,7 +51,7 @@ describe('chat model and structured-output options', () => {
         json_schema: { name: string; strict: boolean; schema: { required: string[] } }
       }
     }
-    expect(payload.model).toBe('deepseek/deepseek-v4-flash')
+    expect(payload.model).toBe('deepseek/deepseek-v4-flash-vision-exp')
     expect(payload.response_format).toMatchObject({
       type: 'json_schema',
       json_schema: {

@@ -1,11 +1,8 @@
-import { execSync } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage } from '../lib/types'
 import { getCurrentUserId } from '../lib/auth-context'
+import { makeInMemoryPrisma } from './_prisma-mock'
 
 // Mock auth context — next-auth can't run in vitest (no next/server).
 // Server actions fall through to anonymous access (userId=null) in tests.
@@ -13,25 +10,15 @@ vi.mock('../lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
 }))
 
-// lib/db.ts reads DATABASE_URL at import time, so the temp DB must be set up
-// and the env var set BEFORE the actions module is (dynamically) imported.
-const dir = mkdtempSync(join(tmpdir(), 'chat-actions-'))
-const dbPath = join(dir, 'test.db')
+// In-memory prisma stand-in. The real Prisma client would need a live
+// Postgres connection (or a `file:` sqlite that Prisma 7's AI guard
+// refuses to provision for us). The actions exercised here touch five
+// tables with CRUD; the in-memory store in tests/_prisma-mock.ts covers
+// the operations they use, so we never open a real connection.
+const prismaFixture = makeInMemoryPrisma()
+vi.mock('../lib/db', () => ({ prisma: prismaFixture.prisma }))
 
 let actions: typeof import('../app/actions')
-
-beforeAll(() => {
-  process.env.DATABASE_URL = `file:${dbPath}`
-  execSync('npx prisma db push --accept-data-loss', {
-    stdio: 'pipe',
-    env: process.env,
-  })
-})
-
-afterAll(() => {
-  delete process.env.DATABASE_URL
-  rmSync(dir, { recursive: true, force: true })
-})
 
 // Message ids are globally unique (client-generated UUIDs in production), so
 // each session's thread uses distinct ids — reusing ids across sessions would
@@ -218,14 +205,14 @@ describe('conversation persistence server actions', () => {
         id: 'sess-model-2',
         role: 'assistant',
         content: 'Served reply',
-        model: 'stealth/ox-alpha',
+        model: 'minimax/minimax-m3:free',
         modelOverridden: true,
       },
       {
         id: 'sess-model-3',
         role: 'assistant',
         content: 'Neutral reply',
-        model: 'google/gemini-2.5-flash-lite',
+        model: 'google/gemini-3.5-flash-lite',
         modelOverridden: false,
       },
     ]
@@ -509,11 +496,11 @@ describe('conversation persistence server actions', () => {
 
     it("reports the last assistant reply's model as lastModel", async () => {
       const threaded = threadFor('sess-model')
-      threaded[1] = { ...threaded[1]!, model: 'deepseek/deepseek-v4-flash' }
+      threaded[1] = { ...threaded[1]!, model: 'deepseek/deepseek-v4-flash-vision-exp' }
       await actions.saveChatMessages({ sessionId: 'sess-model', branches: [threaded] })
       // A later assistant reply with a different model wins (last reply).
       const withSecond = threadFor('sess-model-2')
-      withSecond[1] = { ...withSecond[1]!, model: 'stealth/ox-alpha' }
+      withSecond[1] = { ...withSecond[1]!, model: 'minimax/minimax-m3:free' }
       withSecond.push({
         id: 'sess-model-2-4',
         role: 'assistant',
@@ -529,7 +516,7 @@ describe('conversation persistence server actions', () => {
         .sessions
       const byId = Object.fromEntries(sessions.map((s) => [s.id, s]))
       expect(byId['sess-model-2']?.lastModel).toBe('gpt-4o-mini')
-      expect(byId['sess-model']?.lastModel).toBe('deepseek/deepseek-v4-flash')
+      expect(byId['sess-model']?.lastModel).toBe('deepseek/deepseek-v4-flash-vision-exp')
     })
 
     it('excludes empty sessions (created but never used) from the list', async () => {

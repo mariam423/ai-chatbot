@@ -137,7 +137,7 @@ describe('POST /api/chat', () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('OPENROUTER_APP_NAME', 'Chatbot')
     // The dev .env.local may export MODEL_NAME — pin it so the resolved
-    // default (stealth/ox-alpha) is asserted, not the override.
+    // default (minimax/minimax-m3:free) is asserted, not the override.
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
     const sse = new ReadableStream<Uint8Array>({
@@ -156,15 +156,15 @@ describe('POST /api/chat', () => {
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
     // Free-first: the provider default is the genuinely free, live
-    // `stealth/ox-alpha` route (verified against the catalog + live API).
-    expect(payload.model).toBe('stealth/ox-alpha')
+    // `minimax/minimax-m3:free` route (verified against the catalog + live API).
+    expect(payload.model).toBe('minimax/minimax-m3:free')
     expect(init!.headers).toMatchObject({
       Authorization: 'Bearer sk-or-v1-test',
       'X-Title': 'Chatbot',
     })
     // The streaming response reports the served model back to the client —
     // and, with no swap in play, the override flag stays false.
-    expect(res.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
     expect(res.headers.get('x-served-model-overridden')).toBe('false')
   })
 
@@ -200,8 +200,8 @@ describe('POST /api/chat', () => {
       messages: Array<{ role: string; content: unknown }>
     }
     // The text-only provider default is swapped for the free vision fallback
-    // (stealth/ox-alpha is 0-cost AND vision-capable — verified live).
-    expect(payload.model).toBe('stealth/ox-alpha')
+    // (minimax/minimax-m3:free is 0-cost AND vision-capable — verified live).
+    expect(payload.model).toBe('minimax/minimax-m3:free')
     // The image rides along as a multimodal part on the user message.
     expect(payload.messages.at(-1)).toEqual({
       role: 'user',
@@ -228,19 +228,22 @@ describe('POST /api/chat', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'deepseek-v4-flash',
+          // The text-only `provider-default` selection is swapped to the
+          // vision fallback when media is attached. (DeepSeek is now
+          // vision-capable, so it no longer exercises the swap path.)
+          model: 'provider-default',
           messages: [{ role: 'user', content: 'Describe the photo.' }],
           imageDataUrl: 'data:image/jpeg;base64,AAAA',
         }),
       }),
     )
     expect(res.status).toBe(200)
-    // The text-only DeepSeek selection was swapped to the vision fallback —
+    // The text-only default selection was swapped to the vision fallback —
     // the served model differs from the selection, but this is routing, not
     // a failure: the override flag stays false so the caption stays neutral.
     const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
-    expect(payload.model).toBe('stealth/ox-alpha')
-    expect(res.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+    expect(payload.model).toBe('minimax/minimax-m3:free')
+    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
     expect(res.headers.get('x-served-model-overridden')).toBe('false')
   })
 
@@ -269,7 +272,7 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(200)
 
     const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
-    expect(payload.model).toBe('openai/gpt-5.6')
+    expect(payload.model).toBe('openai/gpt-5.6-luna')
   })
 
   it('retries with the free fallback when the selected OpenRouter model 404s', async () => {
@@ -309,13 +312,13 @@ describe('POST /api/chat', () => {
       max_tokens?: number
     }
     expect(first.model).toBe('google/gemini-2.0-flash-lite-001')
-    expect(second.model).toBe('stealth/ox-alpha')
+    expect(second.model).toBe('minimax/minimax-m3:free')
     // The retry keeps the explicit conservative cap (pre-auth stays tiny).
     expect(second.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
     // The response reports the model that actually served the reply — the
     // fallback, not the dead selection — and flags the swap for the UI's
     // amber warning caption.
-    expect(res.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
     expect(res.headers.get('x-served-model-overridden')).toBe('true')
   })
 
@@ -402,8 +405,8 @@ describe('POST /api/chat', () => {
       const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
       const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
       expect(first.model).toBe('moonshotai/kimi-k3')
-      expect(second.model).toBe('stealth/ox-alpha')
-      expect(response.headers.get('x-served-model')).toBe('stealth/ox-alpha')
+      expect(second.model).toBe('minimax/minimax-m3:free')
+      expect(response.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
       expect(response.headers.get('x-served-model-overridden')).toBe('true')
     }
   })
@@ -436,7 +439,7 @@ describe('POST /api/chat', () => {
       expect(res.status, `status ${status}`).toBe(200)
       expect(fetchMock, `status ${status}`).toHaveBeenCalledTimes(2)
       const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
-      expect(second.model).toBe('stealth/ox-alpha')
+      expect(second.model).toBe('minimax/minimax-m3:free')
     }
   })
 
@@ -447,7 +450,7 @@ describe('POST /api/chat', () => {
         providerKey: 'AIza-test',
         staleOverride: 'MODEL_GEMINI_2_FLASH',
         deadSlug: 'gemini-2.0-flash',
-        backup: 'gemini-2.5-flash-lite',
+        backup: 'gemini-3.5-flash-lite',
         modelKey: 'gemini-2-flash',
       },
       {
@@ -533,7 +536,7 @@ describe('POST /api/chat', () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
-    // The provider default resolves to stealth/ox-alpha — if IT 404s, there
+    // The provider default resolves to minimax/minimax-m3:free — if IT 404s, there
     // is no backup left to retry with (and the guard prevents a loop).
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(404, { error: 'not found' }))
     vi.stubGlobal('fetch', fetchMock)
@@ -592,7 +595,7 @@ describe('POST /api/chat', () => {
     const payload = JSON.parse(init!.body as string) as { model: string; max_tokens?: number }
     // Provider-default selection sends a plain Gemini model name on the direct
     // endpoint, not an OpenRouter-namespaced id.
-    expect(payload.model).toBe('gemini-2.5-flash-lite')
+    expect(payload.model).toBe('gemini-3.5-flash-lite')
     // Every provider gets the conservative completion cap.
     expect(payload.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
     expect(init!.headers).toMatchObject({ Authorization: 'Bearer AIza-test' })
@@ -624,7 +627,7 @@ describe('POST /api/chat', () => {
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
-    expect(payload.model).toBe('google/gemini-2.5-flash-lite')
+    expect(payload.model).toBe('google/gemini-3.5-flash-lite')
   })
 
   it('uses MODEL_NAME and OPENROUTER_BASE_URL env vars when set', async () => {
