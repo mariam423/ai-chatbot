@@ -11,10 +11,41 @@ interface SpeechRecognitionLike {
   continuous: boolean
   interimResults: boolean
   onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
-  onerror: (() => void) | null
+  onerror: ((event: { error?: string; message?: string }) => void) | null
   onend: (() => void) | null
   start: () => void
   stop: () => void
+}
+
+/** Map a Web Speech API `error` code to a short, user-facing explanation.
+ *
+ * The Web Speech API reports a `SpeechRecognitionErrorEvent.error` string
+ * (`no-speech`, `audio-capture`, `not-allowed`, `network`, `aborted`,
+ * `service-not-allowed`, `language-not-supported`, `phrases-not-supported`,
+ * `busy`, `canceled`). The previous handler used a single generic message
+ * for every code, which made the composer read as "voice is broken" even
+ * when the cause was a routine no-speech timeout or a denied permission.
+ */
+function speechErrorMessage(code: string | undefined): string {
+  switch (code) {
+    case 'no-speech':
+      return 'No speech detected. Try again.'
+    case 'audio-capture':
+      return 'No microphone was found.'
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone permission was denied.'
+    case 'network':
+      return 'Voice recognition needs a network connection.'
+    case 'aborted':
+    case 'canceled':
+      // User-initiated stops fire `aborted`; not a real failure.
+      return ''
+    case 'language-not-supported':
+      return 'This language is not supported for voice input.'
+    default:
+      return 'Voice recognition is unavailable.'
+  }
 }
 interface SpeechRecognitionConstructor {
   new (): SpeechRecognitionLike
@@ -225,7 +256,11 @@ export default function AudioInput({ disabled = false, onTranscript }: AudioInpu
       }
       if (transcript) onTranscript(transcript)
     }
-    rec.onerror = () => finishWithError('Voice recognition is unavailable.')
+    rec.onerror = (event) => {
+      const message = speechErrorMessage(event?.error)
+      if (message) finishWithError(message)
+      else setListening(false)
+    }
     rec.onend = () => setListening(false)
     recRef.current = rec
     try {
