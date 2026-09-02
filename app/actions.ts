@@ -441,11 +441,13 @@ export async function listChatSessions(input?: {
   const { search, skip, take, archived } = parsed.data
   const userId = await getCurrentUserId()
   try {
-    const userFilter = userId ? Prisma.sql`AND cs.userId = ${userId}` : Prisma.empty
+    const userFilter = userId ? Prisma.sql`AND cs."userId" = ${userId}` : Prisma.empty
     const searchFilter = search
-      ? Prisma.sql`AND (cs.title LIKE ${`%${search}%`} COLLATE NOCASE
-             OR EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = cs.id
-                        AND m.content LIKE ${`%${search}%`} COLLATE NOCASE))`
+      ? // ILIKE is the Postgres case-insensitive LIKE; works on both the
+        // session title and the message body in a single predicate.
+        Prisma.sql`AND (cs.title ILIKE ${`%${search}%`}
+               OR EXISTS (SELECT 1 FROM chat_messages m WHERE m."sessionId" = cs.id
+                          AND m.content ILIKE ${`%${search}%`}))`
       : Prisma.empty
     const rows = await prisma.$queryRaw<
       Array<{
@@ -460,19 +462,19 @@ export async function listChatSessions(input?: {
       }>
     >`
       SELECT cs.id, cs.title, cs.pinned, cs.archived,
-        (SELECT m2.content FROM chat_messages m2 WHERE m2.sessionId = cs.id
-           ORDER BY m2.position ASC LIMIT 1) AS first_content,
-        (SELECT COUNT(*) FROM chat_messages m3 WHERE m3.sessionId = cs.id) AS message_count,
-        (SELECT m4.model FROM chat_messages m4 WHERE m4.sessionId = cs.id
+        (SELECT m2.content FROM chat_messages m2 WHERE m2."sessionId" = cs.id
+           ORDER BY m2."position" ASC LIMIT 1) AS first_content,
+        (SELECT COUNT(*) FROM chat_messages m3 WHERE m3."sessionId" = cs.id) AS message_count,
+        (SELECT m4.model FROM chat_messages m4 WHERE m4."sessionId" = cs.id
            AND m4.role = 'assistant' AND m4.model IS NOT NULL
-           ORDER BY m4.position DESC LIMIT 1) AS last_model,
-        cs.updatedAt AS updated_at
+           ORDER BY m4."position" DESC LIMIT 1) AS last_model,
+        cs."updatedAt" AS updated_at
       FROM chat_sessions cs
-      WHERE cs.archived = ${archived ? 1 : 0}
-        AND EXISTS (SELECT 1 FROM chat_messages m WHERE m.sessionId = cs.id)
+      WHERE cs.archived = ${archived}
+        AND EXISTS (SELECT 1 FROM chat_messages m WHERE m."sessionId" = cs.id)
         ${userFilter}
         ${searchFilter}
-      ORDER BY cs.pinned DESC, cs.updatedAt DESC
+      ORDER BY cs.pinned DESC, cs."updatedAt" DESC
       LIMIT ${take + 1} OFFSET ${skip}
     `
     const hasMore = rows.length > take

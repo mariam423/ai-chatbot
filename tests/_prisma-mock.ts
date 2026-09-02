@@ -520,15 +520,18 @@ function synthesizeSessionList(db: Db, raw: string): Row[] {
   const limitMatch = raw.match(/LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i)
   const takePlusOne = limitMatch ? Number(limitMatch[1]) : 20
   const offset = limitMatch ? Number(limitMatch[2]) : 0
-  const archived = raw.includes('cs.archived = 1')
-  const userIdMatch = raw.match(/cs\.userId\s*=\s*(?:'([^']*)'|(\S+?))(?:\s|$)/)
+  const archived = raw.includes('cs.archived = true') || raw.includes('cs.archived = 1')
+  const userIdMatch = raw.match(/cs(?:\."userId"|\.userId)\s*=\s*(?:'([^']*)'|(\S+?))(?:\s|$)/)
   const userId = userIdMatch ? (userIdMatch[1] ?? userIdMatch[2]) : null
   // The inlined search term is the value passed to Prisma.sql — `%term%`
   // for the title clause and `%term%` for the content clause, with or
-  // without surrounding single quotes. Match the first LIKE clause and
-  // strip the surrounding `%` to get the actual search term.
-  const searchMatch = raw.match(/LIKE\s+(?:'%)?(%?[^%]*?%?)(?:')?\s+COLLATE\s+NOCASE/s)
-  const searchTerm = searchMatch?.[1] ? searchMatch[1].replace(/%/g, '').toLowerCase() : ''
+  // without surrounding single quotes. Match the first LIKE/ILIKE clause
+  // and strip the surrounding `%` to get the actual search term.
+  // Greedy capture so a search term containing a literal `%` doesn't
+  // truncate early; we strip the surrounding `%` next. Capture group 2
+  // is the actual term (group 1 is the leading `%`).
+  const searchMatch = raw.match(/(?:LIKE|ILIKE)\s+'?(%)?([^'%]*)(%)?'?(?:\s+COLLATE\s+NOCASE)?/s)
+  const searchTerm = searchMatch?.[2] ? searchMatch[2].toLowerCase() : ''
   // eslint-disable-next-line no-console
   console.log('[mock] searchMatch:', searchMatch?.[0], '| searchTerm:', searchTerm)
   const filtered = sessions
