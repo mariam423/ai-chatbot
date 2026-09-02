@@ -35,6 +35,21 @@ export const dynamic = 'force-dynamic'
 const SYSTEM_PROMPT = 'You are a helpful assistant.'
 
 /**
+ * Hard cap on the total time the upstream stream can stay open. Distinct
+ * from `request.signal` (which fires when the client disconnects) — this
+ * one fires regardless, so a stuck/free-tier model that never returns
+ * a token cannot keep the SSE response open forever and chew up Vercel
+ * function-seconds. When the timer fires, the route aborts the upstream
+ * fetch and returns a JSON 504 to the client with the partial chunks it
+ * has already received up to that point.
+ *
+ * 90s is enough for normal completions (a long chat answer on a free
+ * model can take 30-60s end-to-end) and short enough that a hung model
+ * fails fast. Override with CHAT_TOTAL_TIMEOUT_MS in env.
+ */
+const TOTAL_TIMEOUT_MS = Number(process.env.CHAT_TOTAL_TIMEOUT_MS) || 90_000
+
+/**
  * Upstream statuses that trigger the model fallback retry: 404 (dead/deprecated
  * model slug), 402 (OpenRouter pre-authorizes against the model and rejects
  * low-credit keys before streaming), and 429 (model-scoped rate limit). The
@@ -304,6 +319,15 @@ export async function POST(request: Request) {
   // The model id that actually serves the reply — the selected model, or the
   // backup when a retry fires. Reported to the client via X-Served-Model.
   let servedModel = model
+  // Total-time guard: even if the client stays connected, the upstream
+  // request must not stay open past TOTAL_TIMEOUT_MS (90s default). We
+  // race the fetch against a timer so a stuck/free-tier model fails
+  // fast instead of streaming a 1-token-per-minute reply. Declared in
+  // the outer scope so the `finally` cleanup below can reach it.
+  const totalController = new AbortController()
+  const totalTimer = setTimeout(() => totalController.abort(), TOTAL_TIMEOUT_MS)
+  const onClientAbort = () => totalController.abort()
+  request.signal.addEventListener('abort', onClientAbort, { once: true })
   // True only when the error-fallback retry fires (404/402/429 → backup
   // model). Vision auto-routing is NOT flagged: swapping a text-only
   // selection to a vision-capable model is expected behavior for media
@@ -407,6 +431,24 @@ export async function POST(request: Request) {
     }
   } catch {
     return errorResponse('Could not reach the LLM API.', 502)
+  }
+
+  // Detach the listener so a late `abort` event on the request signal
+  // (after we've decided what to return) doesn't dangle.
+  request.signal.removeEventListener('abort', onClientAbort)
+  // clearTimeout is a no-op if the timer already fired; that's fine.
+  clearTimeout(totalTimer)
+
+  if (totalController.signal.aborted && (!upstream || !upstream.body)) {
+    // Wall-clock cap fired before the upstream even produced a body.
+    return NextResponse.json(
+      {
+        error:
+          'The model took too long to respond. Please try again, or pick a different model in Settings.',
+        code: 'chat_total_timeout',
+      },
+      { status: 504 },
+    )
   }
 
   if (!upstream.ok || !upstream.body) {

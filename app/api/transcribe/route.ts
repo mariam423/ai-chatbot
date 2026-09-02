@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { errorResponse } from '@/lib/http'
-import { getLlmConfig } from '@/lib/llm-config'
 import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 
 export const runtime = 'nodejs'
@@ -15,6 +14,74 @@ const MAX_AUDIO_BYTES = 2_000_000
 const TRANSCRIBE_TIMEOUT_MS = 20_000
 
 /**
+ * Provider note: only OpenAI + Gemini expose an OpenAI-compatible
+ * `/audio/transcriptions` endpoint. OpenRouter does not proxy Whisper and
+ * returns 402 with a "requires at least $0.50 in balance for audio" error
+ * if you call that path through it.
+ *
+ * We deliberately pick the transcription provider independently of the
+ * chat provider: the chat route keeps using whatever's cheapest for text
+ * (OpenRouter in production) but a request to transcribe should jump to
+ * OpenAI or Gemini when those keys are present, even if OpenRouter is the
+ * chat provider. That way one OPENAI_API_KEY (or GEMINI_API_KEY) on the
+ * server enables voice transcription regardless of the chat key, instead
+ * of forcing the user to clear OPENROUTER_API_KEY to use the mic.
+ *
+ * Fallback chain: OPENAI_API_KEY → GEMINI_API_KEY → OPENROUTER_API_KEY
+ * (the last only reaches `/audio/transcriptions` if and when OpenRouter
+ * adds support; right now it returns 402). The explicit STT provider is
+ * resolved by `resolveTranscriptionProvider` so the chosen key + base URL
+ * stay consistent.
+ */
+type TranscriptionProvider = 'openai' | 'gemini' | 'openrouter'
+
+function resolveTranscriptionProvider(): {
+  provider: TranscriptionProvider
+  apiKey: string | null
+  baseUrl: string
+} {
+  const openAiKey = process.env.OPENAI_API_KEY?.trim() || null
+  const geminiKey = process.env.GEMINI_API_KEY?.trim() || null
+  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim() || null
+
+  if (openAiKey) {
+    return {
+      provider: 'openai',
+      apiKey: openAiKey,
+      baseUrl: (process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1').replace(
+        /\/+$/,
+        '',
+      ),
+    }
+  }
+  if (geminiKey) {
+    return {
+      provider: 'gemini',
+      apiKey: geminiKey,
+      baseUrl: (
+        process.env.GEMINI_BASE_URL?.trim() ||
+        'https://generativelanguage.googleapis.com/v1beta/openai'
+      ).replace(/\/+$/, ''),
+    }
+  }
+  if (openRouterKey) {
+    return {
+      provider: 'openrouter',
+      apiKey: openRouterKey,
+      baseUrl: (process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1').replace(
+        /\/+$/,
+        '',
+      ),
+    }
+  }
+  return { provider: 'openrouter', apiKey: null, baseUrl: 'https://api.openai.com/v1' }
+}
+
+function supportsTranscription(provider: TranscriptionProvider): boolean {
+  return provider === 'openai' || provider === 'gemini'
+}
+
+/**
  * Server-side speech-to-text fallback (used by the composer mic on browsers
  * without the Web Speech API). Accepts a multipart audio `file` and forwards it
  * to the configured provider's OpenAI-compatible `/audio/transcriptions`
@@ -26,11 +93,27 @@ export async function POST(request: Request) {
   const guard = await guardRoute(request, ROUTE_GUARDS.transcribe)
   if (!guard.ok) return guard.response
 
-  const { apiKey, baseUrl } = getLlmConfig()
+  const { provider, apiKey, baseUrl } = resolveTranscriptionProvider()
+
   if (!apiKey) {
     return errorResponse(
-      'Server is not configured with an LLM API key (OPENROUTER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY). Voice transcription requires one.',
+      'Server is not configured with an LLM API key for transcription. Set OPENAI_API_KEY or GEMINI_API_KEY in the environment.',
       500,
+    )
+  }
+  if (!supportsTranscription(provider)) {
+    // OpenRouter does not proxy Whisper — fail fast with a 503 so the
+    // client knows the configured provider can't transcribe. The composer
+    // falls back to the browser's Web Speech API on Chrome/Edge; on
+    // Firefox/Safari the mic button is hidden in that case (see
+    // `pickVoiceEngine`).
+    return NextResponse.json(
+      {
+        error:
+          'Voice transcription is not available with the current provider. Configure OPENAI_API_KEY or GEMINI_API_KEY, or use a browser with built-in speech recognition.',
+        code: 'transcription_provider_unsupported',
+      },
+      { status: 503 },
     )
   }
 

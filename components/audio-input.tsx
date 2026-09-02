@@ -51,7 +51,14 @@ export function pickVoiceEngine(opts: {
   return null
 }
 
-/** POST a recorded clip to the server transcription route and return the text. */
+/** POST a recorded clip to the server transcription route and return the text.
+ *
+ * The server returns a structured `{ error, code }` for known failure modes
+ * (e.g. `transcription_provider_unsupported` when the configured provider
+ * is OpenRouter, which doesn't proxy Whisper). We surface those messages
+ * to the composer so the user sees a useful explanation instead of a
+ * generic "voice transcription failed" toast.
+ */
 async function transcribeAudio(blob: Blob, mimeType: string): Promise<string> {
   const ext =
     mimeType.includes('mp4') || mimeType.includes('m4a')
@@ -63,7 +70,17 @@ async function transcribeAudio(blob: Blob, mimeType: string): Promise<string> {
   form.append('file', new File([blob], `recording.${ext}`, { type: mimeType }))
   form.append('language', navigator.language?.slice(0, 2) || 'en')
   const response = await fetch('/api/transcribe', { method: 'POST', body: form })
-  if (!response.ok) throw new Error(`transcribe failed (${response.status})`)
+  if (!response.ok) {
+    let message = `transcribe failed (${response.status})`
+    try {
+      const body = (await response.json()) as { error?: string }
+      if (body.error) message = body.error
+    } catch {
+      // Body wasn't JSON (or the request failed before the server could
+      // respond). Fall back to the generic message above.
+    }
+    throw new Error(message)
+  }
   const data = (await response.json()) as { transcript?: string }
   return data.transcript ?? ''
 }
