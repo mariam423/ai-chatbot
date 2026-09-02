@@ -165,22 +165,25 @@ export default function CommandPalette({
     [allItems, selectedIndex, onSelectSession, onClose],
   )
 
-  // Global keyboard listener
+  // Global keyboard listener: Esc closes from anywhere, Cmd/Ctrl+K toggles.
+  // Without the document-level Esc, the only way to close was to focus
+  // the search input and press Esc there — clicking outside the input
+  // (e.g. on a result row) would leave the user with no way out.
   useEffect(() => {
+    if (!open) return
     function handleGlobalKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
-        if (open) {
-          onClose()
-        } else {
-          // Parent should toggle open
-        }
+        onClose()
       }
     }
-    if (open) {
-      document.addEventListener('keydown', handleGlobalKey)
-      return () => document.removeEventListener('keydown', handleGlobalKey)
-    }
+    document.addEventListener('keydown', handleGlobalKey)
+    return () => document.removeEventListener('keydown', handleGlobalKey)
   }, [open, onClose])
 
   return (
