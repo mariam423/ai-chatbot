@@ -184,16 +184,34 @@ function inlinePrismaValue(v: unknown): string {
 function buildModel(store: Row[]) {
   return {
     async findUnique(
-      { where, include }: { where: Row; include?: Record<string, unknown> } = { where: {} },
+      {
+        where,
+        include,
+        select,
+      }: {
+        where: Row
+        include?: Record<string, unknown>
+        select?: Record<string, unknown>
+      } = { where: {} },
     ) {
       const row = store.find((r) => matchesWhere(r, where)) ?? null
-      if (!row || !include) return row
-      return applyInclude(row, include)
+      if (!row) return row
+      const withIncludes = include ? applyInclude(row, include) : row
+      return applySelect(withIncludes, select)
     },
-    async findFirst({ where, include }: { where?: Row; include?: Record<string, unknown> } = {}) {
+    async findFirst({
+      where,
+      include,
+      select,
+    }: {
+      where?: Row
+      include?: Record<string, unknown>
+      select?: Record<string, unknown>
+    } = {}) {
       const row = store.find((r) => matchesWhere(r, where)) ?? null
-      if (!row || !include) return row
-      return applyInclude(row, include)
+      if (!row) return row
+      const withIncludes = include ? applyInclude(row, include) : row
+      return applySelect(withIncludes, select)
     },
     async findMany({
       where,
@@ -224,10 +242,12 @@ function buildModel(store: Row[]) {
       where,
       orderBy,
       include,
+      select,
     }: {
       where?: Row
       orderBy?: Row
       include?: Record<string, unknown>
+      select?: Record<string, unknown>
     } = {}) {
       // Convenience used by the chat-session list queries.
       const filtered = store.filter((row) => matchesWhere(row, where))
@@ -240,8 +260,9 @@ function buildModel(store: Row[]) {
         })
       }
       const row = filtered[0] ?? null
-      if (!row || !include) return row
-      return applyInclude(row, include)
+      if (!row) return row
+      const withIncludes = include ? applyInclude(row, include) : row
+      return applySelect(withIncludes, select)
     },
     async create({ data }: { data: Row }) {
       // Prisma auto-generates a cuid id when the column has `@default(cuid())`
@@ -370,10 +391,15 @@ export function makeInMemoryPrisma() {
     document: [],
     documentChunk: [],
   }
-  RELATIONS.chatSession.parent = db.chatSession
-  RELATIONS.chatSession.children = db.chatMessage
-  RELATIONS.document.parent = db.document
-  RELATIONS.document.children = db.documentChunk
+  // The Record<string, ...> index access yields `T | undefined` under
+  // strict TS, so grab the entries once and assert the shape we just
+  // declared at module load.
+  const chatSessionRel = RELATIONS.chatSession!
+  const documentRel = RELATIONS.document!
+  chatSessionRel.parent = db.chatSession
+  chatSessionRel.children = db.chatMessage
+  documentRel.parent = db.document
+  documentRel.children = db.documentChunk
   const models = {
     user: buildModel(db.user),
     userPreference: buildModel(db.userPreference),
