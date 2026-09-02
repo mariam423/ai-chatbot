@@ -20,40 +20,110 @@ const ALL_SKILL_IDS = SKILLS.map((skill) => skill.id)
 // header + description + paddings.
 const MENU_APPROX_HEIGHT = 400
 
+/**
+ * `position: fixed` is normally contained by the viewport, but the
+ * CSS spec carves out exceptions: any ancestor with `transform`,
+ * `perspective`, `filter`, `backdrop-filter`, `contain: paint/layout/
+ * strict/content`, or `will-change` set to one of these becomes the
+ * containing block. `view-transition-name` (used by our `.vt-chat-shell`
+ * for the login→chat transition) does the same.
+ *
+ * The menu is portalled to `<body>` to escape clipping ancestors, but
+ * portalling does NOT escape a containing block for `fixed` — the
+ * containing block is the nearest such ancestor of the original tree.
+ * Walk up from the trigger until we find one and return its viewport
+ * rect so we can translate viewport coords into the containing
+ * block's coords. Returns `null` if the containing block is the
+ * viewport.
+ */
+function findFixedContainingBlock(
+  start: HTMLElement,
+): { top: number; left: number; height: number } | null {
+  const re =
+    /(^|\s)(transform|perspective|filter|backdrop-filter|contain|will-change|view-transition-name)(\s|$)/
+  let node: HTMLElement | null = start
+  while (node && node !== document.documentElement) {
+    const style = getComputedStyle(node)
+    if (
+      style.transform !== 'none' ||
+      style.perspective !== 'none' ||
+      style.filter !== 'none' ||
+      style.backdropFilter !== 'none' ||
+      // `contain` is a shorthand; check the resolved value. Browsers
+      // that don't recognize the value return the empty string, which
+      // is fine — the regex still catches paint/layout/strict/content.
+      /\b(paint|layout|strict|content)\b/.test(style.contain) ||
+      re.test(style.willChange) ||
+      // `view-transition-name` is the only property that has the
+      // containing-block side-effect without being a normal style —
+      // check the resolved value directly.
+      (style.viewTransitionName && style.viewTransitionName !== 'none')
+    ) {
+      const rect = node.getBoundingClientRect()
+      return { top: rect.top, left: rect.left, height: rect.height }
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
 export default function SkillPicker({ enabledSkills, onChange }: SkillPickerProps) {
   const [open, setOpen] = useState(false)
-  const [position, setPosition] = useState<{ top: number; left: number; placement: 'down' | 'up' }>(
-    {
-      top: 0,
-      left: 0,
-      placement: 'down',
-    },
-  )
+  const [position, setPosition] = useState<{
+    top: number
+    left: number
+    cbHeight: number
+    placement: 'down' | 'up'
+  }>({
+    top: 0,
+    left: 0,
+    cbHeight: 0,
+    placement: 'down',
+  })
   const buttonRef = useRef<HTMLButtonElement>(null)
   const reducedMotion = useReducedMotion()
 
-  // Recompute the menu's viewport coordinates whenever it opens, when
-  // the window resizes, or when the trigger moves (covers both the
-  // initial open and subsequent window/scroll changes). useLayoutEffect
-  // avoids a one-frame flash at the old position.
+  // Recompute the menu's position whenever it opens, when the window
+  // resizes, or when the trigger moves (covers both the initial open
+  // and subsequent window/scroll changes). useLayoutEffect avoids a
+  // one-frame flash at the old position.
+  //
+  // We measure the trigger with `getBoundingClientRect()` (always
+  // viewport-relative), but the menu lives inside a portal that is
+  // still constrained by the nearest containing block for `position:
+  // fixed` — that block is set by an ancestor with `view-transition-name`
+  // (`.vt-chat-shell`), `transform`, `filter`, `contain: paint`, etc.
+  // Subtract the containing block's offset so `top`/`left` are correct
+  // in that block's coordinate system.
   const computePosition = useCallback(() => {
     const button = buttonRef.current
     if (!button) return
     const rect = button.getBoundingClientRect()
+    // The portal'd menu's containing block is the nearest positioned
+    // ancestor of the portal target (<body>), which is the viewport
+    // unless an ancestor of the trigger has `view-transition-name` /
+    // `transform` / `filter` / `contain: paint`. Walk up from the
+    // trigger to find it.
+    const cb = findFixedContainingBlock(button)
+    const cbTop = cb?.top ?? 0
+    const cbLeft = cb?.left ?? 0
+    const cbHeight = cb?.height ?? window.innerHeight
     const menuWidth = 288 // w-72 = 18rem = 288px
     const margin = 8
     // Right-align the menu to the trigger (same as `right-0` in the
-    // previous absolute layout).
-    let left = rect.right - menuWidth
+    // previous absolute layout), expressed in the containing block's
+    // coordinates.
+    let left = rect.right - menuWidth - cbLeft
     if (left < margin) left = margin
-    const spaceBelow = window.innerHeight - rect.bottom - margin
+    const spaceBelow = cbHeight - (rect.bottom - cbTop) - margin
     if (spaceBelow >= MENU_APPROX_HEIGHT) {
-      setPosition({ top: rect.bottom + margin, left, placement: 'down' })
+      setPosition({ top: rect.bottom + margin - cbTop, left, cbHeight, placement: 'down' })
     } else {
       // Flip upward: anchor the menu's bottom edge to just above the
-      // trigger. `bottom` is computed from the viewport's top so the
-      // fixed menu lands in the right spot.
-      setPosition({ top: rect.top - margin, left, placement: 'up' })
+      // trigger. `top` here is the trigger's top, which we later use
+      // as `bottom: cbHeight - top`; both must be in the containing
+      // block's coords.
+      setPosition({ top: rect.top - margin - cbTop, left, cbHeight, placement: 'up' })
     }
   }, [])
 
@@ -129,13 +199,20 @@ export default function SkillPicker({ enabledSkills, onChange }: SkillPickerProp
         // never gets clipped by .overflow-y-auto ancestors. Right edge
         // aligns with the trigger (left is the right-aligned coord
         // computed above); top is set from the trigger rect.
-        className="fixed z-50 w-72 overflow-hidden rounded-xl py-1"
-        style={
-          position.placement === 'down'
+        className="fixed z-50 w-72 overflow-hidden rounded-xl py-1 shadow-2xl backdrop-blur-md"
+        style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-medium)',
+          ...(position.placement === 'down'
             ? { top: position.top, left: position.left }
-            : // Flip: anchor the menu's bottom to the trigger's top.
-              { bottom: window.innerHeight - position.top, left: position.left }
-        }
+            : // Flip: anchor the menu's bottom to just above the
+              // trigger. `cbHeight` is the containing block's height
+              // (viewport when no shifting ancestor exists, otherwise
+              // the shifting ancestor's height) so this stays correct
+              // when `view-transition-name` or `transform` on an
+              // ancestor makes that ancestor the containing block.
+              { bottom: position.cbHeight - position.top, left: position.left }),
+        }}
         // Prevent the portal'd menu from causing layout shifts in the
         // original tree while the exit animation plays.
         ref={(node) => {
