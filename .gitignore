@@ -19,3 +19,5 @@ blob-report/
 generated/
 # TypeScript incremental build info
 *.tsbuildinfo
+# Local env files at the repo root (not the standard .env pattern)
+/env.
