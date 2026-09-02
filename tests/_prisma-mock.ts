@@ -21,6 +21,8 @@ type Db = {
   customAgent: Row[]
   workspaceTask: Row[]
   passwordResetToken: Row[]
+  document: Row[]
+  documentChunk: Row[]
 }
 
 /**
@@ -30,13 +32,35 @@ type Db = {
  * on `chatSession` — the mock resolves the messages from the chatMessage
  * store and applies the requested orderBy.
  */
-const RELATIONS: Record<string, { field: string; store: Row[] }> = {
-  chatSession: { field: 'messages', store: [] }, // assigned in makeInMemoryPrisma
+// Relations the mock can resolve. Each entry names the *parent* model
+// (chatSession / document) plus the child-side field name (messages /
+// chunks). Two stores per relation so the mock can answer both
+// directions:
+//   - `parent`  — the parent rows (used for nested-where filtering:
+//     "chunks whose document matches { sessionId }").
+//   - `children` — the child rows (used to populate `include` lookups
+//     and to set the foreign key on a nested create).
+// `childKey` is the foreign key on the child side (e.g. documentId).
+const RELATIONS: Record<string, { field: string; parent: Row[]; children: Row[]; childKey: string }> = {
+  chatSession: { field: 'messages', parent: [], children: [], childKey: 'sessionId' },
+  document: { field: 'chunks', parent: [], children: [], childKey: 'documentId' },
 }
 
 function matchesWhere(row: Row, where: Row | undefined): boolean {
   if (!where) return true
   for (const [key, value] of Object.entries(where)) {
+    // Nested relation filter: `where: { document: { sessionId: 'x' } }` on
+    // documentChunk.findMany means "chunks whose related document matches".
+    // The relation here is keyed by parent name (document), so we look
+    // it up directly and resolve the parent row from the *parent* store.
+    if (key in RELATIONS && value && typeof value === 'object' && !Array.isArray(value)) {
+      const relation = RELATIONS[key]!
+      const parentId = row[relation.childKey]
+      const parent = relation.parent.find((p) => p['id'] === parentId)
+      if (!parent) return false
+      if (!matchesWhere(parent, value as Row)) return false
+      continue
+    }
     // Prisma compound unique keys are passed as `{ a_b_c: { a, b, c } }`,
     // and so are compound where filters with `_and` / `_or`. Flatten the
     // inner key/value pairs and test each against the row.
@@ -62,23 +86,70 @@ function matchesWhere(row: Row, where: Row | undefined): boolean {
   return true
 }
 
-function applyInclude(row: Row, include: Record<string, unknown>, modelName: string): Row {
+function applyInclude(row: Row, include: Record<string, unknown>): Row {
   const out: Row = { ...row }
-  const relation = RELATIONS[modelName]
-  if (!relation) return out
-  const subOpts = include[relation.field] as { orderBy?: Row; where?: Row } | undefined
-  if (!subOpts) return out
-  const parentKey = modelName === 'chatSession' ? 'sessionId' : 'id'
-  const children = relation.store.filter((child) => child[parentKey] === row['id'])
-  if (subOpts.orderBy) {
-    const [[key, dir]] = Object.entries(subOpts.orderBy) as [[string, 'asc' | 'desc']]
-    children.sort((a, b) => {
-      if (a[key] === b[key]) return 0
-      const cmp = (a[key] as number) - (b[key] as number)
-      return dir === 'asc' ? cmp : -cmp
-    })
+  // An include entry may be keyed by the parent name (chatSession include
+  // uses "messages" — that key matches RELATIONS.chatSession.field), or by
+  // the parent name directly when the include is on the child side
+  // (e.g. documentChunk.findMany with where: { document: ... }). For
+  // `include` specifically, the key is always the child-field name, so we
+  // find the relation whose `field` matches the include key.
+  for (const [relationName, subOpts] of Object.entries(include)) {
+    if (!subOpts) continue
+    const relation = Object.values(RELATIONS).find((r) => r.field === relationName)
+    if (!relation) continue
+    const opts = subOpts as { orderBy?: Row; where?: Row }
+    const children = relation.children.filter((child) => child[relation.childKey] === row['id'])
+    let ordered = children
+    if (opts.orderBy) {
+      const [[key, dir]] = Object.entries(opts.orderBy) as [[string, 'asc' | 'desc']]
+      ordered = [...children].sort((a, b) => {
+        if (a[key] === b[key]) return 0
+        const cmp = (a[key] as number) - (b[key] as number)
+        return dir === 'asc' ? cmp : -cmp
+      })
+    }
+    out[relation.field] = ordered
   }
-  out[relation.field] = children
+  return out
+}
+
+/**
+ * Prisma `select` projection. A value of `true` means "keep this column";
+ * a nested object means "keep these sub-columns on the related record".
+ * The mock only implements the shape used by RAG + upload (`{ chunkIndex,
+ * content, embedding, document: { name } }`).
+ */
+function applySelect(row: Row | null, select: Record<string, unknown> | undefined): Row | null {
+  if (!row) return row
+  if (!select) return row
+  const out: Row = {}
+  for (const [key, value] of Object.entries(select)) {
+    if (value === true) {
+      out[key] = row[key]
+    } else if (value && typeof value === 'object') {
+      // Nested select on a relation. The key may be the parent name
+      // (`document`) or the child-field name (`chunks`) — Prisma's
+      // wire format for a nested select is
+      // `{ document: { select: { name: true } } }` (parent name wraps
+      // a `select` sub-key). Look up the relation either way.
+      const relation =
+        (RELATIONS[key] ?? Object.values(RELATIONS).find((r) => r.field === key))
+      if (relation) {
+        const parentId = row[relation.childKey]
+        const related = relation.parent.find((p) => p['id'] === parentId)
+        if (related) {
+          const subValue = value as Record<string, unknown>
+          const subSelect = ('select' in subValue
+            ? (subValue.select as Record<string, unknown>)
+            : subValue) as Record<string, unknown>
+          out[key] = applySelect(related, subSelect)
+        } else {
+          out[key] = null
+        }
+      }
+    }
+  }
   return out
 }
 
@@ -110,24 +181,31 @@ function inlinePrismaValue(v: unknown): string {
   return String(v)
 }
 
-function buildModel(store: Row[], modelName: string) {
+function buildModel(store: Row[]) {
   return {
     async findUnique(
       { where, include }: { where: Row; include?: Record<string, unknown> } = { where: {} },
     ) {
       const row = store.find((r) => matchesWhere(r, where)) ?? null
       if (!row || !include) return row
-      return applyInclude(row, include, modelName)
+      return applyInclude(row, include)
     },
     async findFirst({ where, include }: { where?: Row; include?: Record<string, unknown> } = {}) {
       const row = store.find((r) => matchesWhere(r, where)) ?? null
       if (!row || !include) return row
-      return applyInclude(row, include, modelName)
+      return applyInclude(row, include)
     },
     async findMany({
       where,
       orderBy,
-    }: { where?: Row; orderBy?: Row; include?: Record<string, unknown> } = {}) {
+      include,
+      select,
+    }: {
+      where?: Row
+      orderBy?: Row
+      include?: Record<string, unknown>
+      select?: Record<string, unknown>
+    } = {}) {
       const filtered = store.filter((row) => matchesWhere(row, where))
       if (orderBy && typeof orderBy === 'object') {
         const [[key, dir]] = Object.entries(orderBy) as [[string, 'asc' | 'desc']]
@@ -137,7 +215,10 @@ function buildModel(store: Row[], modelName: string) {
           return dir === 'asc' ? cmp : -cmp
         })
       }
-      return [...filtered]
+      return filtered.map((row) => {
+        const withIncludes = include ? applyInclude(row, include) : row
+        return applySelect(withIncludes, select)
+      })
     },
     async findFirstOrdered({
       where,
@@ -160,19 +241,50 @@ function buildModel(store: Row[], modelName: string) {
       }
       const row = filtered[0] ?? null
       if (!row || !include) return row
-      return applyInclude(row, include, modelName)
+      return applyInclude(row, include)
     },
     async create({ data }: { data: Row }) {
       // Prisma auto-generates a cuid id when the column has `@default(cuid())`
       // and the caller doesn't provide one. The mock mirrors that by
       // stamping a `cuid-` + random id when `data.id` is missing — the
       // server actions that read `session.id` afterwards depend on it.
+      //
+      // Nested writes (`chunks: { create: [...] }`) are flattened into
+      // child rows that reference the parent's id via the relation's
+      // child foreign key. Only the one-relation-deep shape used by the
+      // upload route (document → documentChunk) is supported; deeper
+      // nesting isn't currently exercised by the tests.
+      const { ...topData } = data
+      const nested: Array<{ relation: string; rows: Row[] }> = []
+      for (const [key, value] of Object.entries(data)) {
+        if (value && typeof value === 'object' && 'create' in (value as Row)) {
+          const childRows = (value as { create: Row[] }).create
+          if (Array.isArray(childRows)) {
+            nested.push({ relation: key, rows: childRows })
+            delete (topData as Row)[key]
+          }
+        }
+      }
       const row = {
-        ...data,
-        id: data.id ?? `cuid-${Math.random().toString(36).slice(2, 12)}`,
-        updatedAt: data.updatedAt ?? new Date(),
+        ...topData,
+        id: (topData as Row).id ?? `cuid-${Math.random().toString(36).slice(2, 12)}`,
+        updatedAt: (topData as Row).updatedAt ?? new Date(),
       }
       store.push(row)
+      for (const { relation, rows } of nested) {
+        // The nested write key is the *child* field name (chunks/messages),
+        // so find the relation whose `field` matches the key.
+        const rel = Object.values(RELATIONS).find((r) => r.field === relation)
+        if (!rel) continue
+        for (const child of rows) {
+          rel.children.push({
+            ...child,
+            id: child.id ?? `cuid-${Math.random().toString(36).slice(2, 12)}`,
+            [rel.childKey]: row.id,
+            createdAt: child.createdAt ?? new Date(),
+          })
+        }
+      }
       return { ...row }
     },
     async createMany({ data }: { data: Row[] }) {
@@ -255,16 +367,23 @@ export function makeInMemoryPrisma() {
     customAgent: [],
     workspaceTask: [],
     passwordResetToken: [],
+    document: [],
+    documentChunk: [],
   }
-  RELATIONS.chatSession = { field: 'messages', store: db.chatMessage }
+  RELATIONS.chatSession.parent = db.chatSession
+  RELATIONS.chatSession.children = db.chatMessage
+  RELATIONS.document.parent = db.document
+  RELATIONS.document.children = db.documentChunk
   const models = {
-    user: buildModel(db.user, 'user'),
-    userPreference: buildModel(db.userPreference, 'userPreference'),
-    chatSession: buildModel(db.chatSession, 'chatSession'),
-    chatMessage: buildModel(db.chatMessage, 'chatMessage'),
-    customAgent: buildModel(db.customAgent, 'customAgent'),
-    workspaceTask: buildModel(db.workspaceTask, 'workspaceTask'),
-    passwordResetToken: buildModel(db.passwordResetToken, 'passwordResetToken'),
+    user: buildModel(db.user),
+    userPreference: buildModel(db.userPreference),
+    chatSession: buildModel(db.chatSession),
+    chatMessage: buildModel(db.chatMessage),
+    customAgent: buildModel(db.customAgent),
+    workspaceTask: buildModel(db.workspaceTask),
+    passwordResetToken: buildModel(db.passwordResetToken),
+    document: buildModel(db.document),
+    documentChunk: buildModel(db.documentChunk),
   }
   return {
     prisma: {
