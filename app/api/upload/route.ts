@@ -123,8 +123,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ document })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not process the document.'
-    return errorResponse(message, message.includes('limit') ? 413 : 422)
+    // Log the full error server-side for diagnosis; surface a generic
+    // message to the client. Prisma's exception messages routinely include
+    // partial method calls (e.g. "Invalid `prisma.document.create(`") whose
+    // formatting breaks in the UI and can leak schema names, so we never
+    // forward the raw `error.message` to the client. The 422 distinguishes
+    // "I understood the request but it couldn't be processed" from 413
+    // (oversized) and 500 (infrastructure).
+    console.error('[api/upload] document create failed:', error)
+    return errorResponse('Could not process the document. Please try again.', 422)
   }
 }
 
