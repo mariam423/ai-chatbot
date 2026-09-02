@@ -280,7 +280,7 @@ export default function Chat({
 
   const activePresetName = systemPrompt
     ? (allPresets.find((p) => p.prompt === systemPrompt)?.name ?? 'Custom')
-    : 'Default'
+    : 'Base assistant'
 
   const selectPreset = useCallback(
     async (preset: SystemPromptPreset | null) => {
@@ -845,7 +845,9 @@ export default function Chat({
                   <p className="px-3 py-1.5 text-[10px] font-semibold tracking-widest text-[var(--text-muted)] uppercase">
                     Presets
                   </p>
-                  {/* Default option */}
+                  {/* Default option — labeled "Base assistant" so it reads as
+                      the absence of a system-prompt override, not a
+                      separate agent. */}
                   <button
                     type="button"
                     role="option"
@@ -858,7 +860,7 @@ export default function Chat({
                     }}
                   >
                     <span className="size-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
-                    <span className="truncate font-medium">Default</span>
+                    <span className="truncate font-medium">Base assistant</span>
                     {!systemPrompt && (
                       <span className="ml-auto text-[10px] text-emerald-500">Active</span>
                     )}
@@ -951,6 +953,23 @@ export default function Chat({
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 void send(input)
+                return
+              }
+              if (event.key === 'Escape') {
+                // Chrome's default Esc behavior on a focused textarea is to
+                // blur it and surface the draft text to the page (it
+                // re-injects any IME composition). Users hit Esc expecting
+                // "cancel", and instead the textarea re-renders the draft
+                // visibly. Two jobs here:
+                //   1. If a reply is streaming, Esc stops it.
+                //   2. Otherwise, swallow the event so the browser doesn't
+                //      blur / re-inject — and let Enter handle send.
+                if (isStreaming) {
+                  event.preventDefault()
+                  stop()
+                  return
+                }
+                event.preventDefault()
               }
             }}
             rows={1}
