@@ -229,13 +229,13 @@ export function extractDocumentText(name: string, mimeType: string, bytes: Uint8
   const extension = getDocumentExtension(name)
   if (!extension) throw new Error('Only PDF, TXT, MD, CSV, XLSX, and DOCX files are supported.')
 
-  if (extension === 'docx') return extractDocxText(bytes)
-  if (extension === 'xlsx') return extractXlsxText(bytes)
+  if (extension === 'docx') return sanitizeForPostgres(extractDocxText(bytes))
+  if (extension === 'xlsx') return sanitizeForPostgres(extractXlsxText(bytes))
   if (extension !== 'pdf') {
     // TextDecoder with fatal=true rejects malformed/binary payloads early.
     const text = decodeUtf8(bytes)
     if (!text.trim()) throw new Error('The document does not contain any text.')
-    return text.slice(0, MAX_EXTRACTED_TEXT_LENGTH)
+    return sanitizeForPostgres(text.slice(0, MAX_EXTRACTED_TEXT_LENGTH))
   }
 
   if (mimeType && mimeType !== 'application/pdf') {
@@ -261,12 +261,37 @@ export function extractDocumentText(name: string, mimeType: string, bytes: Uint8
   }
   const text = candidates.join(' ').replace(/\s+/g, ' ').trim()
   if (!text) throw new Error('The PDF does not contain extractable text.')
-  return text.slice(0, MAX_EXTRACTED_TEXT_LENGTH)
+  return sanitizeForPostgres(text.slice(0, MAX_EXTRACTED_TEXT_LENGTH))
+}
+
+/**
+ * Strip characters that PostgreSQL refuses to store in a UTF-8 text column.
+ *
+ * The only one we actually hit in practice is the NUL byte (0x00) — PDFs
+ * occasionally include it inside compressed stream fragments, and DOCX/XLSX
+ * can carry it through legacy Office XML. Postgres raises SQLSTATE 22021
+ * (`invalid byte sequence for encoding "UTF8": 0x00`) and Prisma surfaces it
+ * as a 422 with the raw `prisma.document.create()` invocation in the error
+ * message, which is what users were seeing in the upload error toast.
+ *
+ * The fix is to scrub the NUL byte (and the other control characters in the
+ * C0 range that Postgres's text encoding rejects, namely 0x01-0x08 / 0x0B /
+ * 0x0C / 0x0E-0x1F) before persistence. We replace each one with a space so
+ * adjacent text doesn't merge into garbage; collapsing runs of whitespace
+ * back to a single space is left to the chunker.
+ */
+function sanitizeForPostgres(text: string): string {
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
 }
 
 /** Split extracted text into overlapping, bounded chunks for retrieval. */
 export function chunkDocumentText(text: string): string[] {
-  const normalized = text.replace(/\r\n?/g, '\n').trim()
+  // Defense in depth: callers normally route through extractDocumentText
+  // (which already scrubs control bytes), but a future caller could pass
+  // raw input straight in. Re-sanitize here so a stray 0x00 can never reach
+  // Postgres via the chunk insert.
+  const sanitized = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
+  const normalized = sanitized.replace(/\r\n?/g, '\n').trim()
   const chunks: string[] = []
   let start = 0
   while (start < normalized.length && chunks.length < MAX_DOCUMENT_CHUNKS) {

@@ -157,6 +157,34 @@ describe('document processing', () => {
     expect(first).toHaveLength(EMBEDDING_DIMENSION)
     expect(Math.hypot(...first)).toBeCloseTo(1)
   })
+
+  it('strips NUL and other C0 control bytes before persistence', () => {
+    // PostgreSQL text columns reject 0x00 with SQLSTATE 22021 ("invalid byte
+    // sequence for encoding UTF8: 0x00"). PDFs and legacy Office XML
+    // occasionally carry these bytes; the extractor must scrub them or the
+    // insert blows up with a Prisma error that surfaces as 422 in the UI.
+    //
+    // `decodeUtf8` removes 0x00 outright; the remaining C0 controls
+    // (0x01-0x08 / 0x0B / 0x0C / 0x0E-0x1F) are replaced with a space so
+    // adjacent text doesn't merge. The key invariant is that no 0x00 ever
+    // reaches the Prisma insert.
+    const dirty = 'hello\x00world\x01\x02more\x0Btext\x1Fdone'
+    const out = extractDocumentText('notes.txt', 'text/plain', bytes(dirty))
+    expect(out).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F]/)
+    expect(out).toBe('helloworld  more text done')
+  })
+
+  it('strips C0 control bytes from chunks too', () => {
+    // chunkDocumentText is exported and could be called by future callers
+    // that didn't go through extractDocumentText. Defense-in-depth: scrub
+    // here as well so the chunk insert can never blow up on a stray 0x00.
+    const dirty = `prefix\x00mid\x0B${'filler'.repeat(400)}\nsuffix`
+    const chunks = chunkDocumentText(dirty)
+    expect(chunks.length).toBeGreaterThan(0)
+    for (const chunk of chunks) {
+      expect(chunk).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F]/)
+    }
+  })
 })
 
 describe('POST /api/upload boundary', () => {
