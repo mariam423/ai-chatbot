@@ -264,7 +264,11 @@ export default function Chat({
     }
   }, [])
 
-  // Close preset menu on outside click.
+  // Close preset menu on outside click or Esc. Without the Esc handler, the
+  // dropdown stays open until you click somewhere else, which is jarring
+  // — and Chrome's default Esc on the focused trigger button does an
+  // implicit blur-then-restore that looks like the composer is "filling
+  // itself in" with the draft text.
   useEffect(() => {
     if (!presetMenuOpen) return
     function handleClick(e: MouseEvent) {
@@ -272,8 +276,18 @@ export default function Chat({
         setPresetMenuOpen(false)
       }
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setPresetMenuOpen(false)
+      }
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [presetMenuOpen])
 
   const allPresets = [...BUILTIN_PRESETS, ...customPresets]

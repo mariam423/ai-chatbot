@@ -540,7 +540,7 @@ export default function ChatApp() {
                 aria-label="Select custom assistant"
                 className="max-w-28 cursor-pointer truncate bg-transparent outline-none sm:max-w-40"
               >
-                <option value="">Default assistant</option>
+                <option value="">Base model</option>
                 {customAgents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name}
