@@ -105,6 +105,52 @@ describe('checkCsrf', () => {
   it('accepts requests without an origin (non-browser traffic)', () => {
     expect(checkCsrf(new Request('http://localhost:3000/api/chat', { method: 'POST' }))).toBeNull()
   })
+
+  it('accepts origin when NEXT_PUBLIC_APP_URL matches', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.example.test')
+    const request = new Request('https://app.example.test/api/chat', {
+      method: 'POST',
+      headers: { origin: 'https://app.example.test' },
+    })
+    expect(checkCsrf(request)).toBeNull()
+    vi.unstubAllEnvs()
+  })
+
+  it('accepts VERCEL_URL-derived https origin for preview deploys', () => {
+    vi.stubEnv('VERCEL_URL', 'ai-chatbot-pr-42-username.vercel.app')
+    const request = new Request('https://ai-chatbot-pr-42-username.vercel.app/api/chat', {
+      method: 'POST',
+      headers: { origin: 'https://ai-chatbot-pr-42-username.vercel.app' },
+    })
+    expect(checkCsrf(request)).toBeNull()
+    vi.unstubAllEnvs()
+  })
+
+  it('falls back to the request host when no env var is set', () => {
+    // Fresh preview deploy: no NEXT_PUBLIC_APP_URL, no VERCEL_URL, but
+    // the request still comes from the same host the user is on — the
+    // guard should not lock the user out in that case.
+    const request = new Request('https://ai-chatbot-pr-99.vercel.app/api/chat', {
+      method: 'POST',
+      headers: {
+        origin: 'https://ai-chatbot-pr-99.vercel.app',
+        host: 'ai-chatbot-pr-99.vercel.app',
+        'x-forwarded-proto': 'https',
+      },
+    })
+    expect(checkCsrf(request)).toBeNull()
+  })
+
+  it('still blocks a true cross-site origin even with the host fallback', () => {
+    const request = new Request('https://app.example.test/api/chat', {
+      method: 'POST',
+      headers: {
+        origin: 'https://evil.example',
+        host: 'app.example.test',
+      },
+    })
+    expect(checkCsrf(request)?.status).toBe(403)
+  })
 })
 
 describe('sanitizeInput', () => {

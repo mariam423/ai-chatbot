@@ -47,8 +47,25 @@ export function clientIp(request: Request): string {
  * Reject cross-site requests to state-changing endpoints. The app is a
  * cookie-authenticated SPA, so any mutation must come from the same origin.
  * Accepts either an explicit Origin header (browsers always send one on
- * cross-origin + same-origin POSTs) or a Referer fallback. Same-origin is
- * judged against the configured public URL (defaults to localhost:3000).
+ * cross-origin + same-origin POSTs) or a Referer fallback.
+ *
+ * Allowed origins — priority order:
+ *   1. `process.env.NEXT_PUBLIC_APP_URL` (explicit app URL; recommended)
+ *   2. `process.env.AUTH_URL` / `NEXTAUTH_URL` (Auth.js's own canonical URL)
+ *   3. `process.env.VERCEL_URL` plus the deployment scheme
+ *      (`https://`) for Vercel preview + production deploys
+ *   4. The request's own host (inferred from `host` / `x-forwarded-host`)
+ *      — used as a last-resort fallback so the app stays self-consistent
+ *      even when env vars drift (e.g. a fresh preview deploy that hasn't
+ *      had NEXT_PUBLIC_APP_URL set yet)
+ *   5. `http://localhost:3000` for local dev
+ *
+ * The point of (3) and (4) is to support Vercel's per-deploy preview URLs
+ * without forcing every preview to set NEXT_PUBLIC_APP_URL: a CSRF origin
+ * check that hard-rejects a request from the same host the user is on is
+ * the worst kind of "secure by configuration" — it locks the user out the
+ * first time the env var is forgotten.
+ *
  * Returns null when the request is safe, or a 403 response to return.
  */
 export function checkCsrf(request: Request): NextResponse | null {
@@ -61,10 +78,66 @@ export function checkCsrf(request: Request): NextResponse | null {
     // (curl, servers, tests) and allowed through for API compatibility.
     return null
   }
-  const allowedOrigin = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const allowed = new URL(allowedOrigin).origin
-  if (candidate === allowed) return null
+
+  const allowed = allowedCsrfOrigins(request)
+  for (const entry of allowed) {
+    if (candidate === entry) return null
+  }
   return NextResponse.json({ error: 'Cross-site request blocked.' }, { status: 403 })
+}
+
+/**
+ * Returns every origin the CSRF guard will accept for a given request, in
+ * priority order. See `checkCsrf` for the rationale behind each entry.
+ *
+ * Exported so tests can pin the same set as the runtime check without
+ * having to duplicate the inference logic.
+ */
+export function allowedCsrfOrigins(request: Request): string[] {
+  const out: string[] = []
+
+  // (1) explicit app URL — the documented knob in .env.example
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    try {
+      out.push(new URL(process.env.NEXT_PUBLIC_APP_URL).origin)
+    } catch {
+      // Misconfigured env var — fall through to the next source rather
+      // than crash the route. A misconfigured URL should not turn into a
+      // 403 for every request.
+    }
+  }
+
+  // (2) Auth.js's own canonical URL env vars. AUTH_URL is the v5 name;
+  // NEXTAUTH_URL is the legacy v4 alias still respected by some tooling.
+  const authUrl = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL
+  if (authUrl) {
+    try {
+      out.push(new URL(authUrl).origin)
+    } catch {
+      // Same tolerance as above.
+    }
+  }
+
+  // (3) Vercel preview + production: VERCEL_URL is host-only (no scheme)
+  // and the protocol is always https on Vercel.
+  if (process.env.VERCEL_URL) {
+    out.push(`https://${process.env.VERCEL_URL}`)
+  }
+
+  // (4) Fall back to the request's own host header (with x-forwarded-proto
+  // so the scheme is right behind Vercel's proxy). Lets a fresh preview
+  // deploy that hasn't had NEXT_PUBLIC_APP_URL set still pass CSRF for
+  // requests originating from itself.
+  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host')
+  const proto = request.headers.get('x-forwarded-proto') ?? 'https'
+  if (host) out.push(`${proto}://${host}`)
+
+  // (5) dev fallback
+  if (process.env.NODE_ENV !== 'production') {
+    out.push('http://localhost:3000')
+  }
+
+  return out
 }
 
 /* ------------------------------------------------------------------ */
