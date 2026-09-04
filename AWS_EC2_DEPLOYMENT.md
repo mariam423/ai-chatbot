@@ -75,24 +75,41 @@ npm run build
 ## 3. Configure PM2
 
 The repository is an ESM package, so `ecosystem.config.cjs` is the file used by
-the deployment script; PM2 loads it reliably through CommonJS. It starts
-`next start` on `127.0.0.1:3000` with:
+the deployment script; PM2 loads it reliably through CommonJS. It starts two
+processes:
 
+**pulse-ai** (main app) — `next start` on `127.0.0.1:3000`:
 - automatic crash restarts and a 5-second restart delay
 - a 512 MB memory restart ceiling
 - bounded unstable-restart protection
 - graceful reload/termination timeouts
 - production environment variables and merged timestamped logs
 
-Start it and configure boot persistence:
+**pulse-ai-worker** (background task processor) — handles BullMQ jobs:
+- document RAG post-processing, Stripe webhook side-effects, cache invalidation
+- 256 MB memory ceiling, 3-second restart delay
+- requires `REDIS_URL` to be set; exits immediately otherwise
+- 5 concurrent jobs, rate-limited to 30/sec
+
+Start both and configure boot persistence:
 
 ```bash
-cd /var/www/chatbot
+cd /var/www/pulse-ai
 pm2 start ecosystem.config.cjs --env production --update-env
 pm2 save
 pm2 startup systemd
 # Run the sudo command printed by `pm2 startup`, then:
 pm2 save
+```
+
+To start only the main app (no worker):
+```bash
+pm2 start ecosystem.config.cjs --only pulse-ai --env production --update-env
+```
+
+To start only the worker:
+```bash
+pm2 start ecosystem.config.cjs --only pulse-ai-worker --env production --update-env
 ```
 
 The health endpoint is available locally at

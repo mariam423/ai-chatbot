@@ -11,6 +11,7 @@ import { createEmbedding } from '@/lib/rag'
 import { errorResponse } from '@/lib/http'
 import { findOwnedSession } from '@/lib/session-access'
 import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
+import { addTask } from '@/lib/queues/task-queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -119,6 +120,15 @@ export async function POST(request: Request) {
         },
       },
       select: { id: true, name: true, mimeType: true, size: true, textLength: true },
+    })
+
+    // Dispatch background post-processing (cache invalidation, optional
+    // re-embedding). Falls back to synchronous when Redis is unavailable.
+    void addTask('document:process', {
+      sessionId: session.id,
+      documentId: document.id,
+      userId: guard.userId,
+      fileName: file.name,
     })
 
     return NextResponse.json({ document })

@@ -6,6 +6,7 @@ import { verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { parsePlanKey } from '@/lib/billing/plans'
 import { DEFAULT_USER_ROLE } from '@/lib/roles'
 import { sendSubscriptionActivatedEmail, sendSubscriptionCancelledEmail } from '@/lib/email'
+import { addTask } from '@/lib/queues/task-queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -108,6 +109,13 @@ export async function POST(request: Request) {
           },
         })
         if (updatedUser?.email) void sendSubscriptionActivatedEmail(updatedUser.email)
+        // Invalidate cached billing/user metadata so the plan change
+        // reflects immediately across all instances.
+        void addTask('webhook:stripe:post-process', {
+          userId,
+          eventType: event.type,
+          subscriptionId: typeof object.subscription === 'string' ? object.subscription : undefined,
+        })
         break
       }
       case 'customer.subscription.updated':
@@ -135,6 +143,12 @@ export async function POST(request: Request) {
         if (updatedUser?.email && event.type === 'customer.subscription.deleted') {
           void sendSubscriptionCancelledEmail(updatedUser.email)
         }
+        // Invalidate cached billing/user metadata on plan changes.
+        void addTask('webhook:stripe:post-process', {
+          userId,
+          eventType: event.type,
+          subscriptionId: subscriptionId ?? undefined,
+        })
         break
       }
       default:

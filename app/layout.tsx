@@ -20,9 +20,9 @@ const spaceGrotesk = Space_Grotesk({
   display: 'swap',
 })
 
-const APP_NAME = process.env.APP_NAME ?? 'Chatbot'
+const APP_NAME = process.env.APP_NAME ?? 'Pulse AI'
 const APP_DESCRIPTION =
-  'A streaming AI chatbot with branching conversations, skills, document RAG, and voice input — built with Next.js.'
+  'A streaming AI chatbot with branching conversations, skills, document RAG, and voice input — powered by Pulse AI.'
 const THEME_COLOR = '#059669' // matches --accent in globals.css (Cyber Emerald)
 
 export const metadata: Metadata = {

@@ -193,7 +193,7 @@ export default function LoginPage() {
             className="mt-1.5 text-sm text-[var(--text-secondary)]"
           >
             {mode === 'login'
-              ? 'Sign in to continue to Chatbot'
+              ? 'Sign in to continue to Pulse AI'
               : 'Get started with your free account'}
           </motion.p>
         </div>

@@ -1,8 +1,8 @@
 <div align="center">
 
-# AI Chatbot
+# Pulse AI
 
-### A production-grade, streaming AI chatbot — installable as a PWA, with branching conversations, document RAG, voice input, and multi-provider OAuth. Built on Next.js 16 and deployed on Vercel.
+### A production-grade, streaming AI chatbot — installable as a PWA/TWA, with branching conversations, document RAG, voice input, and multi-provider OAuth. Built on Next.js 16 and deployed on Vercel.
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/mariam423/ai-chatbot?style=for-the-badge&color=10b981" alt="License" /></a>
@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/Prisma-7.9-2D3748?style=for-the-badge&logo=prisma&logoColor=white" alt="Prisma 7" />
   <img src="https://img.shields.io/badge/PostgreSQL-Neon-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL on Neon" />
   <img src="https://img.shields.io/badge/Auth.js-5-000?style=for-the-badge&logo=nextauth&logoColor=white" alt="Auth.js" />
-  <img src="https://img.shields.io/badge/PWA-Installable-5A29E4?style=for-the-badge&logo=pwa&logoColor=white" alt="PWA" />
+  <img src="https://img.shields.io/badge/PWA%2FTWA-Installable-5A29E4?style=for-the-badge&logo=pwa&logoColor=white" alt="PWA / TWA" />
   <img src="https://img.shields.io/badge/Deployed-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel" />
 </p>
 
@@ -26,7 +26,7 @@
 
 ---
 
-> _A real-world SaaS template that goes beyond the demo: production security headers (OWASP A05), streaming LLM responses, error-fallback model routing, encrypted user secrets, an offline-capable PWA shell, and a polished glassmorphic interface._
+> _A real-world SaaS template that goes beyond the demo: production security headers (OWASP A05), streaming LLM responses, error-fallback model routing, encrypted user secrets, an offline-capable PWA shell with Google Play Store (TWA) packaging support, and a polished glassmorphic interface._
 
 ## Table of Contents
 
@@ -35,6 +35,7 @@
 - [Getting Started](#getting-started)
 - [Authentication](#authentication)
 - [PWA & Offline](#pwa--offline)
+- [Google Play Store (TWA)](#google-play-store-twa)
 - [Next.js 16 & Proxy](#nextjs-16--proxy)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -45,7 +46,7 @@
 
 ## Overview
 
-A full-featured AI chatbot built on the Next.js 16 App Router, with everything needed to ship a real product — not just a demo.
+Pulse AI is a full-featured AI chatbot built on the Next.js 16 App Router, with everything needed to ship a real product — not just a demo.
 
 **Core capabilities**
 
@@ -55,7 +56,7 @@ A full-featured AI chatbot built on the Next.js 16 App Router, with everything n
 - **Voice input & speech** — browser Web Speech API plus a server-side `/api/transcribe` fallback.
 - **Skills & custom agents** — pluggable skills (weather, web search, Kroki diagrams, Google Calendar) and user-defined custom agents.
 - **Multi-provider auth** — email + password, Google OAuth, GitHub OAuth. Account linking on shared verified emails.
-- **Progressive Web App** — installable on desktop and mobile, with an offline fallback page and a smart service worker.
+- **Progressive Web App** — installable on desktop and mobile, with an offline fallback page and a smart service worker. Ready for Google Play Store via Trusted Web Activity (TWA).
 - **Production security** — CSP, HSTS, `frame-ancestors 'none'`, and the rest of the OWASP A05 header set.
 - **Stripe billing** — Pro tier with webhook-synced plan state.
 - **Embeddable widget** — drop the chat into any external site via `app/embed-widget.js`.
@@ -88,9 +89,10 @@ A full-featured AI chatbot built on the Next.js 16 App Router, with everything n
 
 ### PWA
 
-- **Manifest** — `public/manifest.webmanifest` with maskable icons and a "New Chat" shortcut.
+- **Manifest** — `public/manifest.webmanifest` with maskable icons, a "New Chat" shortcut, and Pulse AI branding.
 - **Service worker** — vanilla `public/sw/service-worker.js`. No extra dependencies. Cache-first for `/_next/static/*`, network-first for navigations, stale-while-revalidate elsewhere.
 - **Offline fallback** — `app/offline/page.tsx`, served when no cached copy of a navigation exists.
+- **Digital Asset Links** — `public/.well-known/assetlinks.json` for TWA domain verification (Google Play Store packaging).
 
 ### Tooling
 
@@ -139,6 +141,9 @@ OPENROUTER_API_KEY="sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # NextAuth session signing — generate with: openssl rand -base64 32
 AUTH_SECRET="your-long-random-secret-here"
+
+# App identity (optional — defaults to "Pulse AI")
+APP_NAME="Pulse AI"
 ```
 
 ### 3. Apply the database schema
@@ -234,19 +239,19 @@ If a button is missing on the live login page, check this line first — it tell
 
 ### Account linking
 
-When a user signs in with Google or GitHub using a verified email that already exists in the `users` table, the OAuth identity is linked to that existing account rather than creating a duplicate. Account-first lookup (by `provider` + `providerAccountId`) prevents the same OAuth identity from being relinked to a different email later.
+When a user signs in with Google or GitHub using a verified email that already exists in the `users` table, the OAuth identity is linked to that existing account rather than creating a duplicate. Account-first lookup (by `provider` + `providerAccountId`) prevents the same OAuth identity being relinked to a different email later.
 
 ---
 
 ## PWA & Offline
 
-The app is a fully installable Progressive Web App. Once installed, it launches in a standalone window (no browser chrome), uses the Cyber Emerald theme color (`#059669`) for the status bar, and exposes a "New Chat" shortcut in the OS app menu.
+Pulse AI is a fully installable Progressive Web App. Once installed, it launches in a standalone window (no browser chrome), uses the Cyber Emerald theme color (`#059669`) for the status bar, and exposes a "New Chat" shortcut in the OS app menu.
 
 ### Installing the app
 
 | Platform                    | How to install                                                                                                                                                |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chrome / Edge (desktop)** | Click the **install icon** in the address bar, or open the browser menu and choose "Install AI Chatbot".                                                      |
+| **Chrome / Edge (desktop)** | Click the **install icon** in the address bar, or open the browser menu and choose "Install Pulse AI".                                                       |
 | **Android (Chrome)**        | Tap the browser menu → "Install app" (or "Add to Home screen"). The app appears in the launcher with the emerald icon.                                        |
 | **iOS / iPadOS (Safari)**   | Tap **Share → Add to Home Screen**. iOS doesn't surface the install icon, but the manifest and Apple-specific meta tags make the home-screen experience work. |
 | **ChromeOS**                | The install icon appears in the address bar; the app installs like a native app.                                                                              |
@@ -257,12 +262,13 @@ PWA install requires **HTTPS** — Vercel provides this automatically. Localhost
 
 | File                                                           | Purpose                                                                                                      |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`public/manifest.webmanifest`](./public/manifest.webmanifest) | PWA manifest — name, icons, theme color, display mode, shortcuts.                                            |
+| [`public/manifest.webmanifest`](./public/manifest.webmanifest) | PWA manifest — Pulse AI branding, icons, theme color, display mode, shortcuts.                               |
 | [`public/sw/service-worker.js`](./public/sw/service-worker.js) | Vanilla service worker. Smart caching strategy (see below).                                                  |
 | [`app/offline/page.tsx`](./app/offline/page.tsx)               | Static offline fallback page, served when no cached copy of a navigation exists.                             |
 | [`app/sw-init.tsx`](./app/sw-init.tsx)                         | Client component that registers the SW on `load` with a `serviceWorker in navigator` guard. Renders nothing. |
 | `public/icons/icon-192x192.png`                                | PWA icon (192×192, maskable).                                                                                |
 | `public/icons/icon-512x512.png`                                | PWA icon (512×512, maskable).                                                                                |
+| `public/.well-known/assetlinks.json`                           | Digital Asset Links for TWA domain verification.                                                             |
 | `app/layout.tsx`                                               | Injects the manifest `<link>`, `theme-color` meta, Apple-specific tags, and the SW registrar.                |
 
 ### Offline capabilities
@@ -293,6 +299,69 @@ Cache names are versioned (`static-v1.0.0`, `runtime-v1.0.0`) and pruned on `act
 4. Open DevTools → **Application → Service Workers** to confirm `/sw/service-worker.js` is **activated and running**.
 
 If the install icon doesn't appear, the most common causes are a missing manifest, a failed SW registration, or missing icons — all three are checkable from the DevTools panels above.
+
+---
+
+## Google Play Store (TWA)
+
+Pulse AI can be packaged as a **Trusted Web Activity (TWA)** for native distribution on the Google Play Store, enabling installation across PC, Mac, and mobile from a single web-based codebase.
+
+### How it works
+
+A TWA wraps the PWA in an Android app shell using [Bubblewrap](https://github.com/nicedoc/nicedoc) or the [PWABuilder](https://www.pwabuilder.com) CLI. The key requirements:
+
+| Requirement                          | Status in Pulse AI                                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Valid `manifest.webmanifest`         | ✅ `public/manifest.webmanifest` — `display: standalone`, maskable icons, `start_url: /`.               |
+| HTTPS origin                         | ✅ Vercel provides this automatically.                                                                   |
+| `assetlinks.json` at `/.well-known/` | ✅ `public/.well-known/assetlinks.json` — placeholder entry; replace with your signing key fingerprint.  |
+| Service worker registered            | ✅ `public/sw/service-worker.js` — registered via `app/sw-init.tsx`.                                    |
+| Offline fallback                     | ✅ `app/offline/page.tsx` — precached by the SW on first visit.                                         |
+
+### Packaging steps
+
+1. **Generate a signing key** for your Android app:
+   ```bash
+   keytool -genkey -v -keystore pulse-ai.keystore -alias pulse-ai -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+2. **Get the SHA-256 fingerprint** of your signing key:
+   ```bash
+   keytool -list -v -keystore pulse-ai.keystore -alias pulse-ai
+   ```
+
+3. **Update `assetlinks.json`** with your app's package name and signing key SHA-256 fingerprint:
+   ```json
+   [
+     {
+       "relation": ["delegate_permission/common.handle_all_urls"],
+       "target": {
+         "namespace": "android_app",
+         "package_name": "com.yourcompany.pulseai",
+         "sha256_cert_fingerprints": ["YOUR_SHA256_FINGERPRINT"]
+       }
+     }
+   ]
+   ```
+
+4. **Build the TWA** using [Bubblewrap](https://github.com/nicedoc/nicedoc):
+   ```bash
+   npx @nicedoc/nicedoc init
+   # Follow the prompts, pointing to your deployed Pulse AI URL
+   npx @nicedoc/nicedoc build
+   ```
+
+5. **Upload the generated AAB** to the [Google Play Console](https://play.google.com/console).
+
+### Installing across platforms
+
+| Platform        | Install method                                                                         |
+| --------------- | -------------------------------------------------------------------------------------- |
+| **Android**     | Google Play Store (TWA), or Chrome → "Install app"                                     |
+| **iOS / iPadOS**| Safari → Share → Add to Home Screen                                                    |
+| **Desktop**     | Chrome / Edge address bar install icon, or download via PWABuilder                     |
+| **Mac**         | Chrome → "Install Pulse AI" (creates a .app in Applications)                           |
+| **Windows**     | Edge → "Install Pulse AI" (creates a Start Menu shortcut)                              |
 
 ---
 
@@ -339,7 +408,7 @@ The e2e suite runs against the production build to exercise the real CSP, real s
 ## Project Structure
 
 ```
-ai-chatbot/
+pulse-ai/
 ├── app/                          # Next.js App Router
 │   ├── api/                      # Route handlers: chat, upload, transcribe, speak, auth, stripe…
 │   ├── dashboard/                # Analytics & session insights
@@ -355,7 +424,8 @@ ai-chatbot/
 ├── public/
 │   ├── icons/                    # PWA icons (192×192, 512×512)
 │   ├── manifest.webmanifest      # PWA manifest
-│   └── sw/                       # PWA service worker
+│   ├── sw/                       # PWA service worker
+│   └── .well-known/              # Digital Asset Links for TWA
 ├── tests/                        # Vitest specs
 ├── e2e/                          # Playwright specs
 ├── proxy.ts                      # Next.js 16 routing proxy (formerly middleware.ts)

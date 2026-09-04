@@ -175,15 +175,6 @@ function SessionItem({
               <span className="block truncate">{session.title}</span>
               <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
                 {session.messageCount} msg{session.messageCount === 1 ? '' : 's'}
-                {session.lastModel ? (
-                  <>
-                    {' '}
-                    ·{' '}
-                    <span className="font-mono" data-testid="session-model">
-                      via {session.lastModel}
-                    </span>
-                  </>
-                ) : null}
               </span>
             </span>
           </motion.button>
