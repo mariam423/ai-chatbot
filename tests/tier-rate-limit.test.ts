@@ -7,7 +7,7 @@ function createFakeTierRedis() {
   const store = new Map<string, Map<string, number>>() // key -> (member -> score)
   return {
     store,
-    eval: vi.fn(async (script: string, numKeys: number, ...args: (string | number)[]) => {
+    eval: vi.fn(async (_script: string, _numKeys: number, ...args: (string | number)[]) => {
       const key = String(args[0])
       const windowStart = Number(args[1])
       const now = Number(args[2])
@@ -66,11 +66,26 @@ afterEach(() => {
 describe('TIER_CONFIGS', () => {
   it('defines free and pro tiers', async () => {
     const { TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
-    expect(TIER_CONFIGS.free).toBeDefined()
-    expect(TIER_CONFIGS.pro).toBeDefined()
-    expect(TIER_CONFIGS.free.requestsPerMinute).toBeGreaterThan(0)
-    expect(TIER_CONFIGS.free.requestsPerDay).toBeGreaterThan(0)
-    expect(TIER_CONFIGS.pro.requestsPerDay).toBeNull() // unlimited
+    expect(TIER_CONFIGS.free!).toBeDefined()
+    expect(TIER_CONFIGS.pro!).toBeDefined()
+    expect(TIER_CONFIGS.free!.requestsPerMinute).toBeGreaterThan(0)
+    expect(TIER_CONFIGS.free!.requestsPerDay).toBeGreaterThan(0)
+    expect(TIER_CONFIGS.pro!.requestsPerDay).toBeNull() // unlimited
+  })
+
+  it('honors the FREE_PLAN_BURST_PER_MINUTE env knob for the free tier', async () => {
+    vi.stubEnv('FREE_PLAN_BURST_PER_MINUTE', '7')
+    vi.resetModules()
+    const { TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
+    expect(TIER_CONFIGS.free!.requestsPerMinute).toBe(7)
+    // Pro and the daily cap are untouched by the burst knob.
+    expect(TIER_CONFIGS.pro!.requestsPerMinute).toBe(120)
+    expect(TIER_CONFIGS.free!.requestsPerDay).toBeGreaterThan(0)
+    // Fallback to 20 when the env value is garbage.
+    vi.stubEnv('FREE_PLAN_BURST_PER_MINUTE', 'not-a-number')
+    vi.resetModules()
+    const again = await import('../lib/billing/tier-rate-limit')
+    expect(again.TIER_CONFIGS.free!.requestsPerMinute).toBe(20)
   })
 })
 
@@ -83,7 +98,7 @@ describe('checkTierBurstLimit (Redis sliding window)', () => {
 
   it('rejects once the limit is exceeded', async () => {
     const { checkTierBurstLimit, TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
-    const limit = TIER_CONFIGS.free.requestsPerMinute
+    const limit = TIER_CONFIGS.free!.requestsPerMinute
     // Exhaust the burst window: fake Redis allows count < limit.
     for (let i = 0; i < limit; i++) {
       expect(await checkTierBurstLimit('u1', 'free')).toEqual({ allowed: true })
@@ -109,7 +124,7 @@ describe('checkTierBurstLimit (Redis sliding window)', () => {
   it('pro tier has a higher burst limit', async () => {
     const { checkTierBurstLimit, TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
     // Pro allows 120 req/min — verify the config.
-    expect(TIER_CONFIGS.pro.requestsPerMinute).toBe(120)
+    expect(TIER_CONFIGS.pro!.requestsPerMinute).toBe(120)
     // Fake Redis allows up to the limit, so 20 calls should all pass.
     for (let i = 0; i < 20; i++) {
       expect(await checkTierBurstLimit('u-pro', 'pro')).toEqual({ allowed: true })
@@ -131,7 +146,7 @@ describe('checkTierBurstLimit (in-memory fallback)', () => {
 
   it('rejects when the limit is exceeded', async () => {
     const { checkTierBurstLimit, TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
-    const limit = TIER_CONFIGS.free.requestsPerMinute
+    const limit = TIER_CONFIGS.free!.requestsPerMinute
     for (let i = 0; i < limit; i++) {
       await checkTierBurstLimit('u-mem-limit', 'free')
     }
@@ -145,7 +160,7 @@ describe('checkTierBurstLimit (in-memory fallback)', () => {
 
 describe('getCachedDailyUsage / setCachedDailyUsage / invalidateCachedDailyUsage', () => {
   it('round-trips daily usage through Redis', async () => {
-    const { getCachedDailyUsage, setCachedDailyUsage } = await import('../lib/billing/tier-rate-limit')
+    const { setCachedDailyUsage } = await import('../lib/billing/tier-rate-limit')
     await setCachedDailyUsage('u1', { count: 5, date: '2026-09-04' })
     expect(fakeRedis.set).toHaveBeenCalledWith(
       expect.stringContaining('daily:u1'),
@@ -177,7 +192,7 @@ describe('checkTierLimits', () => {
 
   it('denies when daily cap is reached', async () => {
     const { checkTierLimits, TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
-    const dailyLimit = TIER_CONFIGS.free.requestsPerDay!
+    const dailyLimit = TIER_CONFIGS.free!.requestsPerDay!
     const result = await checkTierLimits('u1', 'free', dailyLimit)
     expect(result.allowed).toBe(false)
     if (!result.allowed) {
@@ -189,7 +204,7 @@ describe('checkTierLimits', () => {
   it('denies when burst limit is hit', async () => {
     const { checkTierLimits, TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
     // Exhaust the burst window.
-    const burstLimit = TIER_CONFIGS.free.requestsPerMinute
+    const burstLimit = TIER_CONFIGS.free!.requestsPerMinute
     for (let i = 0; i < burstLimit; i++) {
       await checkTierLimits('u1', 'free', 0)
     }
@@ -210,7 +225,7 @@ describe('checkTierLimits', () => {
 
   it('unknown plan defaults to free tier config', async () => {
     const { checkTierLimits, TIER_CONFIGS } = await import('../lib/billing/tier-rate-limit')
-    const dailyLimit = TIER_CONFIGS.free.requestsPerDay!
+    const dailyLimit = TIER_CONFIGS.free!.requestsPerDay!
     const result = await checkTierLimits('u1', 'enterprise', dailyLimit)
     expect(result.allowed).toBe(false)
     if (!result.allowed) {

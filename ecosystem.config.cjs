@@ -34,11 +34,13 @@ module.exports = {
     {
       // Background task worker — processes BullMQ jobs (document RAG,
       // Stripe webhook side-effects, cache invalidation). Only runs
-      // when REDIS_URL is set; exits immediately otherwise.
+      // when REDIS_URL is set; exits immediately otherwise. tsx is the
+      // interpreter because the worker imports TS modules that use the
+      // `@/` path alias (tsconfig paths) plain Node cannot resolve.
       name: 'pulse-ai-worker',
       cwd: __dirname,
       script: 'scripts/worker.mjs',
-      interpreter: 'node',
+      interpreter: 'node_modules/.bin/tsx',
       exec_mode: 'fork',
       instances: 1,
       autorestart: true,

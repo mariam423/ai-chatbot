@@ -64,8 +64,33 @@ export function getRedisClient(): Redis | null {
 }
 
 /**
+ * Dedicated Redis connection for BullMQ (queue + worker).
+ *
+ * BullMQ requires `maxRetriesPerRequest: null` on its connections because it
+ * issues blocking commands (BRPOPLPUSH etc.) that must never be retried per
+ * request — reusing the shared `getRedisClient()` (tuned for short
+ * serverless commands with `maxRetriesPerRequest: 3`) would corrupt job
+ * processing. Everything else (lazy connect, no reconnect, bounded connect
+ * timeout) stays the same so outages surface fast and the worker restarts
+ * cleanly. Each call returns a fresh client; BullMQ owns its lifecycle.
+ */
+export function createBullMqConnection(): Redis {
+  const url = process.env.REDIS_URL
+  if (!url) {
+    throw new Error(
+      'REDIS_URL is not set. The task queue and worker require Redis. ' +
+        'Set REDIS_URL in .env.local or your hosting provider environment.',
+    )
+  }
+  return new Redis(url, {
+    ...REDIS_OPTIONS,
+    maxRetriesPerRequest: null,
+  })
+}
+
+/**
  * Convenience: get a client or throw with a clear message when Redis is
- * required (e.g. BullMQ mandates it).
+ * required.
  */
 export function requireRedis(): Redis {
   const client = getRedisClient()

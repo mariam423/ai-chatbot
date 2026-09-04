@@ -8,10 +8,17 @@ frame analysis.
 
 A Next.js 16 App Router chatbot streams replies from an OpenAI-compatible
 provider, defaulting to OpenRouter. The app uses TypeScript strict mode, React
-19, Tailwind CSS v4, Framer Motion, Zod, and Prisma 7 with the LibSQL adapter.
-Conversation data, uploaded document metadata, extracted chunks, and serialized
-vector embeddings are persisted in SQLite. The app is authenticated by default;
-`AUTH_DISABLED=true` enables the anonymous test/local-development mode.
+19, Tailwind CSS v4, Framer Motion, Zod, and Prisma 7 over Postgres
+(`@prisma/adapter-pg`, Neon pooled URL in production). Conversation data,
+uploaded document metadata, extracted chunks, and serialized vector embeddings
+are persisted in Postgres. The app is authenticated by default;
+`AUTH_DISABLED=true` enables the anonymous test/local-development mode. An
+optional shared Redis (`REDIS_URL`) powers distributed tier rate limiting,
+short-TTL caches, and a BullMQ background worker; without it each layer
+degrades to in-process or inline-synchronous fallbacks. Chat streams run
+through a multi-provider gateway (per-user key, or OpenRouter → Gemini →
+OpenAI by configured key) with per-provider circuit breakers, failing over
+pre-stream so a 429/5xx on one provider never interrupts a reply.
 
 ## Design system
 
@@ -42,7 +49,15 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   to six validated video frames, and optional still-image/audio data URLs. It retrieves session-owned RAG context,
   composes grounding/vision/memory instructions, reserves prompt tokens before
   FIFO history compression, optionally runs MCP agent steps, and streams the
-  final OpenAI-compatible response.
+  final OpenAI-compatible response. Signed-in requests first pass the plan
+  gate — a Redis tier pre-check (per-minute burst + daily cap, in-process
+  fallback without Redis) then the DB usage counter — before any RAG or
+  provider work. The provider call is an attempt chain over `lib/gateway.ts`
+  candidates (a per-user Settings key first, then server keys in OpenRouter →
+  Gemini → OpenAI order), each provider guarded by a circuit breaker;
+  404/402/408/429, any 5xx, and thrown connect errors hop to the next
+  provider pre-stream (never mid-stream). The reply carries `X-Served-Model` /
+  `X-Served-Provider` / `X-Served-Model-Overridden` headers.
 - **`app/api/skills/route.ts`** — Capability API for the client. `GET`
   returns the full skill catalog (id, name, domain, description, system
   instructions, tool names per skill; tool name/description/JSON-schema
@@ -53,11 +68,19 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   chips. Guarded by a per-IP rate limit (no CSRF — read-only GET).
 - **`app/api/upload/route.ts`** — Node-runtime document API. `POST` accepts
   PDF/TXT/MD/CSV/XLSX/DOCX multipart uploads up to 20 MB, validates ownership
-  and limits, extracts text, chunks and embeds it, and stores metadata. `GET`
+  and limits, and extracts + chunks the text. Above the offload threshold
+  (`ASYNC_PROCESSING_MIN_CHUNKS`, ~50 chunks) it creates only the document row
+  and queues a BullMQ `document:process` job — chunking, embedding, and chunk
+  persistence run in the worker so the request returns fast; smaller documents
+  embed and persist chunk rows inline. When Redis is down the offload path
+  falls back to synchronous storage, so retrieval is always ready. `GET`
   lists session documents; `DELETE` removes a document and its chunks.
 - **`app/api/health/route.ts`** — Public, non-sensitive readiness endpoint for
   Nginx/ALB/uptime monitors. It runs a lightweight Prisma database check and
-  returns `200` for healthy or `503` for degraded readiness.
+  returns `200` for healthy or `503` for degraded readiness. A companion
+  ADMIN-gated `app/api/health/queue/route.ts` reports BullMQ queue depths
+  (waiting/active/completed/failed/delayed via `getQueueMetrics`; `queue:`
+  `null` without Redis) for operator dashboards.
 - **`app/actions.ts`** — Server Actions for session/message persistence,
   sidebar listing, rename/pin/archive, per-user custom assistants, workspace
   task persistence, preferences, prompt presets, and long-term memory records.
@@ -183,7 +206,10 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   Subscription events can resolve the user from metadata/reference id or
   stored Stripe ids. Guarded by a generous per-IP flood brake (signature
   verification is the real auth; the CSRF check is defense in depth — Stripe's
-  server-to-server calls carry no Origin).
+  server-to-server calls carry no Origin). Plan-change side-effects (billing /
+  user-meta / daily-usage cache invalidation) dispatch to a
+  `webhook:stripe:post-process` BullMQ job; when Redis is down the route
+  invalidates inline so the new plan reflects immediately.
 - **`lib/security.ts`** — Shared guardrails: `checkCsrf`
   (Origin/Referer vs `NEXT_PUBLIC_APP_URL`; absent Origin allowed for
   non-browser traffic), `sanitizeInput` (control-char strip preserving
@@ -228,8 +254,19 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   `isOverDailyLimit` helpers shared by the route guard, webhook, and UI.
 - **`lib/billing/usage.ts`** — `checkAndRecordUsage(userId)`: reads the user's
   plan + today's counter and either increments (allowing) or returns an
-  over-limit error the route surfaces as 429. Enforced in `/api/chat` before
+  over-limit error the route surfaces as 429. The Redis pre-checks in
+  `lib/billing/tier-rate-limit.ts` run first (per-minute burst + daily cap)
+  and only passing requests reach this DB counter, which re-checks the daily
+  cap against a possibly stale cached count. Enforced in `/api/chat` before
   any RAG/provider work when the user is signed in.
+- **`lib/billing/tier-rate-limit.ts`** — Redis sliding-window burst limiter
+  plus daily caps (`TIER_CONFIGS`: free 20/min burst + 20/day, pro 120/min
+  and unlimited/day; `FREE_PLAN_BURST_PER_MINUTE` / `FREE_PLAN_DAILY_LIMIT`
+  env knobs). `checkTierLimits` denies with a guard-shaped 429 + `Retry-After`
+  before the request touches the DB write path; the sorted-set window falls
+  back to an in-process Map when Redis is unreachable. Also hosts the cached
+  daily-usage read/write/invalidate helpers shared by the chat route and the
+  Stripe webhook.
 - **`lib/billing/stripe.ts`** — SDK-free Stripe REST client (plain fetch):
   `createCheckoutSession`, `createBillingPortalSession`, and
   `verifyStripeWebhookSignature` (HMAC + timing-safe compare + 5-minute skew
@@ -263,9 +300,12 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`lib/audit.ts`** — Structured security audit logging (OWASP A09):
   `logSecurityEvent` emits one-line JSON events for denials (CSRF blocks,
   401s, rate-limit trips, auth throttles, ownership violations, webhook
-  signature failures) and opt-in info events (successful logins via
-  `SECURITY_AUDIT_LOG=true`). No-op under NODE_ENV=test. Never logs bodies,
-  headers, or secrets — only ids, IPs, and status codes.
+  signature failures) and opt-in info events (successful logins,
+  `gateway_failover`, `gateway_exhausted` via `SECURITY_AUDIT_LOG=true`),
+  plus `worker_job_failed` warnings carrying the attempt count. No-op under
+  NODE_ENV=test. Never logs bodies, headers, or secrets — only ids, IPs, and
+  status codes (job payloads may hold document text, so worker error messages
+  are never logged).
 - **`lib/ssrf.ts`** — SSRF guard (OWASP A10): `assertSafeUrl` whitelists
   http(s), blocks private/loopback/link-local/reserved IPs (IPv4 + IPv6,
   incl. IPv4-mapped and dotted-quad forms), and rejects hostnames whose DNS
@@ -338,9 +378,15 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 
 ## Libraries and boundaries
 
-- **`lib/models.ts`** — Stable model-key registry for Provider default, Qwen
-  3.6, DeepSeek V4 Flash, Kimi K3, and GPT-5.6, with server-side environment
-  overrides.
+- **`lib/models.ts`** + **`lib/llm-config.ts`** — Stable model-key registry
+  (Provider default, Qwen 3.8 Flash, DeepSeek V4 Flash, Kimi K3, GPT-5.6, and
+  Gemini 3.5 Flash Lite) with per-model `MODEL_*` env overrides and
+  provider-aware slug resolution (namespaced on OpenRouter, plain names on
+  Gemini's direct endpoint). `llm-config.ts` centralizes the shared provider
+  config — key-prefix detection, per-provider base URLs — and the
+  conservative 200-token `max_tokens` cap (env-tunable) that keeps
+  pre-authorization costs near zero; models.ts also supplies stable
+  per-provider error-fallback and vision-fallback model ids.
 - **`lib/agent.ts`** — Bounded autonomous agent loop. It makes non-streaming
   planning calls with built-in and configured MCP function tools, executes
   calls sequentially, retains assistant/tool messages as execution memory, and
@@ -401,12 +447,51 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
 - **`lib/types.ts`** — Shared Zod-backed chat, uploaded-document, video-frame,
   session, memory, and prompt-preset types.
 - **`lib/storage.ts`** — Versioned localStorage fallback for chat messages,
-  extended for branching. The payload is version 2 and stores a `ThreadState`
-  (`{ version: 3, branches, active }`, messages may carry the served `model`) — a list of linear branches plus the
-  active index. `loadThread`/`saveThread` remain as active-branch
-  conveniences; v1 and pre-versioning payloads auto-migrate to a single
-  branch.
-- **`lib/db.ts`** — Hot-reload-safe Prisma singleton using the LibSQL adapter.
+  extended for branching. The stored payload is version 3 — a `ThreadState` of
+  `{ version: 3, branches, active }`, messages optionally carrying the served
+  `model` / `modelOverridden` — a list of linear branches plus the active
+  index. `loadThread`/`saveThread` remain as active-branch conveniences; v2
+  branched payloads migrate losslessly, and v1 / pre-versioning payloads
+  auto-migrate to a single branch.
+- **`lib/db.ts`** — Hot-reload-safe Prisma singleton over Postgres
+  (`@prisma/adapter-pg`). Pooling is configurable via `lib/db-config.ts`
+  (`DATABASE_POOL_MAX/MIN/IDLE_TIMEOUT_MS/CONNECTION_TIMEOUT_MS` with
+  runtime-aware defaults — per-instance max 1 on Vercel, node-postgres
+  defaults on long-lived processes), and a startup warning fires when a
+  serverless runtime points at a Neon direct URL instead of the pooled one.
+- **`lib/redis.ts`** — Shared fail-fast ioredis singleton. `getRedisClient()`
+  returns `null` without `REDIS_URL`, and the client is lazy-connected with
+  no reconnect strategy, so outages surface immediately and every consumer
+  degrades (in-memory fallback, cache miss, or synchronous processing)
+  instead of queueing forever. Also exports `createBullMqConnection()`
+  (BullMQ needs its own connection) and graceful `disconnectRedis()`.
+- **`lib/cache.ts`** — Short-TTL (30–300 s) Redis JSON cache under
+  `pulse:cache:` for user meta (plan/tier), billing status, session meta, and
+  paginated session-list pages — keeping frequent reads (sidebar list,
+  settings, quota badge) off the primary DB. SCAN-based pattern deletion
+  (`cacheDelPattern`) plus per-domain helpers (`getCachedSessionList` /
+  `setCachedSessionList` / `getCachedBillingStatus` / …); every getter
+  returns a miss and every write is a no-op when Redis is down, and callers
+  always fall through to the DB — stale data is safer than a 500. Session
+  mutations invalidate the affected user's pages (`invalidateAllUserCache`);
+  the chat usage path and Stripe post-process job invalidate the
+  billing/daily-usage keys.
+- **`lib/queues/task-queue.ts`** + **`lib/workers/task-worker.ts`** — BullMQ
+  offload of heavy work to a background worker (`pulse-tasks` queue):
+  `document:process` (chunk/embed/persist + cache invalidation for offloaded
+  uploads), `webhook:stripe:post-process`, `analytics:aggregate`, and
+  `cache:invalidate`. `addTask` returns `null` without Redis so callers fall
+  back to synchronous processing; `getQueueMetrics()` feeds the admin health
+  route. Production runs the worker as a separate PM2 process
+  (`ecosystem.config.cjs` → `scripts/worker.mjs`, which loads `.env.local`),
+  tuned via `WORKER_CONCURRENCY` / `WORKER_LIMITER_MAX`, with job-duration
+  logs and `worker_job_failed` audit events.
+- **`lib/gateway.ts`** — Multi-provider resilience for `/api/chat`.
+  `listGatewayCandidates()` orders the usable providers — a per-user Settings
+  key first (prefix-detected), then server keys in OpenRouter → Gemini →
+  OpenAI rank — and per-provider circuit breakers (3 failures/60 s opens for
+  30 s; Redis-backed with an in-process fallback) decide which candidates get
+  tried or skipped. `resetGatewayBreakers()` is the test/ops reset.
 
 ## Database
 
@@ -418,19 +503,21 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
   each user's prompt, baseline model, selected tools, and optional visual
   theme. `User` carries the SaaS billing state (`role`, `plan`,
   `stripeCustomerId`, `stripeSubscriptionId`, daily `usageCount`/`usageDate`).
-  Document and user relations cascade appropriately.
-- **`prisma/migrations/20260822100000_add_documents/migration.sql`** — Creates
-  the document and chunk tables and retrieval indexes.
-- **`prisma/migrations/20260822120000_add_memory/migration.sql`** — Creates
-  user preferences and long-term memory tables and brings session metadata
-  columns into the migration history.
-- **`prisma/migrations/20260826000000_add_user_role/migration.sql`** — Adds
-  the role column and OAuth account user index.
-- **`prisma/migrations/20260826120000_migrate_user_roles/migration.sql`** —
-  Migrates legacy `USER` rows to `FREE` and makes `FREE` the SQLite default;
-  active Stripe plans use `PRO`, while canceled subscriptions return to `FREE`.
+  Document and user relations cascade appropriately. `UserPreference` holds
+  the profile, the Settings API key and Google Calendar service-account
+  fields, preferred model + generation tuning, and the active workspace task
+  id; `WorkspaceTask` is the user-scoped task organizer; `Session` and
+  `PasswordResetToken` back the auth flows; `ChatSession.enabledSkills` is
+  the per-session skill override.
+- **`prisma/migrations/`** — a single squashed Postgres migration
+  (`20260904000000_init`; `migration_lock.toml` pins `postgresql`). It creates
+  the full schema: chat sessions + messages, users + OAuth accounts with the
+  `FREE`/`PRO`/`ADMIN` role (legacy `USER` rows normalized to `FREE`; active
+  Stripe plans use `PRO`, canceled subscriptions return to `FREE`), the
+  document/chunk tables with retrieval indexes, user preferences + long-term
+  memory, and custom agents.
 - Generated Prisma output is in `generated/` and ignored by Git. Run
-  `npx prisma generate` after schema changes.
+  `npx prisma generate` after schema changes (postinstall does it).
 
 ## Data flow
 
@@ -438,15 +525,22 @@ vector embeddings are persisted in SQLite. The app is authenticated by default;
    and falls back to the versioned localStorage thread. The header model
    selector stores a stable key in `chat.model` and sends it with each request.
 2. A document selection posts multipart data to `/api/upload`. The server
-   validates extension, MIME, size, ownership, extracts text, chunks it, stores
-   embeddings, and returns metadata for the removable badge.
+   validates extension, MIME, size, and ownership, then extracts and chunks
+   the text. Large documents (over the offload threshold) queue a BullMQ
+   `document:process` job — the worker chunks, embeds, persists chunk rows,
+   and invalidates caches — so the request returns fast; small documents
+   embed and persist inline immediately. If Redis is down the offload falls
+   back to synchronous ingestion, so the document is always retrievable.
+   Metadata returns for the removable badge.
 3. A video selection uses `lib/video.ts` in the browser to sample keyframes.
    The client sends only frame data URLs with the next `/api/chat` request as
    multimodal image content. Still images and bounded MP3/WAV data URLs use the
    same request-scoped path; the route validates them and adds visual/audio
    analysis instructions.
-4. `/api/chat` retrieves nearest document chunks and relevant user memory,
-   detects table/code/citation intent, and optionally adds an OpenAI-compatible
+4. Signed-in `/api/chat` requests pass the plan gate first (Redis burst +
+   daily pre-check, then the DB usage counter), then the route retrieves
+   nearest document chunks and relevant user memory, detects table/code/
+   citation intent, and optionally adds an OpenAI-compatible
    strict `response_format.json_schema`. Document text and memory are marked
    as untrusted data; the model is instructed to cite `[Document: ..., section
 N]` labels.
@@ -517,18 +611,24 @@ N]` labels.
 - The app deliberately hand-rolls OpenAI-compatible SSE instead of using an AI
   SDK. The MCP planning pass is non-streaming, while the final answer remains
   streamed to preserve the existing UI contract.
-- SQLite/LibSQL is the current local database choice. Integration tests use
-  temporary databases with `prisma db push`; development and deployment use
-  checked-in migrations.
+- Postgres is the database: Neon (pooled URL) in production, any Postgres
+  locally. Vitest suites stub Prisma with the in-memory `tests/_prisma-mock.ts`
+  or mock route deps; only the Playwright e2e suite touches a real Postgres
+  (CI provisions a Postgres 16 service container). Schema is versioned by the
+  squashed Postgres `init` migration — apply with `npx prisma migrate deploy`.
 
 ## Tests
 
 - `npm run typecheck` runs strict TypeScript checking.
-- `npm test` runs Vitest suites for agents/skills, API contracts, context
-  compression, documents/RAG, models/structured output, MCP execution, memory,
-  and video-frame validation. `tests/live-providers.test.ts` exercises the
-  real Kroki + Google Calendar providers but is skipped unless
-  `RUN_LIVE_PROVIDER_TESTS=true` (manual runs only).
+- `npm test` runs the Vitest suites — agents/skills conventions, SSE parsing,
+  security/rate-limit/auth throttles, SSRF, field encryption, billing/Stripe
+  webhooks, task queue + worker, session-cache wiring, gateway failover, RAG,
+  storage, export helpers, and route-contract tests. `npm run check` =
+  typecheck + the full Vitest run (the CI gate). Two suites exercise real
+  external services and skip unless opted in: `tests/live-providers.test.ts`
+  (Kroki + Google Calendar, `RUN_LIVE_PROVIDER_TESTS=true`) and
+  `tests/redis-smoke.test.ts` (tier burst limiter + real `/api/chat` against a
+  live Redis, `RUN_REDIS_SMOKE=true` + `REDIS_URL`) — manual runs only.
 - `npm run build` verifies the production Next.js bundle and route modules.
 - `npm run test:e2e` runs the existing Playwright chat/sidebar/accessibility/
   visual flows against a production build with mocked chat streaming.

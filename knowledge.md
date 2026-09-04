@@ -22,9 +22,12 @@ agent scaffold (`.agents/`) and tests that validate both.
   sidebar title). All return `{ ok }` results; inputs validated with Zod.
 - `prisma/schema.prisma` — ChatSession has an optional `title` (user-renamed
   sidebar label); when null the sidebar derives the title from the first message.
-- `lib/db.ts` — PrismaClient singleton (LibSQL adapter, WASM).
-- `prisma/schema.prisma` — ChatSession + ChatMessage models (SQLite); generated
-  client at `generated/` (gitignored), migrations in `prisma/migrations/`.
+- `lib/db.ts` — PrismaClient singleton over Postgres (`@prisma/adapter-pg`);
+  pool tuning is env-driven via `lib/db-config.ts` (`DATABASE_POOL_*`).
+- `prisma/schema.prisma` — Postgres schema (chat sessions/messages, users +
+  OAuth accounts, preferences, documents/chunks, memory, custom agents);
+  generated client at `generated/` (gitignored), versioned by a single
+  squashed Postgres migration in `prisma/migrations/` (`20260904000000_init`).
 - `components/chat-app.tsx` — app shell: sidebar + thread layout, session id
   management (New Chat clears the id AND the cached thread), dark/light theme
   toggle persisted in `chat.theme`, session list refresh.
@@ -88,7 +91,7 @@ active }` with optional per-message `model`/`modelOverridden` (which model
 
 ```bash
 npm install        # install all deps (app + dev tooling); postinstall runs prisma generate
-npx prisma migrate dev  # apply schema migrations to the local SQLite DB
+npx prisma migrate dev  # apply schema migrations to the local Postgres DB
 npm run dev        # Next.js dev server
 npm run build      # production build (also typechecks the app)
 npm run start      # serve the production build
@@ -117,8 +120,8 @@ npm run check      # typecheck + tests
 - `OPENAI_BASE_URL`, `OPENAI_MODEL` — override OpenAI defaults.
 - `OPENROUTER_APP_NAME` — optional; sent as `X-Title` for OpenRouter app
   attribution.
-- `DATABASE_URL` — SQLite file for conversation history (`file:./prisma/dev.db`
-  in `.env`); production: hosted LibSQL/Turso URL.
+- `DATABASE_URL` — Postgres connection string. Production: the Neon **pooled**
+  URL (with `?pgbouncer=true`); local dev: any Postgres URL (see `.env.example`).
 
 ## Conventions
 
@@ -179,13 +182,14 @@ npm run check      # typecheck + tests
   alone exceeds the budget. Abstractive (LLM) summarization is deliberately
   not used — it would add a second LLM call per request.
 - Conversation history (FR-11): Server Actions persist the thread per
-  anonymous session (`chat.sessionId` in localStorage) via Prisma/SQLite;
+  anonymous session (`chat.sessionId` in localStorage) via Prisma/Postgres;
   the DB is authoritative on load, localStorage is the offline fallback.
   Message ids are globally unique (client UUIDs) — re-saving is an idempotent
   upsert; reusing an id across sessions would update the wrong row.
-- SQLite runs through `@prisma/adapter-libsql` (WASM) — `better-sqlite3`
-  needs native build tools (`make`/`g++`) that are unavailable here. Re-run
-  `npx prisma generate` after any schema change (postinstall does it).
+- Postgres runs through `@prisma/adapter-pg` (native driver). Pool tuning is
+  env-driven (`DATABASE_POOL_*` → `lib/db-config.ts`; per-instance `max`
+  defaults to 1 on Vercel). Re-run `npx prisma generate` after any schema
+  change (postinstall does it).
 - Conversation persistence (FR-9) is best-effort via localStorage
   (`chat.messages` key). The stored payload is versioned
   (`{ version: 3, branches, active }`, with optional per-message `model` /

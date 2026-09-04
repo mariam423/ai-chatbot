@@ -33,6 +33,23 @@ jobs:
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
+    # The app now targets Postgres (Neon in production); CI runs a throwaway
+    # Postgres service so the committed migrations and the runtime adapter
+    # (lib/db.ts → @prisma/adapter-pg) are exercised against the real engine.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pulse_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,13 +59,13 @@ jobs:
       - run: npm ci
       # The e2e suite runs with auth disabled (chat requests are mocked, so no
       # LLM key is needed). Provide the minimal env the production server and
-      # NextAuth require, then create the SQLite DB from the committed
-      # migrations. .env is gitignored, so write it here.
+      # NextAuth require, then apply the committed Postgres migrations to the
+      # service above. .env is gitignored, so write it here.
       # STRIPE_WEBHOOK_SECRET enables the webhook route for e2e — the
       # webhook-rate-limit spec signs events with exactly this value.
       - name: Configure environment
         run: |
-          echo "DATABASE_URL=\"file:./prisma/dev.db\"" > .env
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/pulse_ai" > .env
           echo "AUTH_DISABLED=true" >> .env
           echo "AUTH_TRUST_HOST=true" >> .env
           echo "AUTH_SECRET=${{ runner.os }}-ci-secret" >> .env

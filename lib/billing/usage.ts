@@ -44,5 +44,11 @@ export async function checkAndRecordUsage(
       usageDate: today,
     },
   })
+  // The settings/dashboard billing status is cached (30 s TTL); drop it so
+  // the displayed counters reflect this recorded request immediately. This
+  // is fire-and-forget — a Redis hiccup must never slow the chat hot path
+  // (the cache functions no-op when Redis is unavailable anyway).
+  const { invalidateCachedBillingStatus } = await import('@/lib/cache')
+  void invalidateCachedBillingStatus(userId)
   return { ok: true }
 }

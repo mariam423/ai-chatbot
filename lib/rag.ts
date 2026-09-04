@@ -43,6 +43,28 @@ export function createEmbedding(text: string): number[] {
   return magnitude === 0 ? vector : vector.map((value) => value / magnitude)
 }
 
+/**
+ * Persist chunk rows with computed embeddings for a document whose metadata
+ * row already exists (the worker's offloaded ingestion path). Embeddings are
+ * deterministic local hashes, so recomputing them is idempotent and safe on
+ * job retries. The upload route uses this as its synchronous fallback when
+ * Redis is unavailable.
+ */
+export async function storeDocumentChunks(
+  documentId: string,
+  chunks: Array<{ chunkIndex: number; content: string }>,
+): Promise<void> {
+  if (chunks.length === 0) return
+  await prisma.documentChunk.createMany({
+    data: chunks.map(({ chunkIndex, content }) => ({
+      documentId,
+      chunkIndex,
+      content,
+      embedding: JSON.stringify(createEmbedding(content)),
+    })),
+  })
+}
+
 function cosineSimilarity(left: number[], right: number[]): number {
   let score = 0
   for (let index = 0; index < EMBEDDING_DIMENSION; index += 1) {

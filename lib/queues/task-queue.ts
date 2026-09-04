@@ -12,7 +12,7 @@
  */
 
 import { Queue, type JobOptions } from 'bullmq'
-import { requireRedis } from '@/lib/redis'
+import { createBullMqConnection } from '@/lib/redis'
 
 /* ------------------------------------------------------------------ */
 /* Job type definitions                                                */
@@ -31,6 +31,13 @@ export interface DocumentProcessPayload {
   userId: string
   /** Original file name for logging. */
   fileName: string
+  /**
+   * Extracted document text, present on the large-document offload path.
+   * The worker then chunks, embeds, and persists the chunk rows; when
+   * absent the job is post-processing only (cache invalidation) — the
+   * upload route already stored everything synchronously.
+   */
+  text?: string
 }
 
 export interface DocumentEmbedPayload {
@@ -82,12 +89,12 @@ function getQueue(): Queue | null {
   if (!process.env.REDIS_URL) return null
 
   try {
-    const redis = requireRedis()
+    const redis = createBullMqConnection()
     queue = new Queue(QUEUE_NAME, {
       connection: redis,
       defaultJobOptions: {
         removeOnComplete: { age: 86_400, count: 1_000 }, // keep 24h or 1k jobs
-        removeOnFail: { age: 604_800, count: 5_000 },   // keep 7d of failures
+        removeOnFail: { age: 604_800, count: 5_000 }, // keep 7d of failures
         attempts: 3,
         backoff: { type: 'exponential', delay: 2_000 },
       },

@@ -181,6 +181,7 @@ describe('ROUTE_GUARDS', () => {
       'analytics',
       'chat',
       'citation',
+      'health-queue',
       'skills',
       'stripe-webhook',
       'transcribe',
@@ -211,6 +212,12 @@ describe('ROUTE_GUARDS', () => {
     expect(ROUTE_GUARDS['stripe-webhook'].rateLimit).toMatchObject({ limit: 600 })
     // Analytics: CSRF only, no rate limit.
     expect(ROUTE_GUARDS.analytics.rateLimit).toBeUndefined()
+    // Health queue metrics: session-gated GET (role enforced in the route).
+    expect(ROUTE_GUARDS['health-queue']).toMatchObject({
+      session: true,
+      csrf: false,
+      rateLimit: { limit: 120 },
+    })
   })
 })
 

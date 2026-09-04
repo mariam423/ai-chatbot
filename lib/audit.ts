@@ -29,6 +29,11 @@ export type SecurityEventKind =
   | 'billing_throttled'
   | 'webhook_invalid_signature'
   | 'decryption_failed'
+  | 'worker_job_failed'
+  // LLM gateway telemetry (Phase 4): emitted at info level, so both are
+  // gated behind SECURITY_AUDIT_LOG like other info events.
+  | 'gateway_failover'
+  | 'gateway_exhausted'
 
 /**
  * Emit one structured security event. `details` must contain only small,

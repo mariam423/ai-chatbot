@@ -2,12 +2,70 @@ import { generateKeyPairSync } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage } from '../lib/types'
 import { getCurrentUserId } from '../lib/auth-context'
+import { headers } from 'next/headers'
 import { makeInMemoryPrisma } from './_prisma-mock'
 
 // Mock auth context — next-auth can't run in vitest (no next/server).
 // Server actions fall through to anonymous access (userId=null) in tests.
 vi.mock('../lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
+}))
+
+// Billing server actions derive the client IP from next/headers, which can't
+// run outside a request scope — mock it like tests/auth-security.test.ts.
+vi.mock('next/headers', () => ({
+  headers: vi.fn(),
+}))
+
+// Distributed-cache wiring tests exercise the cache-backed listChatSessions /
+// getBillingStatus paths through a fake Redis (same surface as
+// tests/cache.test.ts). Cache calls otherwise no-op (getRedisClient → null),
+// so the mock only affects the assertions below.
+const redisCacheState = vi.hoisted(() => {
+  const store = new Map<string, string>()
+  // Minimal glob support for the `MATCH` patterns lib/cache uses: `*` matches
+  // any run of characters (patterns never contain other glob syntax).
+  const matchesGlob = (key: string, pattern: string): boolean => {
+    const parts = pattern.split('*')
+    if (parts.length === 1) return key === pattern
+    let rest = key
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i]!
+      if (part === '') continue
+      const at = rest.indexOf(part)
+      if (at === -1) return false
+      rest = rest.slice(at + part.length)
+    }
+    return true
+  }
+  const client = {
+    store,
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    set: vi.fn(async (key: string, value: string) => {
+      store.set(key, value)
+    }),
+    del: vi.fn(async (key: string) => {
+      store.delete(key)
+    }),
+    scan: vi.fn(async (_cursor: string, _cmd: string, pattern: string) => {
+      const keys = [...store.keys()].filter((key) => matchesGlob(key, pattern))
+      return ['0', keys]
+    }),
+    pipeline: vi.fn(() => ({
+      del: vi.fn((key: string) => {
+        store.delete(key)
+      }),
+      exec: vi.fn(async () => [] as unknown[]),
+    })),
+    quit: vi.fn(async () => undefined),
+    on: vi.fn(),
+    connect: vi.fn(async () => undefined),
+    status: 'ready',
+  }
+  return { getRedisClient: () => client, client }
+})
+vi.mock('../lib/redis', () => ({
+  getRedisClient: redisCacheState.getRedisClient,
 }))
 
 // In-memory prisma stand-in. The real Prisma client would need a live
@@ -47,9 +105,12 @@ function singleBranchExpected(sessionId: string) {
 }
 
 describe('workspace task persistence server actions', () => {
+  // app/actions pulls in the full server-actions graph (prisma, security,
+  // billing, encryption). Under parallel full-suite load the first import
+  // can exceed the default 10s hook timeout — give it room.
   beforeAll(async () => {
     actions = await import('../app/actions')
-  })
+  }, 30_000)
 
   beforeEach(async () => {
     const { prisma } = await import('../lib/db')
@@ -173,7 +234,7 @@ describe('workspace task persistence server actions', () => {
 describe('conversation persistence server actions', () => {
   beforeAll(async () => {
     actions = await import('../app/actions')
-  })
+  }, 30_000)
 
   it('returns an empty thread for an unknown session', async () => {
     const result = await actions.getChatSession('no-such-session')
@@ -686,7 +747,7 @@ describe('custom assistant server actions', () => {
       create: { id: 'user-1', email: 'user-1@example.com' },
       update: {},
     })
-  })
+  }, 30_000)
 
   beforeEach(async () => {
     vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
@@ -747,7 +808,7 @@ describe('user preferences (calendar credentials)', () => {
       create: { id: 'user-1', email: 'user-1@example.com' },
       update: {},
     })
-  })
+  }, 30_000)
 
   afterEach(async () => {
     vi.mocked(getCurrentUserId).mockResolvedValue(null)
@@ -1079,7 +1140,7 @@ describe('data-at-rest field encryption (ENCRYPTION_KEY)', () => {
       create: { id: 'user-enc', email: 'enc@example.com' },
       update: {},
     })
-  })
+  }, 30_000)
 
   afterEach(async () => {
     delete process.env.ENCRYPTION_KEY
@@ -1159,5 +1220,158 @@ describe('data-at-rest field encryption (ENCRYPTION_KEY)', () => {
       ok: false,
       error: 'No Google Calendar credentials saved yet.',
     })
+  })
+})
+
+describe('distributed cache wiring (fake Redis)', () => {
+  const cacheUserId = 'cache-user'
+  const billingUserId = 'billing-user'
+  const billingIp = '203.0.113.9'
+
+  beforeAll(async () => {
+    actions = await import('../app/actions')
+    vi.mocked(headers).mockResolvedValue(new Headers([['x-forwarded-for', billingIp]]))
+  }, 30_000)
+
+  beforeEach(async () => {
+    const { prisma } = await import('../lib/db')
+    await prisma.chatSession.deleteMany()
+    await prisma.chatMessage.deleteMany()
+    await prisma.user.deleteMany({
+      where: { id: { in: [cacheUserId, billingUserId] } },
+    })
+    redisCacheState.client.store.clear()
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+  })
+
+  it('serves the cached sidebar list and invalidates it on a session mutation', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(cacheUserId)
+    const { prisma } = await import('../lib/db')
+    await actions.saveChatMessages({
+      sessionId: 'cache-sess-1',
+      branches: branchesFor('cache-sess-1'),
+    })
+
+    // First read: cache miss → DB → page written under the per-user key.
+    const first = await actions.listChatSessions()
+    expect(first.ok).toBe(true)
+    const firstIds = (first as { sessions: Array<{ id: string }> }).sessions.map((s) => s.id)
+    expect(firstIds).toEqual(['cache-sess-1'])
+    const pageKey = `pulse:cache:sessions:list:${cacheUserId}:0:0:20`
+    expect(redisCacheState.client.store.has(pageKey)).toBe(true)
+
+    // Wipe the DB behind the action's back — the cached page still serves.
+    await prisma.chatSession.deleteMany()
+    await prisma.chatMessage.deleteMany()
+    const second = await actions.listChatSessions()
+    expect(second.ok).toBe(true)
+    expect((second as { sessions: Array<{ id: string }> }).sessions.map((s) => s.id)).toEqual([
+      'cache-sess-1',
+    ])
+
+    // A rename invalidates the user's list cache → next read reflects the DB.
+    expect(
+      await actions.renameChatSession({ sessionId: 'cache-sess-1', title: 'Renamed' }),
+    ).toEqual({ ok: true })
+    expect(redisCacheState.client.store.has(pageKey)).toBe(false)
+    const third = await actions.listChatSessions()
+    expect(third.ok).toBe(true)
+    expect((third as { sessions: Array<{ id: string }> }).sessions).toEqual([])
+  })
+
+  it('search results bypass the list cache', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(cacheUserId)
+    const { prisma } = await import('../lib/db')
+    await actions.saveChatMessages({
+      sessionId: 'cache-sess-search',
+      branches: branchesFor('cache-sess-search'),
+    })
+    // Populate the non-search page cache.
+    await actions.listChatSessions()
+    expect(redisCacheState.client.store.size).toBeGreaterThan(0)
+
+    // A search never reads or writes the cache — wipe the DB and the search
+    // (correctly) returns nothing instead of a stale cached page.
+    await prisma.chatSession.deleteMany()
+    await prisma.chatMessage.deleteMany()
+    const result = await actions.listChatSessions({ search: 'cache-sess-search' })
+    expect(result).toEqual({ ok: true, sessions: [], hasMore: false })
+  })
+
+  it('serves billing status from the cache and recomputes after invalidation', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(billingUserId)
+    const today = new Date().toISOString().slice(0, 10)
+    const { prisma } = await import('../lib/db')
+    await prisma.user.create({
+      data: {
+        id: billingUserId,
+        email: 'billing@example.com',
+        plan: 'free',
+        usageCount: 3,
+        usageTokens: 1500,
+        usageDate: today,
+      },
+    })
+
+    // Cache miss → DB read → result cached under the user's billing key.
+    const first = await actions.getBillingStatus()
+    expect(first.ok).toBe(true)
+    if (first.ok) {
+      expect(first.data.usedToday).toBe(3)
+      expect(first.data.estimatedTokensToday).toBe(1500)
+    }
+    const billingKey = `pulse:cache:billing:${billingUserId}`
+    expect(redisCacheState.client.store.has(billingKey)).toBe(true)
+
+    // Bump usage behind the action's back — the cached status still serves.
+    await prisma.user.update({
+      where: { id: billingUserId },
+      data: { usageCount: 10, usageTokens: 9999, usageDate: today },
+    })
+    const second = await actions.getBillingStatus()
+    expect(second.ok).toBe(true)
+    if (second.ok) expect(second.data.usedToday).toBe(3) // stale by design (hit)
+
+    // Invalidate → the next read recomputes from the DB.
+    const { invalidateCachedBillingStatus } = await import('../lib/cache')
+    await invalidateCachedBillingStatus(billingUserId)
+    const third = await actions.getBillingStatus()
+    expect(third.ok).toBe(true)
+    if (third.ok) {
+      expect(third.data.usedToday).toBe(10)
+      expect(third.data.estimatedTokensToday).toBe(9999)
+    }
+  })
+
+  it('usage recording invalidates the cached billing status', async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(billingUserId)
+    const today = new Date().toISOString().slice(0, 10)
+    const { prisma } = await import('../lib/db')
+    await prisma.user.create({
+      data: {
+        id: billingUserId,
+        email: 'billing@example.com',
+        plan: 'free',
+        usageCount: 5,
+        usageTokens: 100,
+        usageDate: today,
+      },
+    })
+
+    await actions.getBillingStatus()
+    const billingKey = `pulse:cache:billing:${billingUserId}`
+    expect(redisCacheState.client.store.has(billingKey)).toBe(true)
+
+    // Recording a chat request drops the cache so the settings read stays fresh.
+    const { checkAndRecordUsage } = await import('../lib/billing/usage')
+    expect(await checkAndRecordUsage(billingUserId, 200)).toEqual({ ok: true })
+    expect(redisCacheState.client.store.has(billingKey)).toBe(false)
+
+    const fresh = await actions.getBillingStatus()
+    expect(fresh.ok).toBe(true)
+    if (fresh.ok) {
+      expect(fresh.data.usedToday).toBe(6)
+      expect(fresh.data.estimatedTokensToday).toBe(300)
+    }
   })
 })

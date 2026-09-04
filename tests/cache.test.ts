@@ -116,7 +116,10 @@ describe('cacheGet / cacheSet / cacheDel', () => {
 
 describe('cacheDelPattern', () => {
   it('scans and deletes matching keys', async () => {
-    fakeRedis.scan.mockResolvedValueOnce(['0', ['pulse:cache:user:meta:u1', 'pulse:cache:user:meta:u2']])
+    fakeRedis.scan.mockResolvedValueOnce([
+      '0',
+      ['pulse:cache:user:meta:u1', 'pulse:cache:user:meta:u2'],
+    ])
     const pipelineInstance = { del: vi.fn(), exec: vi.fn(async () => []) }
     fakeRedis.pipeline.mockReturnValueOnce(pipelineInstance)
 
@@ -124,7 +127,11 @@ describe('cacheDelPattern', () => {
     await cacheDelPattern('user:meta:*')
 
     expect(fakeRedis.scan).toHaveBeenCalledWith(
-      '0', 'MATCH', 'pulse:cache:user:meta:*', 'COUNT', 100,
+      '0',
+      'MATCH',
+      'pulse:cache:user:meta:*',
+      'COUNT',
+      100,
     )
     expect(fakeRedis.pipeline).toHaveBeenCalled()
     expect(pipelineInstance.del).toHaveBeenCalledWith('pulse:cache:user:meta:u1')
@@ -174,7 +181,14 @@ describe('cacheDelPattern', () => {
 describe('domain-specific cache accessors', () => {
   it('getCachedUserMeta / setCachedUserMeta', async () => {
     const { getCachedUserMeta, setCachedUserMeta } = await import('../lib/cache')
-    const meta = { id: 'u1', plan: 'free', role: 'FREE', usageCount: 5, usageTokens: 1200, usageDate: '2026-09-04' }
+    const meta = {
+      id: 'u1',
+      plan: 'free',
+      role: 'FREE',
+      usageCount: 5,
+      usageTokens: 1200,
+      usageDate: '2026-09-04',
+    }
     await setCachedUserMeta('u1', meta)
     fakeRedis.get.mockImplementation(async (key: string) => fakeRedis.store.get(key) ?? null)
     const cached = await getCachedUserMeta('u1')
@@ -189,7 +203,15 @@ describe('domain-specific cache accessors', () => {
 
   it('getCachedBillingStatus / setCachedBillingStatus', async () => {
     const { getCachedBillingStatus, setCachedBillingStatus } = await import('../lib/cache')
-    const status = { plan: 'pro', planLabel: 'Pro', dailyLimit: null, usedToday: 42, overLimit: false, stripeConfigured: true }
+    const status = {
+      plan: 'pro',
+      planLabel: 'Pro',
+      dailyLimit: null,
+      usedToday: 42,
+      estimatedTokensToday: 5000,
+      overLimit: false,
+      stripeConfigured: true,
+    }
     await setCachedBillingStatus('u1', status)
     fakeRedis.get.mockImplementation(async (key: string) => fakeRedis.store.get(key) ?? null)
     const cached = await getCachedBillingStatus('u1')
@@ -217,18 +239,114 @@ describe('domain-specific cache accessors', () => {
     expect(fakeRedis.del).toHaveBeenCalledWith('pulse:cache:session:meta:s1')
   })
 
-  it('invalidateAllUserCache clears user meta, billing, and sessions', async () => {
+  it('invalidateAllUserCache clears user meta, billing, and session list pages', async () => {
     const { invalidateAllUserCache } = await import('../lib/cache')
     fakeRedis.scan.mockResolvedValueOnce(['0', []])
     await invalidateAllUserCache('u1')
     expect(fakeRedis.del).toHaveBeenCalledWith('pulse:cache:user:meta:u1')
     expect(fakeRedis.del).toHaveBeenCalledWith('pulse:cache:billing:u1')
+    expect(fakeRedis.scan).toHaveBeenCalledWith(
+      '0',
+      'MATCH',
+      'pulse:cache:sessions:list:u1:*',
+      'COUNT',
+      100,
+    )
   })
 
   it('returns null when domain accessor gets corrupted JSON', async () => {
     fakeRedis.get.mockResolvedValueOnce('{broken')
     const { getCachedUserMeta } = await import('../lib/cache')
     const result = await getCachedUserMeta('u1')
+    expect(result).toBeNull()
+  })
+})
+
+describe('sidebar session-list page cache', () => {
+  const PAGE = {
+    sessions: [
+      {
+        id: 's1',
+        title: 'Trip to Paris',
+        updatedAt: '2026-09-04T10:00:00.000Z',
+        messageCount: 4,
+        pinned: false,
+        archived: false,
+        lastModel: 'minimax/minimax-m3:free',
+      },
+    ],
+    hasMore: false,
+  }
+
+  it('round-trips a page through set/get per user + pagination slice', async () => {
+    const { getCachedSessionList, setCachedSessionList } = await import('../lib/cache')
+    await setCachedSessionList('u1', { archived: false, skip: 0, take: 20 }, PAGE)
+    expect(fakeRedis.set).toHaveBeenCalledWith(
+      'pulse:cache:sessions:list:u1:0:0:20',
+      JSON.stringify(PAGE),
+      'EX',
+      expect.any(Number),
+    )
+    fakeRedis.get.mockImplementation(async (key: string) => fakeRedis.store.get(key) ?? null)
+    const cached = await getCachedSessionList('u1', { archived: false, skip: 0, take: 20 })
+    expect(cached).toEqual(PAGE)
+  })
+
+  it('isolates pages by archived flag, skip, and take', async () => {
+    const { setCachedSessionList } = await import('../lib/cache')
+    await setCachedSessionList('u1', { archived: true, skip: 0, take: 20 }, PAGE)
+    await setCachedSessionList('u1', { archived: false, skip: 20, take: 20 }, PAGE)
+    await setCachedSessionList('u2', { archived: false, skip: 0, take: 20 }, PAGE)
+    expect(fakeRedis.set).toHaveBeenCalledWith(
+      'pulse:cache:sessions:list:u1:1:0:20',
+      expect.any(String),
+      'EX',
+      expect.any(Number),
+    )
+    expect(fakeRedis.set).toHaveBeenCalledWith(
+      'pulse:cache:sessions:list:u1:0:20:20',
+      expect.any(String),
+      'EX',
+      expect.any(Number),
+    )
+    expect(fakeRedis.set).toHaveBeenCalledWith(
+      'pulse:cache:sessions:list:u2:0:0:20',
+      expect.any(String),
+      'EX',
+      expect.any(Number),
+    )
+  })
+
+  it('invalidateCachedSessionList scans away every page for the user', async () => {
+    const pipelineInstance = { del: vi.fn(), exec: vi.fn(async () => []) }
+    fakeRedis.pipeline.mockReturnValueOnce(pipelineInstance)
+    fakeRedis.scan.mockResolvedValueOnce([
+      '0',
+      [
+        'pulse:cache:sessions:list:u1:0:0:20',
+        'pulse:cache:sessions:list:u1:0:20:20',
+        'pulse:cache:sessions:list:u1:1:0:20',
+      ],
+    ])
+
+    const { invalidateCachedSessionList } = await import('../lib/cache')
+    await invalidateCachedSessionList('u1')
+    expect(fakeRedis.scan).toHaveBeenCalledWith(
+      '0',
+      'MATCH',
+      'pulse:cache:sessions:list:u1:*',
+      'COUNT',
+      100,
+    )
+    expect(pipelineInstance.del).toHaveBeenCalledTimes(3)
+    expect(pipelineInstance.del).toHaveBeenCalledWith('pulse:cache:sessions:list:u1:1:0:20')
+    // Another user's pages are untouched.
+    expect(pipelineInstance.del).not.toHaveBeenCalledWith('pulse:cache:sessions:list:u2:0:0:20')
+  })
+
+  it('returns null on a cache miss', async () => {
+    const { getCachedSessionList } = await import('../lib/cache')
+    const result = await getCachedSessionList('u1', { archived: false, skip: 0, take: 20 })
     expect(result).toBeNull()
   })
 })
@@ -248,7 +366,23 @@ describe('cache accessors degrade when Redis is null', () => {
 
   it('setCachedUserMeta is a no-op', async () => {
     const { setCachedUserMeta } = await import('../lib/cache')
-    await setCachedUserMeta('u1', { id: 'u1', plan: 'free', role: 'FREE', usageCount: 0, usageTokens: 0, usageDate: '' })
+    await setCachedUserMeta('u1', {
+      id: 'u1',
+      plan: 'free',
+      role: 'FREE',
+      usageCount: 0,
+      usageTokens: 0,
+      usageDate: '',
+    })
+  })
+
+  it('setCachedSessionList is a no-op', async () => {
+    const { setCachedSessionList } = await import('../lib/cache')
+    await setCachedSessionList(
+      'u1',
+      { archived: false, skip: 0, take: 20 },
+      { sessions: [], hasMore: false },
+    )
   })
 
   it('invalidateCachedUserMeta is a no-op', async () => {
@@ -269,5 +403,10 @@ describe('cache accessors degrade when Redis is null', () => {
   it('getCachedSessionMeta returns null', async () => {
     const { getCachedSessionMeta } = await import('../lib/cache')
     expect(await getCachedSessionMeta('s1')).toBeNull()
+  })
+
+  it('getCachedSessionList returns null', async () => {
+    const { getCachedSessionList } = await import('../lib/cache')
+    expect(await getCachedSessionList('u1', { archived: false, skip: 0, take: 20 })).toBeNull()
   })
 })

@@ -16,7 +16,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm test",
-    "worker": "WORKER_MODE=true node scripts/worker.mjs"
+    "worker": "tsx scripts/worker.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -33,6 +33,7 @@
     "prettier": "^3.9.6",
     "prisma": "^7.9.1",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
@@ -46,6 +47,7 @@
     "@prisma/client": "^7.9.1",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.3.4",
+    "dotenv": "^17.4.2",
     "framer-motion": "^13.1.1",
     "ioredis": "^6.0.0",
     "lucide-react": "^1.33.0",

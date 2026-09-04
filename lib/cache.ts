@@ -81,7 +81,13 @@ export async function cacheDelPattern(pattern: string): Promise<void> {
   try {
     let cursor = '0'
     do {
-      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${PREFIX}${pattern}`, 'COUNT', 100)
+      const [nextCursor, keys] = await redis.scan(
+        cursor,
+        'MATCH',
+        `${PREFIX}${pattern}`,
+        'COUNT',
+        100,
+      )
       cursor = nextCursor
       if (keys.length > 0) {
         const pipeline = redis.pipeline()
@@ -137,6 +143,7 @@ export interface CachedBillingStatus {
   planLabel: string
   dailyLimit: number | null
   usedToday: number
+  estimatedTokensToday: number
   overLimit: boolean
   stripeConfigured: boolean
 }
@@ -183,6 +190,73 @@ export async function invalidateCachedSessionMeta(sessionId: string): Promise<vo
   await cacheDel(`session:meta:${sessionId}`)
 }
 
+/* ------------------------------------------------------------------ */
+/* Sidebar session-list pages                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Cached sidebar list page — the search-less `listChatSessions` result for
+ * one user/pagination slice. Pages are cached per user (not per session)
+ * because the sidebar lists many sessions and the expensive part is the
+ * per-session aggregate query over `chat_messages`; per-session keys could
+ * not serve a paged, multi-row list anyway.
+ *
+ * Only the default (non-search) list is cached — search results are
+ * ephemeral per keystroke and would explode the key space.
+ */
+export interface CachedSessionListItem {
+  id: string
+  title: string
+  updatedAt: string
+  messageCount: number
+  pinned: boolean
+  archived: boolean
+  lastModel: string | null
+}
+
+export interface CachedSessionListPage {
+  sessions: CachedSessionListItem[]
+  hasMore: boolean
+}
+
+const SESSION_LIST_TTL = 30 // 30 seconds — every save reorders/updates the sidebar
+
+function sessionListCacheKey(
+  userId: string,
+  opts: { archived: boolean; skip: number; take: number },
+): string {
+  return `sessions:list:${userId}:${opts.archived ? '1' : '0'}:${opts.skip}:${opts.take}`
+}
+
+/**
+ * Read a cached sidebar page, or `null` on miss / Redis failure. The caller
+ * falls through to the DB and repopulates.
+ */
+export async function getCachedSessionList(
+  userId: string,
+  opts: { archived: boolean; skip: number; take: number },
+): Promise<CachedSessionListPage | null> {
+  return cacheGet<CachedSessionListPage>(sessionListCacheKey(userId, opts))
+}
+
+/** Write a sidebar page to the cache (best-effort). */
+export async function setCachedSessionList(
+  userId: string,
+  opts: { archived: boolean; skip: number; take: number },
+  page: CachedSessionListPage,
+): Promise<void> {
+  await cacheSet(sessionListCacheKey(userId, opts), page, SESSION_LIST_TTL)
+}
+
+/**
+ * Drop every cached sidebar page for a user (any archived flag / pagination
+ * slice). Called after any session mutation that could reorder or change the
+ * sidebar list: save, rename, delete, pin, archive, skill/branch updates.
+ */
+export async function invalidateCachedSessionList(userId: string): Promise<void> {
+  await cacheDelPattern(`sessions:list:${userId}:*`)
+}
+
 /**
  * Invalidate all cached data for a user (on logout, account deletion, etc.).
  */
@@ -190,6 +264,6 @@ export async function invalidateAllUserCache(userId: string): Promise<void> {
   await Promise.all([
     invalidateCachedUserMeta(userId),
     invalidateCachedBillingStatus(userId),
-    cacheDelPattern(`session:${userId}:*`),
+    invalidateCachedSessionList(userId),
   ])
 }

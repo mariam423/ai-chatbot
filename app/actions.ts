@@ -12,6 +12,13 @@ import { getMaxOutputTokens } from '@/lib/llm-config'
 import { checkBillingRateLimit, clientIpFromHeaders, sanitizeInput } from '@/lib/security'
 import { logSecurityEvent } from '@/lib/audit'
 import { decryptField, encryptField } from '@/lib/field-encryption'
+import {
+  getCachedBillingStatus,
+  getCachedSessionList,
+  invalidateCachedSessionList,
+  setCachedBillingStatus,
+  setCachedSessionList,
+} from '@/lib/cache'
 import { getPlan, isOverDailyLimit, PLANS } from '@/lib/billing/plans'
 import { createEmbedToken, normalizeEmbedOrigin } from '@/lib/embed'
 import {
@@ -400,10 +407,22 @@ export async function saveChatMessages(input: {
       ),
     )
     await prisma.$transaction(rows)
+    // The sidebar list aggregates this session's messages — drop the user's
+    // cached pages so the next list read reflects the save.
+    await invalidateCachedSessionLists(userId)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not save messages.' }
   }
+}
+
+/**
+ * Drop the user's cached sidebar-list pages after any session mutation that
+ * could reorder or change the list. No-op for anonymous callers (the list
+ * cache is only written for signed-in users).
+ */
+async function invalidateCachedSessionLists(userId: string | null): Promise<void> {
+  if (userId) await invalidateCachedSessionList(userId)
 }
 
 /** Derive a sidebar title from a session's first message. */
@@ -440,6 +459,20 @@ export async function listChatSessions(input?: {
   }
   const { search, skip, take, archived } = parsed.data
   const userId = await getCurrentUserId()
+  // Distributed-cache fast path: the default (search-less) sidebar list is
+  // cached per user + pagination slice (30 s TTL) so repeated list reads
+  // (mounts, session switches, sidebar polls) skip the chat_messages
+  // aggregate query. Search results are ephemeral per keystroke and stay on
+  // the DB path; anonymous (AUTH_DISABLED) reads skip the cache because the
+  // key would be shared across every anonymous browser. On hit we return the
+  // cached page; on miss the DB query below repopulates.
+  const cacheable = Boolean(userId) && !search
+  if (cacheable) {
+    const cached = await getCachedSessionList(userId!, { archived, skip, take })
+    if (cached) {
+      return { ok: true, hasMore: cached.hasMore, sessions: cached.sessions }
+    }
+  }
   try {
     const userFilter = userId ? Prisma.sql`AND cs."userId" = ${userId}` : Prisma.empty
     const searchFilter = search
@@ -479,19 +512,19 @@ export async function listChatSessions(input?: {
     `
     const hasMore = rows.length > take
     const page = hasMore ? rows.slice(0, take) : rows
-    return {
-      ok: true,
-      hasMore,
-      sessions: page.map((row) => ({
-        id: row.id,
-        title: row.title ?? sessionTitle(row.first_content ?? undefined),
-        updatedAt: new Date(row.updated_at).toISOString(),
-        messageCount: Number(row.message_count),
-        pinned: Boolean(row.pinned),
-        archived: Boolean(row.archived),
-        lastModel: row.last_model ?? null,
-      })),
+    const sessions = page.map((row) => ({
+      id: row.id,
+      title: row.title ?? sessionTitle(row.first_content ?? undefined),
+      updatedAt: new Date(row.updated_at).toISOString(),
+      messageCount: Number(row.message_count),
+      pinned: Boolean(row.pinned),
+      archived: Boolean(row.archived),
+      lastModel: row.last_model ?? null,
+    }))
+    if (cacheable) {
+      await setCachedSessionList(userId!, { archived, skip, take }, { sessions, hasMore })
     }
+    return { ok: true, hasMore, sessions }
   } catch {
     return { ok: false, error: 'Could not list sessions.' }
   }
@@ -516,6 +549,7 @@ export async function renameChatSession(input: {
       },
       data: { title },
     })
+    await invalidateCachedSessionLists(userId)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not rename session.' }
@@ -537,6 +571,7 @@ export async function clearChatSession(
         ...(userId ? { userId } : {}),
       },
     })
+    await invalidateCachedSessionLists(userId)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not clear session.' }
@@ -560,6 +595,7 @@ export async function togglePinSession(
     if (!session) return { ok: false, error: 'Session not found.' }
     const pinned = !session.pinned
     await prisma.chatSession.update({ where: { id: sessionId }, data: { pinned } })
+    await invalidateCachedSessionLists(userId)
     return { ok: true, pinned }
   } catch {
     return { ok: false, error: 'Could not toggle pin.' }
@@ -581,6 +617,7 @@ export async function toggleArchiveSession(
     if (!session) return { ok: false, error: 'Session not found.' }
     const archived = !session.archived
     await prisma.chatSession.update({ where: { id: sessionId }, data: { archived } })
+    await invalidateCachedSessionLists(userId)
     return { ok: true, archived }
   } catch {
     return { ok: false, error: 'Could not toggle archive.' }
@@ -753,6 +790,7 @@ export async function updateSessionSkills(input: {
         enabledSkills: input.enabledSkills === null ? null : input.enabledSkills.join(','),
       },
     })
+    await invalidateCachedSessionLists(userId)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not update skills.' }
@@ -785,6 +823,7 @@ export async function setActiveBranch(input: {
       },
       data: { activeBranch: active },
     })
+    await invalidateCachedSessionLists(userId)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not update active branch.' }
@@ -807,6 +846,7 @@ export async function updateSessionSystemPrompt(input: {
       where: { id: input.sessionId, ...(userId ? { userId } : {}) },
       data: { systemPrompt: input.systemPrompt || null },
     })
+    await invalidateCachedSessionLists(userId)
     return { ok: true }
   } catch {
     return { ok: false, error: 'Could not update system prompt.' }
@@ -1076,24 +1116,45 @@ export async function getBillingStatus(): Promise<
   }
   const throttled = await checkBillingRateLimit('status', clientIpFromHeaders(await headers()))
   if (!throttled.ok) return throttled
+  // Distributed-cache fast path: billing state only changes on plan webhooks
+  // and per-request usage increments, and both invalidate this cache (30 s
+  // TTL), so a hit here is fresh enough for the settings/dashboard display.
+  // Values written before `estimatedTokensToday` existed are treated as a
+  // miss and recomputed below.
+  const cachedStatus = await getCachedBillingStatus(userId)
+  if (cachedStatus && typeof cachedStatus.estimatedTokensToday === 'number') {
+    return {
+      ok: true,
+      data: {
+        plan: cachedStatus.plan,
+        planLabel: cachedStatus.planLabel,
+        dailyLimit: cachedStatus.dailyLimit,
+        usedToday: cachedStatus.usedToday,
+        estimatedTokensToday: cachedStatus.estimatedTokensToday,
+        overLimit: cachedStatus.overLimit,
+        stripeConfigured: cachedStatus.stripeConfigured,
+      },
+    }
+  }
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } })
     const today = new Date().toISOString().slice(0, 10)
     const usedToday = user?.usageDate === today ? user.usageCount : 0
     const estimatedTokensToday = user?.usageDate === today ? user.usageTokens : 0
     const plan = getPlan(user?.plan)
-    return {
-      ok: true,
-      data: {
-        plan: plan.key,
-        planLabel: plan.label,
-        dailyLimit: plan.dailyChatRequests,
-        usedToday,
-        estimatedTokensToday,
-        overLimit: isOverDailyLimit(user?.plan, usedToday),
-        stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO),
-      },
+    const data = {
+      plan: plan.key,
+      planLabel: plan.label,
+      dailyLimit: plan.dailyChatRequests,
+      usedToday,
+      estimatedTokensToday,
+      overLimit: isOverDailyLimit(user?.plan, usedToday),
+      stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_PRICE_PRO),
     }
+    // Populate the cache so repeated settings/dashboard reads skip the DB.
+    // Usage increments (lib/billing/usage.ts) and plan webhooks invalidate it.
+    await setCachedBillingStatus(userId, data)
+    return { ok: true, data }
   } catch {
     return { ok: false, error: 'Could not load billing status.' }
   }
