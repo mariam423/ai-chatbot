@@ -38,7 +38,7 @@ describe('transactional email delivery', () => {
     expect(body).toMatchObject({
       from: 'notify@example.com',
       to: ['user@example.com'],
-      subject: 'Welcome to Chatbot',
+      subject: 'Welcome to Pulse AI',
     })
     expect(body.html).toContain('Welcome, Ada!')
   })
@@ -75,7 +75,7 @@ describe('transactional email delivery', () => {
       '[email:console]',
       expect.objectContaining({
         to: 'user@example.com',
-        subject: 'Your Chatbot subscription was cancelled',
+        subject: 'Your Pulse AI subscription was cancelled',
       }),
     )
   })

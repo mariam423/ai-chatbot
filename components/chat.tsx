@@ -78,8 +78,6 @@ interface ChatProps {
   /** Generation tuning from user settings; null = provider defaults. */
   temperature?: number | null
   maxCompletionTokens?: number | null
-  /** Show the per-message "via <model>" captions (user setting; default on). */
-  showModelCaptions?: boolean
   activeWorkspaceTool?: WorkspaceTool | null
   onWorkspaceToolChange?: (tool: WorkspaceTool | null) => void
   onSessionChange: (id: string | null) => void
@@ -100,11 +98,10 @@ export default function Chat({
   resetNonce = 0,
   modelKey,
   customAgentId = null,
-  assistantName = 'Chatbot',
+  assistantName = 'Pulse AI',
   enabledSkills,
   temperature = null,
   maxCompletionTokens = null,
-  showModelCaptions = true,
   activeWorkspaceTool = null,
   onWorkspaceToolChange,
   onSessionChange,
@@ -651,34 +648,6 @@ export default function Chat({
                   editable={message.role === 'user' && !isStreaming}
                   onEditSave={(next) => void editMessage(index, next)}
                 />
-                {/* "via <model>" caption per assistant message — persisted on
-                    the message (from the X-Served-Model header) so branch
-                    history shows which model answered. Amber warning + a
-                    "fallback" tag only when the error-fallback retry fired
-                    (X-Served-Model-Overridden); vision auto-routing stays
-                    neutral. Hidden entirely when the user disables captions
-                    in settings. */}
-                {showModelCaptions && message.role === 'assistant' && message.model && (
-                  <p
-                    className="mt-1 ml-10 text-[11px] text-[var(--text-muted)]"
-                    data-testid="served-model"
-                    data-overridden={message.modelOverridden || undefined}
-                  >
-                    via{' '}
-                    <code
-                      className={
-                        message.modelOverridden
-                          ? 'rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] px-1 py-0.5 font-mono text-[10px] text-[var(--gold)]'
-                          : 'rounded bg-[var(--bg-input)] px-1 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]'
-                      }
-                    >
-                      {message.model}
-                    </code>
-                    {message.modelOverridden && (
-                      <span className="ml-1.5 font-medium text-[var(--gold)]">fallback</span>
-                    )}
-                  </p>
-                )}
                 {message.role === 'assistant' &&
                   !isStreaming &&
                   message.content !== '' &&
@@ -782,7 +751,7 @@ export default function Chat({
 
       {/* ─── Input form ─── */}
       <form
-        className="flex items-end gap-2 px-4 py-3"
+        className="flex items-end gap-2 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
         style={{
           background: 'var(--glass-bg)',
           backdropFilter: 'blur(12px)',

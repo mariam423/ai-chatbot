@@ -62,7 +62,7 @@ Both Auth.js-style names (`AUTH_*`) and the project's original names are accepte
 | Variable            | Purpose                                                            |
 | ------------------- | ------------------------------------------------------------------ |
 | `RESEND_API_KEY`    | Resend API key (recommended provider).                             |
-| `RESEND_EMAIL_FROM` | Verified sender address (e.g. `Chatbot <noreply@yourdomain.com>`). |
+| `RESEND_EMAIL_FROM` | Verified sender address (e.g. `Pulse AI <noreply@yourdomain.com>`). |
 | `SENDGRID_API_KEY`  | Alternative provider if you don't use Resend.                      |
 
 ## Storage, rate-limiting, analytics
@@ -76,7 +76,7 @@ Both Auth.js-style names (`AUTH_*`) and the project's original names are accepte
 
 | Variable              | Purpose                                                                                                                         | Default                 |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `APP_NAME`            | Display name used in the manifest, layout, and emails.                                                                          | `Chatbot`               |
+| `APP_NAME`            | Display name used in the manifest, layout, and emails.                                                                          | `Pulse AI`              |
 | `AUTH_DISABLED`       | When `true`, the proxy allows every request through (no auth). Useful for e2e and for running locally before OAuth is wired up. | unset                   |
 | `NEXT_PUBLIC_APP_URL` | Public app URL — required for Stripe return URLs, OG tags, and absolute links in emails.                                        | `http://localhost:3000` |
 

@@ -98,8 +98,7 @@ export default function ChatApp() {
   // every chat request; null = provider defaults.
   const [temperature, setTemperature] = useState<number | null>(null)
   const [maxCompletionTokens, setMaxCompletionTokens] = useState<number | null>(null)
-  // Per-message "via <model>" captions (Settings → Model & Generation).
-  const [showModelCaptions, setShowModelCaptions] = useState(true)
+
   // Per-session skill override. null = use the full catalog (defaults).
   const [enabledSkills, setEnabledSkills] = useState<string[] | null>(null)
   // Override chosen before a session existed; applied + persisted the moment a
@@ -173,7 +172,7 @@ export default function ChatApp() {
       }
       setTemperature(result.data.temperature)
       setMaxCompletionTokens(result.data.maxCompletionTokens)
-      setShowModelCaptions(result.data.showModelCaptions)
+
     })
     void getWorkspaceTasks().then((result) => {
       if (result.ok) {
@@ -437,7 +436,7 @@ export default function ChatApp() {
         data-assistant-theme={activeAssistantTheme}
       >
         <header
-          className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+          className="flex flex-wrap items-center justify-between gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3"
           style={{
             background: 'var(--glass-bg)',
             backdropFilter: 'blur(12px)',
@@ -472,13 +471,12 @@ export default function ChatApp() {
               </div>
               <div className="min-w-0">
                 <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-                  Chatbot
+                  Pulse AI
                 </h1>
-                {/* Active conversation metadata — the session title and the
-                    model that served its last reply, so which model answered
-                    is visible without opening the sidebar. Always rendered
-                    (invisible when no session) so the header height is stable
-                    and visual snapshots can mask the slot deterministically. */}
+                {/* Active conversation metadata — the session title. Always
+                    rendered (invisible when no session) so the header height
+                    is stable and visual snapshots can mask the slot
+                    deterministically. */}
                 <p
                   className={`max-w-40 truncate text-[10px] text-[var(--text-tertiary)] sm:max-w-64 ${
                     activeSession ? '' : 'invisible'
@@ -486,15 +484,6 @@ export default function ChatApp() {
                   data-testid="conversation-meta"
                 >
                   {activeSession?.title ?? ''}
-                  {activeSession?.lastModel ? (
-                    <>
-                      {' '}
-                      ·{' '}
-                      <span className="font-mono" data-testid="conversation-model">
-                        via {activeSession.lastModel}
-                      </span>
-                    </>
-                  ) : null}
                 </p>
               </div>
             </div>
@@ -702,11 +691,10 @@ export default function ChatApp() {
             resetNonce={resetNonce}
             modelKey={selectedModel}
             customAgentId={selectedAgentId}
-            assistantName={activeAgent?.name ?? 'Chatbot'}
+            assistantName={activeAgent?.name ?? 'Pulse AI'}
             enabledSkills={enabledSkills}
             temperature={temperature}
             maxCompletionTokens={maxCompletionTokens}
-            showModelCaptions={showModelCaptions}
             activeWorkspaceTool={activeWorkspaceTool}
             onWorkspaceToolChange={setActiveWorkspaceTool}
             onSessionChange={handleSessionChange}

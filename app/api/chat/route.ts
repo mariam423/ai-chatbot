@@ -176,7 +176,51 @@ export async function POST(request: Request) {
   // SaaS cost control: signed-in users are capped at their plan's daily LLM
   // request limit (Free tier) or unlimited (Pro). Enforced before any RAG or
   // provider work so an over-limit request fails fast.
+  //
+  // The tier rate limiter (Redis sliding window + daily cap) runs first as a
+  // fast pre-check — it avoids DB hits on the hot path when the user is
+  // clearly over limit. Only when both burst and daily pass does the request
+  // fall through to checkAndRecordUsage for the DB counter increment.
   if (userId) {
+    const { checkTierLimits, getCachedDailyUsage, setCachedDailyUsage } = await import(
+      '@/lib/billing/tier-rate-limit'
+    )
+    const today = new Date().toISOString().slice(0, 10)
+
+    // Load user plan + usage from cache (60s TTL) to avoid a DB read on
+    // every chat request. Cache miss falls through to the DB via
+    // checkAndRecordUsage below.
+    let userPlan = 'free'
+    let todayCount = 0
+    const cachedUsage = await getCachedDailyUsage(userId)
+    if (cachedUsage && cachedUsage.date === today) {
+      todayCount = cachedUsage.count
+      // Plan isn't in the daily-usage cache; get it from user meta cache.
+      const { getCachedUserMeta } = await import('@/lib/cache')
+      const meta = await getCachedUserMeta(userId)
+      if (meta) userPlan = meta.plan
+    } else {
+      // Cache miss — load from DB (same query checkAndRecordUsage would do).
+      const { prisma } = await import('@/lib/db')
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { plan: true, usageCount: true, usageDate: true },
+      })
+      if (user) {
+        userPlan = user.plan
+        todayCount = user.usageDate === today ? user.usageCount : 0
+      }
+    }
+
+    // Fast pre-check: burst (per-minute ZSET) + daily cap. Returns immediately
+    // on denial so the request never touches the DB write path.
+    const tierCheck = await checkTierLimits(userId, userPlan, todayCount)
+    if (!tierCheck.allowed) {
+      return errorResponse(tierCheck.error, 429)
+    }
+
+    // Pass through to the DB counter increment (also checks daily cap again
+    // as a defense-in-depth — the cached count may be stale under race).
     const { checkAndRecordUsage } = await import('@/lib/billing/usage')
     const usage = await checkAndRecordUsage(
       userId,
@@ -185,6 +229,9 @@ export async function POST(request: Request) {
     if (!usage.ok) {
       return errorResponse(usage.error, 429)
     }
+
+    // Update the daily usage cache so subsequent requests skip the DB read.
+    void setCachedDailyUsage(userId, { count: todayCount + 1, date: today })
   }
   let ragContext = ''
   let memoryContext = ''

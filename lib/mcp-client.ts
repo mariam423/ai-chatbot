@@ -240,7 +240,7 @@ async function openSession(config: z.infer<typeof McpServerSchema>): Promise<Mcp
     {
       protocolVersion: '2025-03-26',
       capabilities: {},
-      clientInfo: { name: 'chatbot-agent', version: '1.0.0' },
+      clientInfo: { name: 'pulse-ai-agent', version: '1.0.0' },
     },
     1,
   )

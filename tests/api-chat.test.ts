@@ -135,7 +135,7 @@ describe('POST /api/chat', () => {
 
   it('supports OPENROUTER_API_KEY with OpenRouter defaults', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
-    vi.stubEnv('OPENROUTER_APP_NAME', 'Chatbot')
+    vi.stubEnv('OPENROUTER_APP_NAME', 'Pulse AI')
     // The dev .env.local may export MODEL_NAME — pin it so the resolved
     // default (minimax/minimax-m3:free) is asserted, not the override.
     vi.stubEnv('MODEL_NAME', undefined)
@@ -160,7 +160,7 @@ describe('POST /api/chat', () => {
     expect(payload.model).toBe('minimax/minimax-m3:free')
     expect(init!.headers).toMatchObject({
       Authorization: 'Bearer sk-or-v1-test',
-      'X-Title': 'Chatbot',
+      'X-Title': 'Pulse AI',
     })
     // The streaming response reports the served model back to the client —
     // and, with no swap in play, the override flag stays false.

@@ -1,7 +1,7 @@
 {
-  "name": "Chatbot",
-  "short_name": "Chatbot",
-  "description": "A streaming AI chatbot with branching conversations, skills, document RAG, and voice input.",
+  "name": "Pulse AI",
+  "short_name": "Pulse AI",
+  "description": "A streaming AI chatbot with branching conversations, skills, document RAG, and voice input — powered by Pulse AI.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

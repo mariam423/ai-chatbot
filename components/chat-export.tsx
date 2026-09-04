@@ -126,7 +126,7 @@ function escapeHtml(text: string): string {
 export default function ChatExport({
   messages,
   title,
-  assistantName = 'Chatbot',
+  assistantName = 'Pulse AI',
   disabled = false,
 }: ChatExportProps) {
   const { track } = useAnalytics()

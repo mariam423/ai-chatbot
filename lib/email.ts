@@ -140,7 +140,7 @@ export function sendWelcomeEmail(to: string, name?: string | null): Promise<Emai
   return sendTransactionalEmail(
     lifecycleEmail(
       to,
-      'Welcome to Chatbot',
+      'Welcome to Pulse AI',
       greeting,
       'Your account is ready. Start a conversation whenever you are ready.',
     ),
@@ -162,7 +162,7 @@ export function sendSubscriptionCancelledEmail(to: string): Promise<EmailDeliver
   return sendTransactionalEmail(
     lifecycleEmail(
       to,
-      'Your Chatbot subscription was cancelled',
+      'Your Pulse AI subscription was cancelled',
       'Subscription cancelled',
       'Your subscription has ended. Your account remains available on the Free tier.',
     ),

@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "worker": "WORKER_MODE=true node scripts/worker.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -44,6 +45,7 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^6.3.4",
     "framer-motion": "^13.1.1",
     "ioredis": "^6.0.0",
     "lucide-react": "^1.33.0",

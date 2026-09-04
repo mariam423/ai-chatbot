@@ -6,7 +6,8 @@ set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
-APP_NAME="${APP_NAME:-chatbot}"
+APP_NAME="${APP_NAME:-pulse-ai}"
+WORKER_NAME="${WORKER_NAME:-pulse-ai-worker}"
 PM2_CONFIG="${PM2_CONFIG:-ecosystem.config.cjs}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/api/health}"
 LOCK_DIR="${DEPLOY_LOCK_DIR:-/tmp/${APP_NAME}.deploy.lock}"
@@ -55,10 +56,11 @@ log 'building Next.js production bundle'
 npm run build
 
 if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-  log "reloading PM2 process ${APP_NAME}"
-  pm2 reload "$APP_NAME" --env production --update-env
+  log "reloading PM2 processes"
+  pm2 reload "$APP_NAME" --env production --update-env 2>/dev/null || true
+  pm2 reload "$WORKER_NAME" --env production --update-env 2>/dev/null || true
 else
-  log "starting PM2 process from ${PM2_CONFIG}"
+  log "starting PM2 processes from ${PM2_CONFIG}"
   pm2 start "$PM2_CONFIG" --env production --update-env
 fi
 
