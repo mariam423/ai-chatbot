@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { errorResponse } from '@/lib/http'
 import { prisma } from '@/lib/db'
-import { getLlmConfig, resolveMaxTokens } from '@/lib/llm-config'
+import { resolveMaxTokens, type LlmProvider } from '@/lib/llm-config'
 import { hasBuiltInToolIntent, runAgent, type AgentInputMessage } from '@/lib/agent'
 import { listBuiltInAgentTools } from '@/lib/agent-tools'
 import { listMcpTools } from '@/lib/mcp-client'
@@ -13,7 +13,15 @@ import {
 } from '@/lib/skills/registry'
 import { listSkillTools } from '@/lib/skills/tools'
 import { DEFAULT_MAX_CONTEXT_TOKENS, estimateTokens, truncateHistory } from '@/lib/context'
-import { getProviderFallbackModel, resolveModel, ModelKeySchema } from '@/lib/models'
+import { getProviderFallbackModel, resolveModel, ModelKeySchema, type ModelKey } from '@/lib/models'
+import { logSecurityEvent } from '@/lib/audit'
+import {
+  isGatewayProviderOpen,
+  listGatewayCandidates,
+  recordGatewayProviderFailure,
+  recordGatewayProviderSuccess,
+  type GatewayCandidate,
+} from '@/lib/gateway'
 import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
 import { getSessionRagContext } from '@/lib/rag'
 import {
@@ -50,13 +58,20 @@ const SYSTEM_PROMPT = 'You are a helpful assistant.'
 const TOTAL_TIMEOUT_MS = Number(process.env.CHAT_TOTAL_TIMEOUT_MS) || 90_000
 
 /**
- * Upstream statuses that trigger the model fallback retry: 404 (dead/deprecated
- * model slug), 402 (OpenRouter pre-authorizes against the model and rejects
- * low-credit keys before streaming), and 429 (model-scoped rate limit). The
- * route retries once with the provider's stable backup model (see
- * `getProviderFallbackModel`) instead of surfacing the raw error to the UI.
+ * Upstream statuses that count as a retryable attempt failure: 404 (dead or
+ * deprecated model slug), 402 (OpenRouter pre-authorizes against the model
+ * and rejects low-credit keys before streaming), 408 (upstream timeout), and
+ * 429 (model-scoped rate limit). Every 5xx is retryable too — checked as
+ * `status >= 500` at the attempt site so 501/505/599 also qualify.
+ *
+ * A failed attempt is retried with the same provider's stable backup model
+ * (see `getProviderFallbackModel`); when a provider exhausts its attempts the
+ * route hops to the next configured provider (see lib/gateway.ts). Failover
+ * is strictly pre-stream — the attempt loop below stops the moment a
+ * streaming response head arrives, and mid-stream errors surface to the
+ * client as partial content (never another attempt).
  */
-const RETRYABLE_STATUSES = new Set([404, 402, 429])
+const RETRYABLE_STATUSES = new Set([404, 402, 408, 429])
 
 /**
  * Hard cap on the raw request body, checked before buffering: the per-field
@@ -182,9 +197,8 @@ export async function POST(request: Request) {
   // clearly over limit. Only when both burst and daily pass does the request
   // fall through to checkAndRecordUsage for the DB counter increment.
   if (userId) {
-    const { checkTierLimits, getCachedDailyUsage, setCachedDailyUsage } = await import(
-      '@/lib/billing/tier-rate-limit'
-    )
+    const { checkTierLimits, getCachedDailyUsage, setCachedDailyUsage } =
+      await import('@/lib/billing/tier-rate-limit')
     const today = new Date().toISOString().slice(0, 10)
 
     // Load user plan + usage from cache (60s TTL) to avoid a DB read on
@@ -216,7 +230,19 @@ export async function POST(request: Request) {
     // on denial so the request never touches the DB write path.
     const tierCheck = await checkTierLimits(userId, userPlan, todayCount)
     if (!tierCheck.allowed) {
-      return errorResponse(tierCheck.error, 429)
+      // 429 parity with the guardRoute denials: a JSON `{ error }` body plus
+      // a Retry-After header when the limiter knows the reset time. Burst
+      // denials (sliding window) carry it; daily-cap denials just surface
+      // the message — the client treats both as the same 429 contract.
+      const retryAfterSeconds = tierCheck.retryAfterMs
+        ? Math.max(1, Math.ceil(tierCheck.retryAfterMs / 1000))
+        : undefined
+      return NextResponse.json(
+        { error: tierCheck.error },
+        retryAfterSeconds
+          ? { status: 429, headers: { 'Retry-After': String(retryAfterSeconds) } }
+          : { status: 429 },
+      )
     }
 
     // Pass through to the DB counter increment (also checks daily cap again
@@ -250,11 +276,14 @@ export async function POST(request: Request) {
   const skillContext = await getUserSkillContext(userId)
   const userApiKey = await getUserApiKey(userId)
 
-  // Shared provider config: a per-user key (detected by prefix) wins; otherwise
-  // OPENROUTER_API_KEY → GEMINI_API_KEY → OPENAI_API_KEY (see lib/llm-config.ts).
-  const llm = getLlmConfig(userApiKey)
-  const { apiKey, baseUrl, provider } = llm
-  if (!apiKey) {
+  // Multi-provider gateway (lib/gateway.ts): ordered candidate providers for
+  // this request — a per-user key from Settings (detected by prefix) first,
+  // then the server env keys in canonical rank OpenRouter → Gemini → OpenAI
+  // (the same chain lib/llm-config.ts used to collapse to a single provider;
+  // failover keeps the rest). Each candidate carries its own key + base URL,
+  // so a hop between providers is a clean key/endpoint/model swap.
+  const candidates = listGatewayCandidates(userApiKey)
+  if (candidates.length === 0) {
     return errorResponse(
       'Server is not configured with an LLM API key (OPENROUTER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY).',
       500,
@@ -342,30 +371,50 @@ export async function POST(request: Request) {
     modelMessages[lastUserIndex] = { role: 'user', content }
   }
 
-  // The model selector resolves stable UI keys here; base URL + key come from
-  // the shared provider config above, and the provider picks the right model id
-  // (OpenRouter namespaced id vs Google's plain name on the direct endpoint).
-  // Media requests auto-route to a vision-capable model (on OpenRouter the
-  // provider default and vision fallback are both the free `stealth/ox-alpha`)
-  // so image/video/audio content is accepted.
-  const model = resolveModel(
+  // Resolve the request's model selection (UI key, or the custom agent's
+  // baseline) once — resolveModel maps it to a concrete model id per provider
+  // below, because ids are provider-specific (a namespaced OpenRouter slug vs
+  // a plain Gemini name on the direct endpoint).
+  const selectedModelKey: ModelKey | undefined =
     parsed.data.model ??
-      (customAgent?.baselineModel && ModelKeySchema.safeParse(customAgent.baselineModel).success
-        ? ModelKeySchema.parse(customAgent.baselineModel)
-        : undefined),
-    provider,
-    { vision: hasMedia },
-  )
-  // Completion cap: the per-user settings value always wins; otherwise the
-  // conservative default (MAX_OUTPUT_TOKENS, 200) applies to every provider —
-  // see lib/llm-config.ts resolveMaxTokens for why the field is never omitted.
+    (customAgent?.baselineModel && ModelKeySchema.safeParse(customAgent.baselineModel).success
+      ? ModelKeySchema.parse(customAgent.baselineModel)
+      : undefined)
+
+  // Circuit breaker (lib/gateway.ts): a provider that failed repeatedly is
+  // skipped for a cooldown and the next-ranked provider serves instead. Only
+  // evaluated when more than one provider is configured (a single-provider
+  // deploy has no one to skip to). When every breaker is open nothing is
+  // skipped — requests keep probing, because a request IS the half-open test
+  // that lets a recovered provider back in.
+  let openProviders = new Set<LlmProvider>()
+  if (candidates.length > 1) {
+    const states = await Promise.all(
+      candidates.map(async (candidate) => ({
+        provider: candidate.provider,
+        open: await isGatewayProviderOpen(candidate.provider),
+      })),
+    )
+    openProviders = new Set(states.filter((s) => s.open).map((s) => s.provider))
+  }
+  const usable = candidates.filter((candidate) => !openProviders.has(candidate.provider))
+  // The attempt chain: usable providers, or all of them when every breaker is
+  // open. `primaryHopped` records whether the top-ranked provider was skipped
+  // (open circuit) — when true, even the first usable provider is serving in
+  // a fallback capacity and the override flag must be set.
+  const chain = usable.length > 0 ? usable : candidates
+  const primaryHopped = chain[0]!.provider !== candidates[0]!.provider
+
+  // Model id for the provider that serves first (the primary). Media requests
+  // auto-route to a vision-capable model when the selection is text-only —
+  // see resolveModel. Completion cap: the per-user settings value always
+  // wins; otherwise the conservative default (MAX_OUTPUT_TOKENS, 200) applies
+  // to every provider — see lib/llm-config.ts resolveMaxTokens for why the
+  // field is never omitted.
+  const primaryModel = resolveModel(selectedModelKey, chain[0]!.provider, {
+    vision: hasMedia,
+  })
   const resolvedMaxTokens = resolveMaxTokens(parsed.data.maxTokens)
-  // Error-fallback backup model for this provider (per-provider default, env
-  // overridable) — resolved once per request so the guard and the retry agree.
-  const fallbackModel = getProviderFallbackModel(provider)
-  // The model id that actually serves the reply — the selected model, or the
-  // backup when a retry fires. Reported to the client via X-Served-Model.
-  let servedModel = model
   // Total-time guard: even if the client stays connected, the upstream
   // request must not stay open past TOTAL_TIMEOUT_MS (90s default). We
   // race the fetch against a timer so a stuck/free-tier model fails
@@ -375,17 +424,25 @@ export async function POST(request: Request) {
   const totalTimer = setTimeout(() => totalController.abort(), TOTAL_TIMEOUT_MS)
   const onClientAbort = () => totalController.abort()
   request.signal.addEventListener('abort', onClientAbort, { once: true })
-  // True only when the error-fallback retry fires (404/402/429 → backup
-  // model). Vision auto-routing is NOT flagged: swapping a text-only
-  // selection to a vision-capable model is expected behavior for media
-  // requests, not a failure — the amber warning is reserved for retries.
+  // What actually served the reply, reported via X-Served-Model /
+  // X-Served-Provider. `servedModelOverridden` is true only when a retry or a
+  // cross-provider hop moved the reply to a backup model/provider. Vision
+  // auto-routing is NOT flagged: swapping a text-only selection to a
+  // vision-capable model is expected behavior for media requests, not a
+  // failure — the amber warning is reserved for retries.
+  let servedModel = ''
+  let servedProvider: LlmProvider = chain[0]!.provider
   let servedModelOverridden = false
+  // Last retryable failure — surfaced (status + detail passthrough) when the
+  // whole attempt chain is exhausted.
+  let lastErrorStatus: number | null = null
+  let lastErrorDetail = ''
 
   // OpenRouter uses X-Title for app attribution (optional, OpenRouter only).
   const appTitle = process.env.OPENROUTER_APP_NAME
   const extraHeaders: Record<string, string> = appTitle ? { 'X-Title': appTitle } : {}
 
-  let upstream: Response
+  let upstream: Response | null = null
   try {
     const mcpTools = await listMcpTools()
     const selectedTools = customAgent ? parseSelectedTools(customAgent.selectedTools) : null
@@ -401,9 +458,9 @@ export async function POST(request: Request) {
     let messagesForModel: unknown[] = modelMessages
     if (agentMcpTools.length > 0 || hasToolIntent) {
       const agent = await runAgent({
-        apiKey,
-        baseUrl,
-        model,
+        apiKey: chain[0]!.apiKey,
+        baseUrl: chain[0]!.baseUrl,
+        model: primaryModel,
         messages: modelMessages,
         systemPrompt,
         tools: agentMcpTools,
@@ -411,7 +468,9 @@ export async function POST(request: Request) {
         skillTools: agentSkillTools,
         skillContext,
         signal: request.signal,
-        headers: extraHeaders,
+        // X-Title is OpenRouter-only app attribution — never sent to Gemini
+        // or OpenAI, whose strict endpoints may reject unknown headers.
+        headers: chain[0]!.provider === 'openrouter' ? extraHeaders : {},
         structuredOutput: structuredOutput ?? undefined,
       })
       if (agent.toolCount > 0) messagesForModel = agent.continuationMessages
@@ -446,35 +505,114 @@ export async function POST(request: Request) {
           : {}),
       })
 
-    const streamFrom = (modelId: string): Promise<Response> =>
-      fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-          ...extraHeaders,
-        },
-        body: buildRequestBody(modelId),
-        signal: request.signal,
+    // Build the ordered attempt chain across the usable providers: each
+    // candidate first tries its own resolution of the selected model
+    // (namespaced OpenRouter slug vs plain Gemini name — resolveModel maps
+    // per provider), then falls back to the provider's stable backup id when
+    // the two differ. That preserves the historical single-provider retry
+    // exactly for the primary; the no-loop guard means no second attempt when
+    // the selected model IS the backup. A hop to the next provider keeps the
+    // same shape — the new provider serves its own model id + backup.
+    const attempts: Array<{
+      candidate: GatewayCandidate
+      modelId: string
+      // True when serving this attempt means the reply differs from the
+      // client's selection (a backup-model retry, a provider hop, or a
+      // request that started in failover because the primary was circuit-open).
+      overridden: boolean
+    }> = []
+    chain.forEach((candidate, chainIndex) => {
+      const isPrimaryCandidate = chainIndex === 0 && !primaryHopped
+      const selected = resolveModel(selectedModelKey, candidate.provider, {
+        vision: hasMedia,
       })
-
-    upstream = await streamFrom(model)
-    // Error fallback: a dead/deprecated slug (404), a low-credit pre-auth
-    // rejection (402), or a model-scoped rate limit (429) should not fail the
-    // chat — retry once with the provider's own backup model (never when the
-    // backup IS the chosen model). The backup id is always valid on the
-    // provider's endpoint (free OpenRouter route / plain Gemini name / cheap
-    // OpenAI model), so the retry applies to every provider.
-    if (!upstream.ok && RETRYABLE_STATUSES.has(upstream.status) && model !== fallbackModel) {
-      // Release the failed response before retrying.
-      try {
-        await upstream.body?.cancel()
-      } catch {
-        // Ignore body-drain failures — the retry is what matters.
+      attempts.push({ candidate, modelId: selected, overridden: !isPrimaryCandidate })
+      const backup = getProviderFallbackModel(candidate.provider)
+      if (selected !== backup) {
+        attempts.push({ candidate, modelId: backup, overridden: true })
       }
-      upstream = await streamFrom(fallbackModel)
-      servedModel = fallbackModel
-      servedModelOverridden = true
+    })
+
+    // Failover is strictly PRE-STREAM: the loop stops the moment a provider
+    // returns a streaming response head and the body passes straight through
+    // — a mid-stream error surfaces to the client as partial content and
+    // never triggers another attempt (that is the app's streaming contract).
+    // A provider only records a breaker failure when it could not serve the
+    // request at all; a provider that streams records success instead.
+    for (let i = 0; i < attempts.length; i++) {
+      const attempt = attempts[i]!
+      if (totalController.signal.aborted) break
+      // The provider is exhausted once no further attempt targets it — that's
+      // when a retryable failure counts against its breaker.
+      const isProviderExhausted =
+        i === attempts.length - 1 ||
+        attempts[i + 1]!.candidate.provider !== attempt.candidate.provider
+      let response: Response
+      try {
+        response = await fetch(`${attempt.candidate.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${attempt.candidate.apiKey}`,
+            ...(attempt.candidate.provider === 'openrouter' ? extraHeaders : {}),
+          },
+          body: buildRequestBody(attempt.modelId),
+          signal: request.signal,
+        })
+      } catch {
+        // Pre-stream connect failure (DNS/TLS/refused/abort) — the provider
+        // never produced a response head. Try the next attempt; a canned 502
+        // is only returned when nothing is left to try.
+        if (isProviderExhausted) {
+          void recordGatewayProviderFailure(attempt.candidate.provider)
+        }
+        continue
+      }
+      if (response.ok && response.body) {
+        // The stream head arrived — this provider is healthy. Record success
+        // (fire-and-forget; it closes the breaker) and hand the body back.
+        void recordGatewayProviderSuccess(attempt.candidate.provider)
+        servedProvider = attempt.candidate.provider
+        servedModel = attempt.modelId
+        servedModelOverridden = attempt.overridden
+        if (attempt.candidate.provider !== chain[0]!.provider) {
+          logSecurityEvent(
+            'gateway_failover',
+            {
+              route: 'chat',
+              from: chain[0]!.provider,
+              to: attempt.candidate.provider,
+              status: lastErrorStatus ?? undefined,
+            },
+            'info',
+          )
+        }
+        upstream = response
+        break
+      }
+      // Non-ok (or a body-less 2xx): drain the error body so the connection
+      // is reusable, then classify the failure.
+      const detail = await response.text().catch(() => '')
+      if (response.ok) {
+        // Degenerate 2xx with no stream body — treat as a failed attempt.
+        if (isProviderExhausted) void recordGatewayProviderFailure(attempt.candidate.provider)
+        continue
+      }
+      const retryable = RETRYABLE_STATUSES.has(response.status) || response.status >= 500
+      if (!retryable) {
+        // Other 4xx statuses (400/401/403/…) surface as-is: retrying another
+        // model or provider cannot fix a malformed request, and a bad key is
+        // a configuration error, not provider sickness.
+        return NextResponse.json(
+          { error: `LLM API error (${response.status}).`, detail: detail.slice(0, 500) },
+          { status: response.status },
+        )
+      }
+      lastErrorStatus = response.status
+      lastErrorDetail = detail
+      if (isProviderExhausted) {
+        void recordGatewayProviderFailure(attempt.candidate.provider)
+      }
     }
   } catch {
     return errorResponse('Could not reach the LLM API.', 502)
@@ -486,8 +624,8 @@ export async function POST(request: Request) {
   // clearTimeout is a no-op if the timer already fired; that's fine.
   clearTimeout(totalTimer)
 
-  if (totalController.signal.aborted && (!upstream || !upstream.body)) {
-    // Wall-clock cap fired before the upstream even produced a body.
+  if (totalController.signal.aborted && !upstream) {
+    // Wall-clock cap fired before any provider produced a stream body.
     return NextResponse.json(
       {
         error:
@@ -498,26 +636,40 @@ export async function POST(request: Request) {
     )
   }
 
-  if (!upstream.ok || !upstream.body) {
-    const detail = await upstream.text().catch(() => '')
-    return NextResponse.json(
-      {
-        error: `LLM API error (${upstream.status}).`,
-        detail: detail.slice(0, 500),
-      },
-      { status: upstream.status },
-    )
+  if (!upstream) {
+    // Every attempt failed. Surface the last retryable upstream status when
+    // there was one (the historical passthrough); a chain that died purely on
+    // connect failures has no status and becomes the canned 502.
+    if (lastErrorStatus !== null) {
+      logSecurityEvent(
+        'gateway_exhausted',
+        {
+          route: 'chat',
+          status: lastErrorStatus,
+          providers: chain.map((candidate) => candidate.provider).join(','),
+        },
+        'info',
+      )
+      return NextResponse.json(
+        { error: `LLM API error (${lastErrorStatus}).`, detail: lastErrorDetail.slice(0, 500) },
+        { status: lastErrorStatus },
+      )
+    }
+    return errorResponse('Could not reach the LLM API.', 502)
   }
 
   return new Response(upstream.body, {
     headers: {
-      // The model that actually served this reply (after any error-fallback
-      // retry) — surfaced to the client so the UI can show "via <model>"
-      // when the selected option was silently swapped (e.g. a 404 fallback).
+      // The model id that actually served this reply (after any retry or
+      // provider hop) — surfaced to the client so the UI can show "via
+      // <model>" when the selection was silently swapped.
       'X-Served-Model': servedModel,
-      // 'true' only when the error-fallback retry fired (a 404/402/429 swap
-      // to the provider backup) — the UI highlights the caption amber with a
-      // "fallback" tag. Vision auto-routing stays neutral ('false').
+      // Which provider served it — the caption can say "fell back to Gemini"
+      // when a hop moved the request off the configured primary.
+      'X-Served-Provider': servedProvider,
+      // 'true' only when a retry/hop swapped the reply to a backup model or
+      // provider — the UI highlights the caption amber with a "fallback"
+      // tag. Vision auto-routing stays neutral ('false').
       'X-Served-Model-Overridden': servedModelOverridden ? 'true' : 'false',
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',

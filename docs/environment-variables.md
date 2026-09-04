@@ -23,6 +23,30 @@ Everything else is optional — features that depend on a missing variable stay 
 | `NEXT_PUBLIC_APP_URL` | recommended | Public app URL (Stripe return URLs, OG tags, email links).                                                                                                                 | Your deployment URL                                             |
 | `ENCRYPTION_KEY`      | recommended | AES-256-GCM key for encrypted `UserPreference` rows. **Generate once, keep stable** — rotating it invalidates existing ciphertext.                                         | `openssl rand -base64 32`                                       |
 
+## Database pooling (optional tuning)
+
+`lib/db.ts` sizes its Postgres pool from these envs (`lib/db-config.ts`). With no overrides on a long-lived process (EC2/PM2/`next start`) the pool matches node-postgres defaults — zero change. On Vercel the per-instance max defaults to **1** (serverless instances are short-lived; Neon's pooler — the `?pgbouncer=true` URL — is what bounds total connections). Explicit values always win.
+
+| Variable                              | Purpose                                                            | Default                        |
+| ------------------------------------- | ------------------------------------------------------------------ | ------------------------------ |
+| `DATABASE_POOL_MAX`                   | Max connections this process opens.                                | `10` (Node/PM2) · `1` (Vercel) |
+| `DATABASE_POOL_MIN`                   | Warm connections kept open (clamped to `MAX`).                     | `0`                            |
+| `DATABASE_POOL_IDLE_TIMEOUT_MS`       | Idle lifetime before the pool closes a connection.                 | `10000`                        |
+| `DATABASE_POOL_CONNECTION_TIMEOUT_MS` | Max wait for a new connection before failing (`0` = wait forever). | `0`                            |
+
+Invalid values (non-numeric, negative) fall back to the default instead of crashing. SSL is driven by the URL (`?sslmode=require` — Neon's default; `sslmode=verify-full` for stricter setups); no pool env affects it.
+
+> **Startup warning:** if `VERCEL` is set and `DATABASE_URL` points at a Neon _direct_ URL (no `?pgbouncer=true`), the app logs a one-time `[db]` warning — switch to the pooled URL so concurrent function instances stay under Neon's direct-connection limit.
+
+## Background worker (optional tuning)
+
+The BullMQ worker (`npm run worker`, PM2 `pulse-ai-worker`) reads these envs at boot. Defaults match the pre-hardcoded values; garbage values (non-numeric, zero, negative) fall back to the defaults.
+
+| Variable             | Purpose                                                     | Default |
+| -------------------- | ----------------------------------------------------------- | ------- |
+| `WORKER_CONCURRENCY` | How many jobs this worker processes in parallel.            | `5`     |
+| `WORKER_LIMITER_MAX` | Max jobs per second across all workers (limiter `max`/1 s). | `30`    |
+
 ## OAuth / Auth.js
 
 Both Auth.js-style names (`AUTH_*`) and the project's original names are accepted. The lookup order is `AUTH_<PROVIDER>_*` first, then the legacy alias.
@@ -59,18 +83,20 @@ Both Auth.js-style names (`AUTH_*`) and the project's original names are accepte
 
 ## Email
 
-| Variable            | Purpose                                                            |
-| ------------------- | ------------------------------------------------------------------ |
-| `RESEND_API_KEY`    | Resend API key (recommended provider).                             |
+| Variable            | Purpose                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `RESEND_API_KEY`    | Resend API key (recommended provider).                              |
 | `RESEND_EMAIL_FROM` | Verified sender address (e.g. `Pulse AI <noreply@yourdomain.com>`). |
-| `SENDGRID_API_KEY`  | Alternative provider if you don't use Resend.                      |
+| `SENDGRID_API_KEY`  | Alternative provider if you don't use Resend.                       |
 
 ## Storage, rate-limiting, analytics
 
-| Variable                       | Purpose                                                                                       |
-| ------------------------------ | --------------------------------------------------------------------------------------------- |
-| `REDIS_URL`                    | Shared rate-limit store across serverless instances. Without it, rate limits are per-process. |
-| `POSTHOG_KEY` / `POSTHOG_HOST` | Self-hosted PostHog for analytics (optional).                                                 |
+| Variable                       | Purpose                                                                                                                                                                                                                 |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REDIS_URL`                    | Central Redis for the distributed cache (`lib/cache.ts`), the tier rate limiter, and the BullMQ task queue. Without it each consumer degrades gracefully: in-memory rate limits, no-op cache, synchronous job fallback. |
+| `FREE_PLAN_DAILY_LIMIT`        | Free-tier daily LLM request cap (default `20`). Pro is unlimited.                                                                                                                                                       |
+| `FREE_PLAN_BURST_PER_MINUTE`   | Free-tier per-minute burst cap (default `20`, mirroring the daily cap). Pro is `120`/min.                                                                                                                               |
+| `POSTHOG_KEY` / `POSTHOG_HOST` | Self-hosted PostHog for analytics (optional).                                                                                                                                                                           |
 
 ## App configuration
 

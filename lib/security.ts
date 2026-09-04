@@ -308,7 +308,14 @@ export interface RouteGuardOptions {
 
 /** Keys of the guarded API routes — the lookup handles for `ROUTE_GUARDS`. */
 export type RouteGuardKey =
-  'chat' | 'transcribe' | 'upload' | 'citation' | 'analytics' | 'skills' | 'stripe-webhook'
+  | 'chat'
+  | 'transcribe'
+  | 'upload'
+  | 'citation'
+  | 'analytics'
+  | 'skills'
+  | 'stripe-webhook'
+  | 'health-queue'
 
 /**
  * Single source of truth for every API route's guard configuration: the
@@ -353,6 +360,15 @@ export const ROUTE_GUARDS: Record<RouteGuardKey, RouteGuardOptions> = {
   'stripe-webhook': {
     name: 'stripe-webhook',
     rateLimit: { limit: 600, windowMs: 60_000 },
+  },
+  // Admin-gated queue metrics (GET): session required so the role check in
+  // the route can trust the caller; no CSRF on a read-only GET. The ADMIN
+  // role itself is enforced inside app/api/health/queue/route.ts.
+  'health-queue': {
+    name: 'health-queue',
+    session: true,
+    csrf: false,
+    rateLimit: { limit: 120, windowMs: 60_000 },
   },
 }
 

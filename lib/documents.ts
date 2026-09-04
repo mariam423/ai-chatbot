@@ -6,6 +6,14 @@ export const MAX_DOCUMENT_CHUNKS = 500
 export const CHUNK_SIZE = 1_600
 export const CHUNK_OVERLAP = 200
 
+/**
+ * Documents that chunk into more than this many pieces are offloaded to the
+ * BullMQ worker (chunk + embed + bulk insert) so the upload request returns
+ * quickly. Smaller documents stay fully synchronous so retrieval is
+ * immediately ready — the common case keeps its current zero-latency path.
+ */
+export const ASYNC_PROCESSING_MIN_CHUNKS = 50
+
 export const SUPPORTED_DOCUMENTS = {
   pdf: { extension: '.pdf', mimeTypes: ['application/pdf'] },
   txt: { extension: '.txt', mimeTypes: ['text/plain'] },

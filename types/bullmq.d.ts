@@ -27,6 +27,8 @@ declare module 'bullmq' {
     timestamp: number
     finishedOn?: number
     processedOn?: number
+    /** How many times this job has been attempted (1 = first try). */
+    attemptsMade?: number
     failedReason?: string
   }
 
@@ -52,11 +54,7 @@ declare module 'bullmq' {
   }
 
   export class Worker<T = unknown> {
-    constructor(
-      name: string,
-      processor: (job: Job<T>) => Promise<void>,
-      opts?: WorkerOpts,
-    )
+    constructor(name: string, processor: (job: Job<T>) => Promise<void>, opts?: WorkerOpts)
     on(event: 'completed', listener: (job: Job<T>) => void): this
     on(event: 'failed', listener: (job: Job<T> | undefined, error: Error) => void): this
     on(event: 'error', listener: (error: Error) => void): this

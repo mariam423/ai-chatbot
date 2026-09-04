@@ -1,17 +1,32 @@
 /**
- * Standable worker entry point — run alongside the Next.js app server.
+ * Standalone worker entry point — run alongside the Next.js app server.
  *
  * Usage:
- *   WORKER_MODE=true node scripts/worker.mjs
+ *   npm run worker          # = npx tsx scripts/worker.mjs
+ *   pm2 start ecosystem.config.cjs --only pulse-ai-worker
  *
- * In production, run this as a separate process (PM2, systemd, Docker).
- * In development, the worker auto-starts when imported with WORKER_MODE=true.
+ * tsx is required: the worker imports TypeScript modules that use the `@/`
+ * path alias (tsconfig paths), which plain Node cannot resolve. In
+ * production, run this as a separate process (PM2, systemd, Docker) with
+ * the same environment as the app server.
  *
- * Requires REDIS_URL to be set.
+ * Requires REDIS_URL to be set (otherwise the worker is a no-op).
+ *
+ * Environment: the worker is a plain Node process (unlike the Next app, it
+ * never loads .env files itself), so this entry point loads `.env.local`
+ * (then `.env`) exactly like the app does — real process env (e.g. PM2
+ * env_production) always wins, and `.env.local` beats `.env` for anything
+ * still unset.
  */
 
-import '../lib/workers/task-worker.js'
-import { startWorker, stopWorker } from '../lib/workers/task-worker.js'
+import dotenv from 'dotenv'
+
+// quiet: true keeps dotenv's "nothing loaded" tips out of PM2 logs when
+// one of the files is absent (the normal single-file case).
+dotenv.config({ path: '.env.local', quiet: true })
+dotenv.config({ quiet: true })
+
+import { startWorker, stopWorker } from '../lib/workers/task-worker.ts'
 
 startWorker()
 

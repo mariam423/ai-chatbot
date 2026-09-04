@@ -6,7 +6,26 @@ import { verifyStripeWebhookSignature } from '@/lib/billing/stripe'
 import { parsePlanKey } from '@/lib/billing/plans'
 import { DEFAULT_USER_ROLE } from '@/lib/roles'
 import { sendSubscriptionActivatedEmail, sendSubscriptionCancelledEmail } from '@/lib/email'
-import { addTask } from '@/lib/queues/task-queue'
+import { addTask, type StripePostProcessPayload } from '@/lib/queues/task-queue'
+import { invalidateCachedBillingStatus, invalidateCachedUserMeta } from '@/lib/cache'
+import { invalidateCachedDailyUsage } from '@/lib/billing/tier-rate-limit'
+
+/**
+ * Dispatch the post-webhook side-effects (cache invalidation) to the BullMQ
+ * worker. When Redis is unavailable the job is executed inline so the plan
+ * change still reflects immediately — the worker would have done the exact
+ * same invalidations.
+ */
+async function dispatchStripePostProcess(payload: StripePostProcessPayload): Promise<void> {
+  const jobId = await addTask('webhook:stripe:post-process', payload)
+  if (!jobId) {
+    await Promise.all([
+      invalidateCachedBillingStatus(payload.userId),
+      invalidateCachedUserMeta(payload.userId),
+      invalidateCachedDailyUsage(payload.userId),
+    ])
+  }
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -110,8 +129,9 @@ export async function POST(request: Request) {
         })
         if (updatedUser?.email) void sendSubscriptionActivatedEmail(updatedUser.email)
         // Invalidate cached billing/user metadata so the plan change
-        // reflects immediately across all instances.
-        void addTask('webhook:stripe:post-process', {
+        // reflects immediately across all instances (inline fallback when
+        // Redis is unavailable).
+        await dispatchStripePostProcess({
           userId,
           eventType: event.type,
           subscriptionId: typeof object.subscription === 'string' ? object.subscription : undefined,
@@ -143,8 +163,9 @@ export async function POST(request: Request) {
         if (updatedUser?.email && event.type === 'customer.subscription.deleted') {
           void sendSubscriptionCancelledEmail(updatedUser.email)
         }
-        // Invalidate cached billing/user metadata on plan changes.
-        void addTask('webhook:stripe:post-process', {
+        // Invalidate cached billing/user metadata on plan changes (inline
+        // fallback when Redis is unavailable).
+        await dispatchStripePostProcess({
           userId,
           eventType: event.type,
           subscriptionId: subscriptionId ?? undefined,

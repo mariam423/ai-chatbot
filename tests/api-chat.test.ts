@@ -1,11 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../app/api/chat/route'
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../lib/llm-config'
+import { getCurrentUserId } from '@/lib/auth-context'
+import { checkTierLimits, getCachedDailyUsage } from '@/lib/billing/tier-rate-limit'
+import { recordGatewayProviderFailure, resetGatewayBreakers } from '../lib/gateway'
 
 // The route resolves the current user for per-user skill credentials;
 // next-auth can't run in vitest, so fall through to anonymous access.
 vi.mock('@/lib/auth-context', () => ({
   getCurrentUserId: vi.fn().mockResolvedValue(null),
+}))
+
+// The route dynamically imports the tier limiter for signed-in users. Every
+// other test runs anonymous (userId null), so the tier block never fires;
+// the denial-shape test below overrides checkTierLimits per call.
+vi.mock('@/lib/billing/tier-rate-limit', () => ({
+  checkTierLimits: vi.fn(async () => ({ allowed: true })),
+  getCachedDailyUsage: vi.fn(async () => null),
+  setCachedDailyUsage: vi.fn(async () => {}),
 }))
 
 // The chat guard requires a session (ROUTE_GUARDS.chat → requireSession),
@@ -19,6 +31,7 @@ vi.mock('@/lib/auth', () => ({
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
+  vi.mocked(getCurrentUserId).mockResolvedValue(null)
 })
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -122,6 +135,29 @@ describe('POST /api/chat', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(502)
+  })
+
+  it('returns a guard-shaped 429 with Retry-After when the tier burst limit denies', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.mocked(getCurrentUserId).mockResolvedValue('tier-user-1')
+    // A cached same-day usage count keeps the route off the DB before the
+    // denial; the plan defaults to free when the user-meta cache is empty.
+    const today = new Date().toISOString().slice(0, 10)
+    vi.mocked(getCachedDailyUsage).mockResolvedValue({ count: 1, date: today })
+    vi.mocked(checkTierLimits).mockResolvedValueOnce({
+      allowed: false,
+      reason: 'burst',
+      retryAfterMs: 42_000,
+      error: 'Rate limit exceeded. You can make 20 requests per minute. Please wait 42s.',
+    })
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(429)
+    // Parity with the guardRoute denials: JSON { error } body + Retry-After.
+    expect(res.headers.get('retry-after')).toBe('42')
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toContain('Rate limit exceeded')
+    expect(checkTierLimits).toHaveBeenCalledWith('tier-user-1', 'free', 1)
   })
 
   it('passes through upstream error statuses', async () => {
@@ -842,5 +878,159 @@ describe('POST /api/chat', () => {
     const { value } = await reader.read()
     const chunk = new TextDecoder().decode(value)
     expect(chunk).toContain('[DONE]')
+  })
+})
+
+describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
+  const OR_URL = 'https://openrouter.ai/api/v1'
+  const GEM_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
+
+  beforeEach(async () => {
+    // Fresh breaker state per test (the gateway keeps a per-process memory
+    // fallback when REDIS_URL is unset, which leaks across tests otherwise).
+    await resetGatewayBreakers()
+    vi.stubEnv('REDIS_URL', '')
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-primary')
+    vi.stubEnv('GEMINI_API_KEY', 'AIza-fallback')
+    vi.stubEnv('OPENAI_API_KEY', '')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('OPENROUTER_BASE_URL', undefined)
+    vi.stubEnv('FALLBACK_MODEL', undefined)
+    vi.stubEnv('GEMINI_FALLBACK_MODEL', undefined)
+    vi.stubEnv('OPENAI_FALLBACK_MODEL', undefined)
+    vi.stubEnv('MODEL_KIMI_K3', undefined)
+  })
+
+  afterEach(async () => {
+    await resetGatewayBreakers()
+  })
+
+  function sseResponse(status = 200): Response {
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      }),
+      { status },
+    )
+  }
+
+  it('fails over to the next provider when the primary returns 5xx pre-stream', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(503, { error: 'upstream down' }))
+      .mockResolvedValueOnce(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${OR_URL}/chat/completions`)
+    expect(fetchMock.mock.calls[1]![0]).toBe(`${GEM_URL}/chat/completions`)
+    // The reply is stamped with who actually served it so the UI can say
+    // "fell back to Gemini".
+    expect(res.headers.get('x-served-provider')).toBe('gemini')
+    expect(res.headers.get('x-served-model')).toBe('gemini-3.5-flash-lite')
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
+  })
+
+  it('hops to the next provider when the primary throws a connect error pre-stream', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockResolvedValueOnce(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${OR_URL}/chat/completions`)
+    expect(fetchMock.mock.calls[1]![0]).toBe(`${GEM_URL}/chat/completions`)
+    expect(res.headers.get('x-served-provider')).toBe('gemini')
+  })
+
+  it('skips a circuit-open primary and serves the next provider without a first attempt on it', async () => {
+    // Three failures inside the window open the OpenRouter breaker.
+    for (let i = 0; i < 3; i++) {
+      await recordGatewayProviderFailure('openrouter')
+    }
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    // The open provider is never called — the request goes straight to Gemini.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${GEM_URL}/chat/completions`)
+    expect(res.headers.get('x-served-provider')).toBe('gemini')
+    // The request started in failover (primary skipped), so the reply is
+    // flagged as overridden even though Gemini served on its first attempt.
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
+  })
+
+  it('surfaces a non-retryable 4xx from the primary without trying the backup provider', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { error: 'bad request' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(400)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = (await res.json()) as { detail?: string }
+    expect(body.detail).toContain('bad request')
+  })
+
+  it('treats 408 as retryable: retries with the same provider backup model', async () => {
+    vi.stubEnv('GEMINI_API_KEY', '')
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(408, { error: 'upstream timeout' }))
+      .mockResolvedValueOnce(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'kimi-k3', messages: [{ role: 'user', content: 'hi' }] }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+    const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+    expect(first.model).toBe('moonshotai/kimi-k3')
+    expect(second.model).toBe('minimax/minimax-m3:free')
+    expect(res.headers.get('x-served-provider')).toBe('openrouter')
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
+  })
+
+  it('returns the last retryable status when every provider fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(503, { error: 'all down' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(503)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toContain('503')
+  })
+
+  it('still probes when the only configured provider has an open breaker (half-open test)', async () => {
+    vi.stubEnv('GEMINI_API_KEY', '')
+    for (let i = 0; i < 3; i++) {
+      await recordGatewayProviderFailure('openrouter')
+    }
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${OR_URL}/chat/completions`)
+    expect(res.headers.get('x-served-provider')).toBe('openrouter')
+    expect(res.headers.get('x-served-model-overridden')).toBe('false')
   })
 })

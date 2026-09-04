@@ -1,5 +1,6 @@
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/client'
+import { buildPrismaPgConfig, pooledUrlWarning } from './db-config'
 
 /**
  * PrismaClient singleton. Each instance opens its own connection pool, so a
@@ -12,6 +13,10 @@ import { PrismaClient } from '../generated/client'
  * are needed at the application layer. Neon requires SSL, so the connection
  * string should include `?sslmode=require` (or `channel_binding=require`
  * with `sslmode=verify-full` for stricter setups).
+ *
+ * Pool sizing comes from lib/db-config.ts: with no env overrides on a
+ * long-lived process the pool matches node-postgres defaults (max 10); on
+ * Vercel the per-instance max defaults to 1. Override with DATABASE_POOL_*.
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 
@@ -25,7 +30,13 @@ if (!connectionString) {
   )
 }
 
-const adapter = new PrismaPg({ connectionString })
+// Phase 2 (scalability): warn once at boot when a serverless deployment is
+// pointed at a Neon direct URL instead of the pooled one — the pooler is
+// what keeps concurrent function instances under Neon's connection limit.
+const poolWarning = pooledUrlWarning(connectionString)
+if (poolWarning) console.warn(`[db] ${poolWarning}`)
+
+const adapter = new PrismaPg(buildPrismaPgConfig(connectionString))
 
 export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter })
 

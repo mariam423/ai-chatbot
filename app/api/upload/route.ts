@@ -6,8 +6,9 @@ import {
   chunkDocumentText,
   getDocumentExtension,
   MAX_DOCUMENT_BYTES,
+  ASYNC_PROCESSING_MIN_CHUNKS,
 } from '@/lib/documents'
-import { createEmbedding } from '@/lib/rag'
+import { createEmbedding, storeDocumentChunks } from '@/lib/rag'
 import { errorResponse } from '@/lib/http'
 import { findOwnedSession } from '@/lib/session-access'
 import { guardRoute, ROUTE_GUARDS } from '@/lib/security'
@@ -96,6 +97,12 @@ export async function POST(request: Request) {
     const chunks = chunkDocumentText(text)
     if (chunks.length === 0) return errorResponse('The document does not contain usable text.')
 
+    // Large documents offload chunking + embedding + the bulk chunk insert
+    // to the BullMQ worker so the request returns fast; small documents stay
+    // fully synchronous so retrieval is immediately ready. When Redis is
+    // down the offload path falls back to synchronous ingestion inline.
+    const offload = chunks.length > ASYNC_PROCESSING_MIN_CHUNKS
+
     const document = await prisma.document.create({
       data: {
         sessionId: session.id,
@@ -111,25 +118,50 @@ export async function POST(request: Request) {
                 : 'text/plain'),
         size: file.size,
         textLength: text.length,
-        chunks: {
-          create: chunks.map((content, chunkIndex) => ({
-            chunkIndex,
-            content,
-            embedding: JSON.stringify(createEmbedding(content)),
-          })),
-        },
+        // Offloaded documents get their chunk rows from the worker;
+        // synchronous ones embed inline so retrieval is immediately ready.
+        ...(offload
+          ? {}
+          : {
+              chunks: {
+                create: chunks.map((content, chunkIndex) => ({
+                  chunkIndex,
+                  content,
+                  embedding: JSON.stringify(createEmbedding(content)),
+                })),
+              },
+            }),
       },
       select: { id: true, name: true, mimeType: true, size: true, textLength: true },
     })
 
-    // Dispatch background post-processing (cache invalidation, optional
-    // re-embedding). Falls back to synchronous when Redis is unavailable.
-    void addTask('document:process', {
-      sessionId: session.id,
-      documentId: document.id,
-      userId: guard.userId,
-      fileName: file.name,
-    })
+    if (offload) {
+      // Full-ingestion offload: the worker chunks, embeds, and persists the
+      // chunk rows, then invalidates the session/user caches.
+      const jobId = await addTask('document:process', {
+        sessionId: session.id,
+        documentId: document.id,
+        userId: guard.userId,
+        fileName: file.name,
+        text,
+      })
+      if (!jobId) {
+        // Redis unavailable — ingest synchronously so the document is usable.
+        await storeDocumentChunks(
+          document.id,
+          chunks.map((content, chunkIndex) => ({ chunkIndex, content })),
+        )
+      }
+    } else {
+      // Small doc: work is already done inline; queue only cache
+      // invalidation (best-effort — the short cache TTL bounds staleness).
+      void addTask('document:process', {
+        sessionId: session.id,
+        documentId: document.id,
+        userId: guard.userId,
+        fileName: file.name,
+      })
+    }
 
     return NextResponse.json({ document })
   } catch (error) {

@@ -21,3 +21,9 @@ generated/
 *.tsbuildinfo
 # Local env files at the repo root (not the standard .env pattern)
 /env.
+
+# Local portable Postgres (e2e runs)
+.pg/
+
+# Local Redis (portable, load-smoke only)
+.redis/

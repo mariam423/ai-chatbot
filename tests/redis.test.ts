@@ -4,10 +4,21 @@ describe('lib/redis.ts', () => {
   beforeEach(() => {
     vi.resetModules()
     delete process.env.REDIS_URL
+    // Tests create REAL ioredis clients against localhost:6379 where no
+    // server runs. Their connect() failures log console.warn asynchronously
+    // (error listener + connect().catch) — silence it so those logs cannot
+    // race the worker teardown. The two warn-assertion tests re-spy on
+    // console.warn and record their own calls.
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
+    // Close any client created during the test and let in-flight connect()
+    // rejections settle while the warn stub is still installed.
+    const { disconnectRedis } = await import('../lib/redis')
+    await disconnectRedis()
+    await new Promise((resolve) => setTimeout(resolve, 50))
     vi.restoreAllMocks()
   })
 
