@@ -172,7 +172,6 @@ export default function ChatApp() {
       }
       setTemperature(result.data.temperature)
       setMaxCompletionTokens(result.data.maxCompletionTokens)
-
     })
     void getWorkspaceTasks().then((result) => {
       if (result.ok) {
@@ -436,7 +435,7 @@ export default function ChatApp() {
         data-assistant-theme={activeAssistantTheme}
       >
         <header
-          className="flex flex-wrap items-center justify-between gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3"
+          className="flex flex-col gap-1.5 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-2"
           style={{
             background: 'var(--glass-bg)',
             backdropFilter: 'blur(12px)',
@@ -444,54 +443,105 @@ export default function ChatApp() {
             borderBottom: '1px solid var(--border-subtle)',
           }}
         >
-          <div className="flex items-center gap-2">
-            <motion.button
-              type="button"
-              onClick={() => setMenuOpen(true)}
-              whileHover={reducedMotion ? undefined : { scale: 1.05 }}
-              whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-              aria-label="Open conversation list"
-              aria-expanded={menuOpen}
-              aria-controls="conversations-drawer"
-              className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)] md:hidden"
-            >
-              <HugeiconsIcon icon={MenuIcon} size={20} strokeWidth={1.5} />
-            </motion.button>
-            <div className="flex items-center gap-2">
-              <div
-                className="vt-brand-icon flex size-7 items-center justify-center rounded-lg border"
-                style={{ background: 'var(--gold-soft)', borderColor: 'var(--gold-border)' }}
+          {/* Row 1 (mobile): brand identity left, essential actions right.
+              On md+ the header becomes a row and this block is just the
+              left-aligned brand group. */}
+          <div className="flex min-w-0 items-center justify-between gap-2 md:justify-start">
+            <div className="flex min-w-0 items-center gap-2">
+              <motion.button
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+                whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+                aria-label="Open conversation list"
+                aria-expanded={menuOpen}
+                aria-controls="conversations-drawer"
+                className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)] md:hidden"
               >
-                <HugeiconsIcon
-                  icon={MenuIcon}
-                  size={13}
-                  strokeWidth={2}
-                  className="text-[var(--gold)]"
-                />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-                  Pulse AI
-                </h1>
-                {/* Active conversation metadata — the session title. Always
-                    rendered (invisible when no session) so the header height
-                    is stable and visual snapshots can mask the slot
-                    deterministically. */}
-                <p
-                  className={`max-w-40 truncate text-[10px] text-[var(--text-tertiary)] sm:max-w-64 ${
-                    activeSession ? '' : 'invisible'
-                  }`}
-                  data-testid="conversation-meta"
+                <HugeiconsIcon icon={MenuIcon} size={20} strokeWidth={1.5} />
+              </motion.button>
+              <div className="flex min-w-0 items-center gap-2">
+                <div
+                  className="vt-brand-icon flex size-7 shrink-0 items-center justify-center rounded-lg border"
+                  style={{ background: 'var(--gold-soft)', borderColor: 'var(--gold-border)' }}
                 >
-                  {activeSession?.title ?? ''}
-                </p>
+                  <HugeiconsIcon
+                    icon={MenuIcon}
+                    size={13}
+                    strokeWidth={2}
+                    className="text-[var(--gold)]"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="truncate text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+                    Pulse AI
+                  </h1>
+                  {/* Active conversation metadata — the session title. Always
+                      rendered (invisible when no session) so the header height
+                      is stable and visual snapshots can mask the slot
+                      deterministically. */}
+                  <p
+                    className={`max-w-40 truncate text-[10px] text-[var(--text-tertiary)] sm:max-w-64 ${
+                      activeSession ? '' : 'invisible'
+                    }`}
+                    data-testid="conversation-meta"
+                  >
+                    {activeSession?.title ?? ''}
+                  </p>
+                </div>
               </div>
             </div>
+            {/* Mobile actions — always visible, never pushed off-screen by the
+                scrollable control strip below. */}
+            <div className="flex shrink-0 items-center gap-1 md:hidden">
+              <motion.button
+                type="button"
+                onClick={() => handleSessionChange(null)}
+                whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+                whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+                aria-label="Start a new chat"
+                className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+              >
+                <HugeiconsIcon icon={PlusIcon} size={20} strokeWidth={1.5} />
+              </motion.button>
+              <motion.button
+                type="button"
+                onClick={toggleTheme}
+                whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+                whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+              >
+                <HugeiconsIcon
+                  icon={theme === 'dark' ? Sun01Icon : MoonIcon}
+                  size={18}
+                  strokeWidth={1.5}
+                />
+              </motion.button>
+              {/* Mobile user menu */}
+              {session?.user && (
+                <motion.button
+                  type="button"
+                  onClick={handleSignOut}
+                  whileHover={reducedMotion ? undefined : { scale: 1.05 }}
+                  whileTap={reducedMotion ? undefined : { scale: 0.95 }}
+                  aria-label="Sign out"
+                  className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
+                >
+                  <HugeiconsIcon icon={Logout01Icon} size={18} strokeWidth={1.5} />
+                </motion.button>
+              )}
+            </div>
           </div>
-          <div className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-1">
+          {/* Row 2 (mobile) / right cluster (md+): dense controls live in a
+              single horizontally scrollable strip on small screens so they
+              never wrap into a tall stack or collide; md+ restores the
+              wrapping two-column header. Scrollbar is hidden — swipe to
+              reveal the rest. */}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] md:flex-wrap md:justify-end md:overflow-visible [&::-webkit-scrollbar]:hidden">
             <nav
               aria-label="Workspace tools"
-              className="flex items-center gap-0.5 rounded-xl p-0.5"
+              className="flex shrink-0 items-center gap-0.5 rounded-xl p-0.5"
               style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
             >
               {WORKSPACE_TOOLS.map(({ id, label, Icon }) => {
@@ -505,7 +555,7 @@ export default function ChatApp() {
                     title={label}
                     data-testid={`workspace-${id}`}
                     onClick={() => setActiveWorkspaceTool(active ? null : id)}
-                    className={`flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors sm:px-2.5 ${
+                    className={`flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors sm:px-2.5 ${
                       active
                         ? 'bg-emerald-500/15 text-emerald-400'
                         : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-primary)]'
@@ -517,9 +567,11 @@ export default function ChatApp() {
                 )
               })}
             </nav>
-            <SkillPicker enabledSkills={enabledSkills} onChange={handleEnabledSkillsChange} />
+            <div className="shrink-0">
+              <SkillPicker enabledSkills={enabledSkills} onChange={handleEnabledSkillsChange} />
+            </div>
             <label
-              className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
+              className="flex shrink-0 items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
               style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
             >
               <span className="sr-only">Select assistant</span>
@@ -527,7 +579,7 @@ export default function ChatApp() {
                 value={selectedAgentId ?? ''}
                 onChange={(event) => setSelectedAgentId(event.target.value || null)}
                 aria-label="Select custom assistant"
-                className="max-w-28 cursor-pointer truncate bg-transparent outline-none sm:max-w-40"
+                className="max-w-24 cursor-pointer truncate bg-transparent outline-none sm:max-w-40"
               >
                 <option value="">Base model</option>
                 {customAgents.map((agent) => (
@@ -538,7 +590,7 @@ export default function ChatApp() {
               </select>
             </label>
             <label
-              className="flex items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
+              className="flex shrink-0 items-center rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-secondary)]"
               style={{ background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}
             >
               <span className="sr-only">AI model</span>
@@ -546,7 +598,7 @@ export default function ChatApp() {
                 value={selectedModel}
                 onChange={(event) => selectModel(event.target.value)}
                 aria-label="Select AI model"
-                className="max-w-36 cursor-pointer truncate bg-transparent outline-none sm:max-w-48"
+                className="max-w-32 cursor-pointer truncate bg-transparent outline-none sm:max-w-48"
               >
                 {MODEL_OPTIONS.map((option) => (
                   <option key={option.key} value={option.key}>
@@ -562,7 +614,7 @@ export default function ChatApp() {
                   ? `${formatCompactNumber(quota.estimatedTokensToday)} estimated tokens used today`
                   : 'Daily quota usage'
               }
-              className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-[11px] font-medium text-emerald-400 sm:px-2.5"
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-2 text-[11px] font-medium text-emerald-400 sm:px-2.5"
               style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent-medium)' }}
             >
               <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
@@ -576,14 +628,14 @@ export default function ChatApp() {
                   : '...'}
               </span>
             </span>
-            {/* Command palette trigger */}
+            {/* Command palette trigger (desktop) */}
             <motion.button
               type="button"
               onClick={() => setCommandPaletteOpen(true)}
               whileHover={reducedMotion ? undefined : { scale: 1.05 }}
               whileTap={reducedMotion ? undefined : { scale: 0.95 }}
               aria-label="Open command palette"
-              className="hidden items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] md:flex"
+              className="hidden shrink-0 items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-secondary)] md:flex"
               style={{ border: '1px solid var(--border-subtle)' }}
             >
               <HugeiconsIcon icon={Search01Icon} size={13} strokeWidth={1.5} />
@@ -600,7 +652,7 @@ export default function ChatApp() {
             </motion.button>
             {/* User avatar (desktop) */}
             {session?.user && (
-              <div className="hidden items-center gap-2 md:flex">
+              <div className="hidden shrink-0 items-center gap-2 md:flex">
                 <div
                   className="flex items-center gap-2 rounded-xl px-2 py-1"
                   style={{
@@ -642,46 +694,6 @@ export default function ChatApp() {
                 </motion.button>
               </div>
             )}
-            {/* Mobile actions */}
-            <div className="flex items-center gap-1 md:hidden">
-              <motion.button
-                type="button"
-                onClick={() => handleSessionChange(null)}
-                whileHover={reducedMotion ? undefined : { scale: 1.05 }}
-                whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-                aria-label="Start a new chat"
-                className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
-              >
-                <HugeiconsIcon icon={PlusIcon} size={20} strokeWidth={1.5} />
-              </motion.button>
-              <motion.button
-                type="button"
-                onClick={toggleTheme}
-                whileHover={reducedMotion ? undefined : { scale: 1.05 }}
-                whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
-              >
-                <HugeiconsIcon
-                  icon={theme === 'dark' ? Sun01Icon : MoonIcon}
-                  size={18}
-                  strokeWidth={1.5}
-                />
-              </motion.button>
-              {/* Mobile user menu */}
-              {session?.user && (
-                <motion.button
-                  type="button"
-                  onClick={handleSignOut}
-                  whileHover={reducedMotion ? undefined : { scale: 1.05 }}
-                  whileTap={reducedMotion ? undefined : { scale: 0.95 }}
-                  aria-label="Sign out"
-                  className="flex size-9 items-center justify-center rounded-xl text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-input)] hover:text-[var(--text-primary)]"
-                >
-                  <HugeiconsIcon icon={Logout01Icon} size={18} strokeWidth={1.5} />
-                </motion.button>
-              )}
-            </div>
           </div>
         </header>
 
