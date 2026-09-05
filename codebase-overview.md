@@ -432,6 +432,14 @@ pre-stream so a 429/5xx on one provider never interrupts a reply.
   and DOCX files plus overlapping text chunking for document RAG.
 - **`lib/rag.ts`** — Deterministic normalized 128-dimensional local embeddings,
   Zod vector validation, cosine retrieval, and bounded citation-labeled context.
+  Two storage/retrieval backends behind one interface: the zero-dependency
+  default (`RAG_VECTOR_MODE=hash`) scores in memory against the persisted
+  serialized vectors, while `RAG_VECTOR_MODE=pgvector` mirrors the same vectors
+  into an opt-in `embedding_vector vector(128)` column (apply `prisma/vector-column.sql`
+  once) and runs DB-side cosine search (`<=>` distance ≤ `1 - RAG_VECTOR_MIN_SIMILARITY`,
+  default 0.75 similarity, capped at `MAX_RAG_CHUNKS`). The pgvector path is
+  capability-probed once per process and falls back to hash on a missing column
+  or a thrown query — a misconfiguration never breaks retrieval.
 - **`lib/video.ts`** — Browser-only MP4/WebM keyframe sampling. It extracts at
   most six resized JPEG frames, enforces byte/data-URL limits, and never sends
   the original video binary.
@@ -599,7 +607,10 @@ N]` labels.
   Recharts renderer when a charting UI is present.
 - Local hashed vectors avoid a second embedding provider and preserve a
   replaceable retrieval contract, at the cost of lower semantic quality than a
-  dedicated embedding model.
+  dedicated embedding model. The optional pgvector backend keeps the same local
+  hashes (no extra provider or model) but pushes the cosine scoring into
+  Postgres for large corpora; the hash path caps corpus growth implicitly by
+  scoring in memory per request.
 - Video binaries and image/audio attachments are not persisted. Local browser
   processing reduces upload cost and privacy exposure; vision/audio support
   depends on the selected provider model. Audio uses the provider's

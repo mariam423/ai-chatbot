@@ -13,6 +13,43 @@ export const dynamic = 'force-dynamic'
 const MAX_AUDIO_BYTES = 2_000_000
 const TRANSCRIBE_TIMEOUT_MS = 20_000
 
+/** MIME types the mic fallback can produce (extend as needed). */
+const ALLOWED_AUDIO_MIME_TYPES = new Set([
+  'audio/webm',
+  'audio/webm;codecs=opus',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/x-m4a',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+  'audio/aac',
+  'audio/flac',
+  'video/webm',
+  'video/mp4',
+])
+
+/**
+ * When a client omits the Content-Type entirely, multipart parsers preserve
+ * the part as `application/octet-stream`. The filename extension is then the
+ * only signal we get, so lookup by extension before deciding it's not audio.
+ */
+const AUDIO_EXTENSIONS = new Set(['webm', 'ogg', 'oga', 'mp3', 'mp4', 'm4a', 'wav', 'aac', 'flac'])
+
+function isAllowedAudio(file: File): boolean {
+  const mimeType = ((file.type || '').toLowerCase().split(';')[0] ?? '').trim()
+  if (ALLOWED_AUDIO_MIME_TYPES.has(mimeType)) return true
+  if (mimeType === '' || mimeType === 'application/octet-stream') {
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+    return AUDIO_EXTENSIONS.has(ext)
+  }
+  return false
+}
+
+/** Language tags: optionally match a valid BCP-47-ish code, else reject. */
+const LANGUAGE_TAG_PATTERN = /^[a-z]{2,3}(?:[-_][a-zA-Z0-9]{2,8})*$/
+
 /**
  * Provider note: only OpenAI + Gemini expose an OpenAI-compatible
  * `/audio/transcriptions` endpoint. OpenRouter does not proxy Whisper and
@@ -131,6 +168,14 @@ export async function POST(request: Request) {
   if (file.size === 0 || file.size > MAX_AUDIO_BYTES) {
     return errorResponse(`Audio must be between 1 byte and ${MAX_AUDIO_BYTES} bytes.`)
   }
+  // Reject obviously non-audio payloads before spending a paid provider call.
+  // The client sends a `type` for webm recordings; a missing or empty type is
+  // tolerated (some encoders omit it — multipart parsers turn that into
+  // `application/octet-stream`, which we fall back to the filename for) but a
+  // present non-audio type is refused.
+  if (!isAllowedAudio(file)) {
+    return errorResponse(`Unsupported audio type: ${file.type || 'unknown'}`)
+  }
 
   const model = process.env.TRANSCRIBE_MODEL || 'whisper-1'
 
@@ -138,7 +183,13 @@ export async function POST(request: Request) {
   upstream.append('file', file, file.name || 'recording.webm')
   upstream.append('model', model)
   const language = form.get('language')
-  if (typeof language === 'string' && language.trim()) upstream.append('language', language.trim())
+  if (
+    typeof language === 'string' &&
+    language.trim().length <= 8 &&
+    LANGUAGE_TAG_PATTERN.test(language.trim())
+  ) {
+    upstream.append('language', language.trim())
+  }
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS)

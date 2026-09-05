@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { guardRoute, ROUTE_GUARDS, clientIp } from '@/lib/security'
 import { logSecurityEvent } from '@/lib/audit'
@@ -9,6 +10,32 @@ import { sendSubscriptionActivatedEmail, sendSubscriptionCancelledEmail } from '
 import { addTask, type StripePostProcessPayload } from '@/lib/queues/task-queue'
 import { invalidateCachedBillingStatus, invalidateCachedUserMeta } from '@/lib/cache'
 import { invalidateCachedDailyUsage } from '@/lib/billing/tier-rate-limit'
+
+/**
+ * Strict Zod contract for the Stripe webhook events we act on. `metadata` and
+ * `client_reference_id` are optional because subscription events (renewals,
+ * dashboard-triggered updates) may carry neither — the user is resolved from
+ * the stable Stripe ids saved at checkout time.
+ */
+const StripeEventSchema = z.object({
+  type: z.string().min(1),
+  data: z
+    .object({
+      object: z
+        .object({
+          id: z.string().optional(),
+          customer: z.string().optional(),
+          status: z.string().optional(),
+          subscription: z.string().optional(),
+          client_reference_id: z.string().optional(),
+          metadata: z.record(z.string(), z.unknown()).optional(),
+        })
+        .passthrough(),
+    })
+    .optional(),
+})
+
+type StripeEvent = z.infer<typeof StripeEventSchema>
 
 /**
  * Dispatch the post-webhook side-effects (cache invalidation) to the BullMQ
@@ -70,21 +97,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid signature.' }, { status: 401 })
   }
 
-  let event: {
-    type: string
-    data: { object: Record<string, unknown> }
-  }
+  let event: StripeEvent
+  let object: Record<string, unknown>
+  let metadata: Record<string, unknown>
   try {
-    event = JSON.parse(rawBody) as typeof event
+    const parsed = StripeEventSchema.safeParse(JSON.parse(rawBody))
+    if (!parsed.success) {
+      logSecurityEvent('webhook_invalid_payload', {
+        ip: clientIp(request),
+        issues: parsed.error.issues.map((issue) => issue.path.join('.')).slice(0, 5),
+      })
+      return NextResponse.json({ error: 'Invalid webhook payload.' }, { status: 400 })
+    }
+    event = parsed.data
+    object = event.data?.object ?? {}
+    metadata =
+      object.metadata && typeof object.metadata === 'object'
+        ? (object.metadata as Record<string, unknown>)
+        : {}
   } catch {
     return NextResponse.json({ error: 'Invalid JSON.' }, { status: 400 })
   }
 
-  const object = event.data?.object ?? {}
-  const metadata =
-    object.metadata && typeof object.metadata === 'object'
-      ? (object.metadata as Record<string, unknown>)
-      : {}
   const explicitUserId =
     typeof object.client_reference_id === 'string'
       ? object.client_reference_id
@@ -116,7 +150,15 @@ export async function POST(request: Request) {
 
     switch (event.type) {
       case 'checkout.session.completed': {
-        if (!userId) return NextResponse.json({ received: true })
+        if (!userId) {
+          logSecurityEvent('webhook_unresolved_user', {
+            ip: clientIp(request),
+            eventType: event.type,
+            customerId: customerId ?? null,
+            subscriptionId: subscriptionId ?? null,
+          })
+          return NextResponse.json({ received: true })
+        }
         const updatedUser = await prisma.user.update({
           where: { id: userId },
           data: {
@@ -140,7 +182,15 @@ export async function POST(request: Request) {
       }
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
-        if (!userId) return NextResponse.json({ received: true })
+        if (!userId) {
+          logSecurityEvent('webhook_unresolved_user', {
+            ip: clientIp(request),
+            eventType: event.type,
+            customerId: customerId ?? null,
+            subscriptionId: subscriptionId ?? null,
+          })
+          return NextResponse.json({ received: true })
+        }
         const status = typeof object.status === 'string' ? object.status : ''
         const active = ['active', 'trialing'].includes(status)
         const updateData = {

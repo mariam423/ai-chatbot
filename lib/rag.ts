@@ -18,6 +18,55 @@ export const EMBEDDING_DIMENSION = 128
 export const MAX_RAG_CHUNKS = 6
 export const MAX_RAG_CONTEXT_LENGTH = 8_000
 
+/**
+ * RAG retrieval backend selection.
+ *
+ *  - `hash` (default): local deterministic embeddings stored in the TEXT
+ *    `embedding` column with in-memory cosine scoring — zero dependencies,
+ *    portable to any Postgres. This is the original implementation and
+ *    remains fully supported.
+ *  - `pgvector`: database-side cosine search over the optional `embedding_vector`
+ *    vector(128) column (PgVector extension + HNSW index). Operator must apply
+ *    `prisma/vector-column.sql` once; when the column or extension is missing the
+ *    code transparently falls back to the hash path (same embeddings, same
+ *    scores — both are L2-normalized so cosine equals the dot product).
+ */
+export const RAG_VECTOR_MODE: 'hash' | 'pgvector' =
+  process.env.RAG_VECTOR_MODE === 'pgvector' ? 'pgvector' : 'hash'
+
+/** Minimum cosine similarity for a chunk to be returned by the pgvector path. */
+export const RAG_VECTOR_MIN_SIMILARITY = Math.min(
+  1,
+  Math.max(0, Number(process.env.RAG_VECTOR_MIN_SIMILARITY ?? 0.75)),
+)
+/** pgvector `<=>` is a cosine *distance* (1 − similarity). */
+const RAG_VECTOR_MAX_DISTANCE = 1 - RAG_VECTOR_MIN_SIMILARITY
+
+/** Lazy, once-per-process capability probe for the optional vector column. */
+let vectorColumnAvailable: boolean | null = null
+
+async function isPgvectorReady(): Promise<boolean> {
+  if (RAG_VECTOR_MODE !== 'pgvector') return false
+  if (vectorColumnAvailable !== null) return vectorColumnAvailable
+  try {
+    const rows = (await prisma.$queryRaw<
+      Array<{ present: number }>
+    >`SELECT 1 AS present FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'document_chunks' AND column_name = 'embedding_vector' LIMIT 1`) as Array<{
+      present: number
+    }>
+    vectorColumnAvailable = Array.isArray(rows) && rows.length > 0
+    if (!vectorColumnAvailable) {
+      console.warn(
+        '[rag] RAG_VECTOR_MODE=pgvector but document_chunks.embedding_vector is missing; falling back to hash search. Apply prisma/vector-column.sql to enable it.',
+      )
+    }
+  } catch (error) {
+    console.warn('[rag] pgvector capability check failed; using hash search:', error)
+    vectorColumnAvailable = false
+  }
+  return vectorColumnAvailable
+}
+
 const EmbeddingSchema = z.array(z.number().finite()).length(EMBEDDING_DIMENSION)
 const tokenPattern = /[\p{L}\p{N}]+/gu
 
@@ -63,8 +112,26 @@ export async function storeDocumentChunks(
       embedding: JSON.stringify(createEmbedding(content)),
     })),
   })
+  // pgvector path: mirror the same 128-dim embedding into the optional vector
+  // column so database-side cosine search can answer later retrievals. Failure
+  // here is non-fatal — the hash column remains the source of truth for the
+  // in-memory fallback (identical scores).
+  if (await isPgvectorReady()) {
+    try {
+      for (const { chunkIndex, content } of chunks) {
+        await prisma.$executeRaw`
+          UPDATE document_chunks
+          SET embedding_vector = ${JSON.stringify(createEmbedding(content))}::vector
+          WHERE document_id = ${documentId} AND chunk_index = ${chunkIndex}
+        `
+      }
+    } catch (error) {
+      console.warn('[rag] pgvector mirror update failed; hash search remains active:', error)
+    }
+  }
 }
 
+/** Dot-product cosine for L2-normalized local vectors (identical in both modes). */
 function cosineSimilarity(left: number[], right: number[]): number {
   let score = 0
   for (let index = 0; index < EMBEDDING_DIMENSION; index += 1) {
@@ -88,6 +155,15 @@ export async function retrieveDocumentChunks(
 ): Promise<RetrievedDocumentChunk[]> {
   const session = await findOwnedSession(sessionId, userId)
   if (!session) return []
+  if (await isPgvectorReady()) {
+    try {
+      return await retrieveDocumentChunksViaPgvector(sessionId, query)
+    } catch (error) {
+      // A malformed vector column, extension drop, or plan-level outage falls
+      // back to the hash path rather than failing the chat.
+      console.warn('[rag] pgvector search failed; falling back to hash search:', error)
+    }
+  }
 
   const rows = await prisma.documentChunk.findMany({
     where: { document: { sessionId } },
@@ -120,6 +196,44 @@ export async function retrieveDocumentChunks(
     })
     .sort((left, right) => right.score - left.score)
     .slice(0, MAX_RAG_CHUNKS)
+}
+
+/**
+ * Database-side cosine search (pgvector `<=>` operator) over the optional
+ * `embedding_vector` column. Returns the same shape as the hash path with a
+ * real similarity threshold applied at the SQL layer.
+ */
+async function retrieveDocumentChunksViaPgvector(
+  sessionId: string,
+  query: string,
+): Promise<RetrievedDocumentChunk[]> {
+  const queryVector = JSON.stringify(createEmbedding(query))
+  const rows = (await prisma.$queryRaw<
+    Array<{ chunkIndex: number; content: string; documentName: string; distance: number }>
+  >`
+    SELECT dc.chunk_index AS "chunkIndex",
+           dc.content,
+           d.name AS "documentName",
+           dc.embedding_vector <=> ${queryVector}::vector AS distance
+    FROM document_chunks dc
+    JOIN documents d ON d.id = dc.document_id
+    WHERE d.session_id = ${sessionId}
+      AND dc.embedding_vector IS NOT NULL
+      AND dc.embedding_vector <=> ${queryVector}::vector <= ${RAG_VECTOR_MAX_DISTANCE}
+    ORDER BY dc.embedding_vector <=> ${queryVector}::vector ASC
+    LIMIT ${MAX_RAG_CHUNKS}
+  `) as Array<{
+    chunkIndex: number
+    content: string
+    documentName: string
+    distance: number
+  }>
+  return rows.map((row) => ({
+    documentName: row.documentName,
+    chunkIndex: row.chunkIndex,
+    content: row.content,
+    score: 1 - row.distance,
+  }))
 }
 
 /** Format retrieved excerpts as bounded, citation-friendly prompt context. */
