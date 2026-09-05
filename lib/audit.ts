@@ -28,6 +28,8 @@ export type SecurityEventKind =
   | 'auth_succeeded'
   | 'billing_throttled'
   | 'webhook_invalid_signature'
+  | 'webhook_invalid_payload'
+  | 'webhook_unresolved_user'
   | 'decryption_failed'
   | 'worker_job_failed'
   // LLM gateway telemetry (Phase 4): emitted at info level, so both are

@@ -64,13 +64,22 @@ Both Auth.js-style names (`AUTH_*`) and the project's original names are accepte
 
 ## Optional providers (LLM fallbacks)
 
-| Variable           | Purpose                                                     |
-| ------------------ | ----------------------------------------------------------- |
-| `OPENAI_API_KEY`   | Direct OpenAI fallback.                                     |
-| `GEMINI_API_KEY`   | Direct Google Gemini fallback (OpenAI-compatible endpoint). |
-| `GROQ_API_KEY`     | Groq fallback.                                              |
-| `TOGETHER_API_KEY` | Together AI fallback.                                       |
-| `OLLAMA_BASE_URL`  | Local Ollama instance (e.g. `http://localhost:11434`).      |
+| Variable           | Purpose                                                       |
+| ------------------ | ------------------------------------------------------------- |
+| `OPENAI_API_KEY`   | Direct OpenAI fallback (also used for Whisper transcription). |
+| `GEMINI_API_KEY`   | Direct Google Gemini fallback (OpenAI-compatible endpoint).   |
+| `GROQ_API_KEY`     | Groq fallback.                                                |
+| `TOGETHER_API_KEY` | Together AI fallback.                                         |
+| `OLLAMA_BASE_URL`  | Local Ollama instance (e.g. `http://localhost:11434`).        |
+
+## Document RAG (pgvector)
+
+| Variable                    | Purpose                                                                                                                                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RAG_VECTOR_MODE`           | Default `hash` (zero-dependency in-memory cosine scoring). Set to `pgvector` to use DB-side cosine search — requires the opt-in `prisma/vector-column.sql` migration. Falling back automatically when the column is missing or the query errors. |
+| `RAG_VECTOR_MIN_SIMILARITY` | Minimum cosine similarity (0–1) for a chunk to be returned by the pgvector path (default `0.75`). Ignored in `hash` mode.                                                                                                                        |
+
+To enable DB-side vector search: apply `prisma/vector-column.sql` once (`psql "$DATABASE_URL" -f prisma/vector-column.sql`), then set `RAG_VECTOR_MODE=pgvector`.
 
 ## Billing
 

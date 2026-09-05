@@ -86,6 +86,32 @@ describe('POST /api/webhooks/stripe', () => {
     expect(res.status).toBe(401)
   })
 
+  it('rejects a validly-signed but structurally invalid payload with 400', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    // Valid signature, but `data` is a string, not an object → Zod rejects.
+    const payload = JSON.stringify({ type: 'checkout.session.completed', data: 'not-an-object' })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(400)
+    expect(userUpdate).not.toHaveBeenCalled()
+  })
+
+  it('marks a subscription event for an unresolvable user (audit + ack, no silent success)', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    userFindFirst.mockResolvedValue(null)
+    const payload = JSON.stringify({
+      type: 'customer.subscription.deleted',
+      data: {
+        object: { id: 'sub_orphan', customer: 'cus_orphan', status: 'canceled' },
+      },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    // Stripe requires a 2xx ack even when we cannot act on the event — but the
+    // path now audits the unresolved-user condition instead of silently
+    // swallowing the plan change (the billing-state-drift diagnostic).
+    expect(res.status).toBe(200)
+    expect(userUpdate).not.toHaveBeenCalled()
+  })
+
   it('upgrades the user to pro on checkout.session.completed', async () => {
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
     const payload = JSON.stringify({

@@ -175,7 +175,10 @@ model Document {
   @@map("documents")
 }
 
-/// A bounded text chunk and its vector embedding, serialized for SQLite.
+/// A bounded text chunk and its hash embedding (JSON in a TEXT column). The
+/// optional `embedding_vector vector(128)` column for pgvector cosine search
+/// lives in an opt-in migration (prisma/vector-column.sql) and is queried via
+/// $queryRaw, so it intentionally stays out of this model.
 model DocumentChunk {
   id         String   @id @default(cuid())
   documentId String

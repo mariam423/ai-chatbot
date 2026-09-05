@@ -163,4 +163,38 @@ describe('POST /api/transcribe', () => {
     const body = (await res.json()) as { error?: string }
     expect(body.error).toContain('no text')
   })
+
+  it('rejects a non-audio file type before hitting the provider', async () => {
+    useOpenAiKey()
+    const fetchMock = vi.fn().mockResolvedValue(okJson('not reached'))
+    vi.stubGlobal('fetch', fetchMock)
+    const bad = new File([new Uint8Array(64)], 'payload.txt', { type: 'text/plain' })
+    const res = await POST(transcribeRequest(bad))
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toContain('Unsupported audio type')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a file with an omitted/empty MIME type (some encoders omit it)', async () => {
+    useOpenAiKey()
+    const fetchMock = vi.fn().mockResolvedValue(okJson('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const bare = new File([new Uint8Array(64)], 'clip.webm', { type: '' })
+    const res = await POST(transcribeRequest(bare))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops an invalid language tag instead of forwarding it upstream', async () => {
+    useOpenAiKey()
+    const fetchMock = vi.fn().mockResolvedValue(okJson('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const res = await POST(transcribeRequest(audioFile(), 'en<SCRIPT>alert(1)</SCRIPT>'))
+    expect(res.status).toBe(200)
+    const init = fetchMock.mock.calls[0]![1]!
+    const body = init.body as FormData
+    // Language not appended → the sanitizer rejected the payload.
+    expect(await body.get('language')).toBeNull()
+  })
 })

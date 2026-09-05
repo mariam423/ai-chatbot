@@ -29,3 +29,4 @@ package-lock.json
 .agents/skills/vercel-composition-patterns
 .agents/skills/streaming
 e2e/**/*-snapshots
+prisma/vector-column.sql
