@@ -23,15 +23,27 @@ export function ServiceWorkerRegistrar() {
     if (!('serviceWorker' in navigator)) return
 
     const register = () => {
-      navigator.serviceWorker.register('/sw/service-worker.js', { scope: '/' }).catch((err) => {
-        // Non-fatal — the app still works as a normal website. The most
-        // common cause is the response lacking `Service-Worker-Allowed: /`,
-        // which means the browser will reject the scope. We swallow it so
-        // the warning doesn't surface in production logs as an error.
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn('[pwa] service worker registration failed:', err)
-        }
-      })
+      navigator.serviceWorker
+        .register('/sw/service-worker.js', { scope: '/' })
+        .then((registration) => {
+          // Informational only — confirms the scope the browser accepted so
+          // a mismatch with the manifest's "/" scope is visible in the log.
+          // Dev-only to avoid noise in production consoles.
+          if (process.env.NODE_ENV !== 'production') {
+            console.info(`[pwa] service worker registered (scope: ${registration.scope})`)
+          }
+        })
+        .catch((err: unknown) => {
+          // Non-fatal — the app still works as a normal website. Logging in
+          // production too (not just dev) so PWA install failures — wrong
+          // scope header, TLS/private-mode quirks, or a missing manifest —
+          // are diagnosable from the browser console instead of silently
+          // killing installability. Structured name/message only; the raw
+          // error can embed URLs but never secrets.
+          const name = err instanceof Error ? err.name : 'UnknownError'
+          const message = err instanceof Error ? err.message : String(err)
+          console.warn(`[pwa] service worker registration failed (${name}): ${message}`)
+        })
     }
 
     let cancelIdle: (() => void) | null = null
