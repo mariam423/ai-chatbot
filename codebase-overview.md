@@ -204,10 +204,15 @@ pre-stream so a 429/5xx on one provider never interrupts a reply.
   `customer.subscription.updated`/`deleted` (synchronizes plan and role;
   deletion clears the subscription id and sends the cancellation notification).
   Subscription events can resolve the user from metadata/reference id or
-  stored Stripe ids. Guarded by a generous per-IP flood brake (signature
-  verification is the real auth; the CSRF check is defense in depth — Stripe's
-  server-to-server calls carry no Origin). Plan-change side-effects (billing /
-  user-meta / daily-usage cache invalidation) dispatch to a
+  stored Stripe ids. **Idempotent**: handled events with a resolvable user are
+  claimed in the `WebhookEvent` ledger (`prisma/migrations/..._add_webhook_event`)
+  before the plan write; a P2002 (duplicate delivery/replay) is acknowledged
+  without re-applying, a failed write rolls the claim back so Stripe's retry
+  re-processes, and a P2021 (table not yet migrated on a rolling deploy)
+  degrades to the legacy path. Guarded by a generous per-IP flood brake
+  (signature verification is the real auth; the CSRF check is defense in depth
+  — Stripe's server-to-server calls carry no Origin). Plan-change side-effects
+  (billing / user-meta / daily-usage cache invalidation) dispatch to a
   `webhook:stripe:post-process` BullMQ job; when Redis is down the route
   invalidates inline so the new plan reflects immediately.
 - **`lib/security.ts`** — Shared guardrails: `checkCsrf`
@@ -308,10 +313,14 @@ pre-stream so a 429/5xx on one provider never interrupts a reply.
   are never logged).
 - **`lib/ssrf.ts`** — SSRF guard (OWASP A10): `assertSafeUrl` whitelists
   http(s), blocks private/loopback/link-local/reserved IPs (IPv4 + IPv6,
-  incl. IPv4-mapped and dotted-quad forms), and rejects hostnames whose DNS
-  resolves to any blocked address (rebinding defense). Applied to web search,
-  MCP server URLs, `diagram_render`, and `weather_lookup`; deliberately not
-  applied to the LLM base URL (self-hosted local models are legitimate).
+  incl. IPv4-mapped, IPv4-translated `::ffff:0:a.b.c.d`, and the NAT64
+  `64:ff9b::/96` prefix), and rejects hostnames whose DNS resolves to any
+  blocked address (rebinding defense). `safeFetch` runs fetches with
+  `redirect: 'manual'`, re-validates every `Location` hop (max 3, 3xx POST →
+  GET rewrites), and throws `SafeFetchError` on a blocked or unbounded chain.
+  Applied to web search, MCP server URLs, `diagram_render`, and `weather_lookup`
+  (all through `safeFetch`); deliberately not applied to the LLM base URL
+  (self-hosted local models are legitimate).
 - **`lib/embed.ts`** — Server-only HMAC-signed embed token contract. Payloads
   carry assistant id, owner id, optional normalized origin, and expiry; token
   verification is timing-safe, rejects tampering/expiry/id mismatches, and is

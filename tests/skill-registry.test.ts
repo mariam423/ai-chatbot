@@ -159,7 +159,9 @@ describe('registered tool executors', () => {
       title: 'Auth flow',
       rendered: true,
     })
-    expect(fetchMock.mock.calls[0]![0]).toBe('https://kroki.example.com/mermaid/svg')
+    expect((fetchMock.mock.calls[0]![0] as URL).toString()).toBe(
+      'https://kroki.example.com/mermaid/svg',
+    )
     expect(fetchMock.mock.calls[0]![1]!.body).toContain('flowchart TD')
   })
 
@@ -169,7 +171,9 @@ describe('registered tool executors', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await executeSkillTool('diagram_render', JSON.stringify({ language: 'ascii', spec: '+---+' }))
-    expect(fetchMock.mock.calls[0]![0]).toBe('https://kroki.example.com/svgbob/svg')
+    expect((fetchMock.mock.calls[0]![0] as URL).toString()).toBe(
+      'https://kroki.example.com/svgbob/svg',
+    )
   })
 
   it('falls back to a text preview when the diagram provider fails', async () => {
@@ -212,7 +216,7 @@ describe('registered tool executors', () => {
     const result = await executeSkillTool('weather_lookup', JSON.stringify({ location: 'Berlin' }))
     expect(result.ok).toBe(true)
     expect(result.data).toEqual({ condition: 'Sunny', temperature: 21 })
-    expect(fetchMock.mock.calls[0]![0]).toBe('https://weather.example.com')
+    expect((fetchMock.mock.calls[0]![0] as URL).toString()).toBe('https://weather.example.com/')
   })
 
   it('humanizes stock AI phrasing deterministically', async () => {

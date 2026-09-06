@@ -14,20 +14,46 @@ const EmbedRequestSchema = z.object({
   messages: z.array(ChatWireMessageSchema).min(1).max(40),
 })
 const RETRYABLE_STATUSES = new Set([404, 402, 429])
+const DAILY_WINDOW_MS = 24 * 60 * 60 * 1000
 
+/** Per-agent daily message budget (the real cost-abuse brake when a scraped
+ * token reaches an attacker). Overridable via EMBED_DAILY_LIMIT. */
+function dailyEmbedBudget(): number {
+  const raw = Number(process.env.EMBED_DAILY_LIMIT)
+  if (Number.isInteger(raw) && raw >= 1) return raw
+  return 500
+}
+
+/** CORS is only meaningful for browser cross-origin calls, which always carry
+ * an Origin header — echo it instead of handing out `*` to origin-less
+ * (server-side or scanner) callers. */
 function corsHeaders(origin: string | null): HeadersInit {
-  return {
-    'Access-Control-Allow-Origin': origin || '*',
+  const headers: HeadersInit = {
     'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Embed-Parent-Origin',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     Vary: 'Origin',
   }
+  if (origin) return { ...headers, 'Access-Control-Allow-Origin': origin }
+  return headers
 }
 
+/** Token channel is the Authorization header only — the `?token=` query string
+ * was removed because it lands the bearer in server access logs and Referer
+ * chains. */
 function tokenFromRequest(request: Request): string | null {
   const authorization = request.headers.get('authorization')
   if (authorization?.toLowerCase().startsWith('bearer ')) return authorization.slice(7).trim()
-  return new URL(request.url).searchParams.get('token')
+  return null
+}
+
+/** Origin signals the token's origin claim is checked against. */
+function originSignals(request: Request): Array<string | null | undefined> {
+  const referrer = request.headers.get('referer')
+  return [
+    request.headers.get('origin'),
+    request.headers.get('x-embed-parent-origin'),
+    referrer ? new URL(referrer).origin : null,
+  ]
 }
 
 export async function OPTIONS(request: Request) {
@@ -40,10 +66,9 @@ export async function OPTIONS(request: Request) {
 /** Stream a deliberately small, token-authenticated assistant surface for iframe embeds. */
 export async function POST(request: Request) {
   const origin = request.headers.get('origin')
-  const parentOrigin = request.headers.get('x-embed-parent-origin')
   const token = tokenFromRequest(request)
   const agentId = new URL(request.url).searchParams.get('agentId') || ''
-  const payload = verifyEmbedToken(token, agentId, parentOrigin || origin)
+  const payload = verifyEmbedToken(token, agentId, originSignals(request))
   const headers = corsHeaders(origin)
   if (!payload) {
     return NextResponse.json({ error: 'Invalid or expired embed token.' }, { status: 401, headers })
@@ -64,6 +89,23 @@ export async function POST(request: Request) {
         'Retry-After': String(limited.retryAfterSeconds),
       },
     })
+
+  const daily = await rateLimit(`embed:${agentId}:day`, {
+    limit: dailyEmbedBudget(),
+    windowMs: DAILY_WINDOW_MS,
+  })
+  if (!daily.ok)
+    return new NextResponse(
+      JSON.stringify({ error: 'This assistant has reached its daily limit.' }),
+      {
+        status: 429,
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          'Retry-After': String(daily.retryAfterSeconds),
+        },
+      },
+    )
 
   let body: unknown
   try {
@@ -119,9 +161,11 @@ export async function POST(request: Request) {
     overridden = true
   }
   if (!upstream.ok || !upstream.body) {
-    const detail = await upstream.text().catch(() => '')
+    // Drain so the connection is reusable; the body is never relayed to the
+    // client — provider error text can echo request data.
+    await upstream.text().catch(() => '')
     return NextResponse.json(
-      { error: `Assistant service error (${upstream.status}).`, detail: detail.slice(0, 300) },
+      { error: `Assistant service error (${upstream.status}).` },
       { status: upstream.status, headers },
     )
   }

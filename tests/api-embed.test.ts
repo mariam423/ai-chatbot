@@ -37,6 +37,35 @@ describe('POST /api/embed/chat', () => {
     expect(findFirst).not.toHaveBeenCalled()
   })
 
+  it('rejects a token supplied only via the query string (Authorization only)', async () => {
+    vi.stubEnv('AUTH_SECRET', 'test-secret')
+    const token = createEmbedToken({ agentId: 'agent-1', userId: 'user-1', origin: '*' })
+    const response = await POST(
+      new Request(`http://localhost/api/embed/chat?agentId=agent-1&token=${token}`, {
+        method: 'POST',
+        headers: {
+          Origin: 'https://example.com',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'Hi' }] }),
+      }),
+    )
+    expect(response.status).toBe(401)
+    expect(findFirst).not.toHaveBeenCalled()
+  })
+
+  it('rejects a token bound to a different origin before provider access', async () => {
+    vi.stubEnv('AUTH_SECRET', 'test-secret')
+    const token = createEmbedToken({
+      agentId: 'agent-1',
+      userId: 'user-1',
+      origin: 'https://allowed.example',
+    })
+    const response = await POST(request('agent-1', token, { messages: [] }))
+    expect(response.status).toBe(401)
+    expect(findFirst).not.toHaveBeenCalled()
+  })
+
   it('validates the owner, streams, and exposes CORS headers', async () => {
     vi.stubEnv('AUTH_SECRET', 'test-secret')
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test')

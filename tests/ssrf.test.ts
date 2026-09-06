@@ -5,7 +5,7 @@ vi.mock('node:dns/promises', () => ({
 }))
 
 import { lookup } from 'node:dns/promises'
-import { assertSafeUrl, isBlockedIp } from '../lib/ssrf'
+import { assertSafeUrl, isBlockedIp, safeFetch } from '../lib/ssrf'
 
 // `lookup` is overloaded (single-address vs { all: true } → array), so vi.mocked
 // picks the wrong resolved type — cast to a plain fn and drive it with arrays.
@@ -13,6 +13,7 @@ const lookupMock = vi.mocked(lookup) as unknown as ReturnType<typeof vi.fn>
 
 afterEach(() => {
   lookupMock.mockReset()
+  vi.unstubAllGlobals()
 })
 
 describe('isBlockedIp (OWASP A10 range blocking)', () => {
@@ -55,6 +56,19 @@ describe('isBlockedIp (OWASP A10 range blocking)', () => {
       'fe80::1',
       'ff02::1',
     ]) {
+      expect(isBlockedIp(ip), ip).toBe(true)
+    }
+  })
+
+  it('blocks IPv4-translated (::ffff:0:a.b.c.d) and NAT64 (64:ff9b::/96) forms', () => {
+    // ::ffff:0:x.x.x.x is the IPv4-translated bit-compatible alias — safe
+    // hosts are only reachable as the first form's ::ffff:x.x.x.x.
+    for (const ip of ['::ffff:0:127.0.0.1', '::ffff:0:10.0.0.1', '::ffff:0:192.168.0.1']) {
+      expect(isBlockedIp(ip), ip).toBe(true)
+    }
+    // The NAT64 well-known prefix forwards to IPv4 targets; the whole /96 is
+    // blocked wholesale (the embedded address could be private).
+    for (const ip of ['64:ff9b::7f00:1', '64:ff9b::a00:1', '64:ff9b::808:808']) {
       expect(isBlockedIp(ip), ip).toBe(true)
     }
   })
@@ -139,5 +153,76 @@ describe('assertSafeUrl', () => {
     lookupMock.mockResolvedValue([{ address: '::ffff:192.168.0.5', family: 6 }])
     const result = await assertSafeUrl('https://mapped.example/x')
     expect(result.ok).toBe(false)
+  })
+})
+
+describe('safeFetch (redirect re-validation)', () => {
+  it('rejects a redirect to a private address without following it', async () => {
+    lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/steal' } }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(safeFetch('https://example.com/x')).rejects.toThrow(/blocked/)
+    // The private hop was never hit — only the original request went out.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({ redirect: 'manual' }),
+    )
+  })
+
+  it('follows a redirect to a public address', async () => {
+    lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 302, headers: { location: 'https://final.example/ok' } }),
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await safeFetch('https://example.com/x')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('ok')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1]![0] as URL).toString()).toBe('https://final.example/ok')
+  })
+
+  it('rewrites a bodyless GET onto a 303 redirect', async () => {
+    lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 303, headers: { location: 'https://final.example/ok' } }),
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await safeFetch('https://example.com/x', { method: 'POST', body: 'data' })
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ method: 'GET', body: undefined, redirect: 'manual' }),
+    )
+  })
+
+  it('throws after exceeding the 3-hop redirect budget', async () => {
+    lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }])
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://redirect.example/again' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(safeFetch('https://example.com/start')).rejects.toThrow(/Too many redirects/)
+    // Initial request + exactly 3 followed hops, then the guard gives up.
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 })

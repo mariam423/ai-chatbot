@@ -90,7 +90,10 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: "default-src 'self'; frame-ancestors *; object-src 'none'; base-uri 'none'",
           },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // The embed lugs a bearer token around (in a URL fragment now, but
+          // still): never pass any part of its address to third parties the
+          // widget content may load.
+          { key: 'Referrer-Policy', value: 'no-referrer' },
         ],
       },
     ]

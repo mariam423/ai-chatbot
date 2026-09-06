@@ -51,8 +51,11 @@ beforeEach(async () => {
   // extractDocumentText already calls sanitizeForPostgres internally
   // (commit 323017d, to strip NUL bytes before Postgres INSERT), and
   // chunkDocumentText re-sanitizes as defense in depth.
-  const cleanText = extractDocumentText('rag-test.txt', 'text/plain',
-    new TextEncoder().encode(rawText))
+  const cleanText = extractDocumentText(
+    'rag-test.txt',
+    'text/plain',
+    new TextEncoder().encode(rawText),
+  )
   const chunks = chunkDocumentText(cleanText)
   expect(chunks.length).toBeGreaterThan(0)
 
@@ -105,11 +108,7 @@ describe('RAG retrieval', () => {
 
   it('orders chunks by descending similarity', async () => {
     const { retrieveDocumentChunks } = await loadRag()
-    const results = await retrieveDocumentChunks(
-      SESSION_ID,
-      'capital of Atlantis',
-      USER_ID,
-    )
+    const results = await retrieveDocumentChunks(SESSION_ID, 'capital of Atlantis', USER_ID)
     expect(results.length).toBeGreaterThan(0)
     for (let i = 1; i < results.length; i += 1) {
       expect(results[i - 1]!.score).toBeGreaterThanOrEqual(results[i]!.score)
@@ -118,11 +117,7 @@ describe('RAG retrieval', () => {
 
   it('returns a lower score for an unrelated query than for the on-topic query', async () => {
     const { retrieveDocumentChunks } = await loadRag()
-    const onTopic = await retrieveDocumentChunks(
-      SESSION_ID,
-      'secret passphrase',
-      USER_ID,
-    )
+    const onTopic = await retrieveDocumentChunks(SESSION_ID, 'secret passphrase', USER_ID)
     const offTopic = await retrieveDocumentChunks(
       SESSION_ID,
       'asdfgh qwerty zxcvbn mnbvcx lkjhgf poiuzt',

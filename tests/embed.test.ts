@@ -25,9 +25,28 @@ describe('embed tokens', () => {
     vi.stubEnv('AUTH_SECRET', 'test-secret')
     const token = createEmbedToken({ agentId: 'agent-1', userId: 'user-1', now: 1_000_000 })
     expect(verifyEmbedToken(`${token}x`, 'agent-1', null, 1_000_001)).toBeNull()
+    expect(verifyEmbedToken(token, 'agent-1', null, 1_000_000 + 24 * 60 * 60 * 1000)).toBeNull()
+  })
+
+  it('enforces a bound origin across the request-origin signals', () => {
+    vi.stubEnv('AUTH_SECRET', 'test-secret')
+    const token = createEmbedToken({
+      agentId: 'agent-1',
+      userId: 'user-1',
+      origin: 'https://embed.example',
+      now: 1_000_000,
+    })
+    // Matches via the Referer-derived origin signal.
     expect(
-      verifyEmbedToken(token, 'agent-1', null, 1_000_000 + 30 * 24 * 60 * 60 * 1000),
+      verifyEmbedToken(token, 'agent-1', ['https://embed.example/path', null], 1_000_001),
+    ).toMatchObject({ origin: 'https://embed.example' })
+    // Rejected when no signal matches.
+    expect(
+      verifyEmbedToken(token, 'agent-1', ['https://other.example', null], 1_000_001),
     ).toBeNull()
+    // A bound token is rejected when no origin signal is present at all.
+    expect(verifyEmbedToken(token, 'agent-1', null, 1_000_001)).toBeNull()
+    expect(verifyEmbedToken(token, 'agent-1', [], 1_000_001)).toBeNull()
   })
 
   it('normalizes an allowed origin to its origin component', () => {

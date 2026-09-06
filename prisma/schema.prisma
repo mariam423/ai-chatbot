@@ -264,3 +264,18 @@ model PasswordResetToken {
   @@index([userId])
   @@map("password_reset_tokens")
 }
+
+/// Stripe webhook idempotency ledger — one row per successfully processed
+/// event id, claimed before the plan/role write and cleared if the write
+/// fails (so Stripe's retry re-processes). A duplicate delivery is
+/// acknowledged without re-applying. `userId` is informational (nullable for
+/// events whose user could not be resolved). Relationless: no FK coupling.
+model WebhookEvent {
+  eventId     String   @id
+  type        String
+  userId      String?
+  processedAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("webhook_events")
+}

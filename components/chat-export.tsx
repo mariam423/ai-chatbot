@@ -273,7 +273,16 @@ export default function ChatExport({
       </AnimatePresence>
 
       {/* Hidden frame used only for the Print → Save-as-PDF flow. */}
-      <iframe ref={iframeRef} title="Export preview" className="hidden" aria-hidden="true" />
+      <iframe
+        ref={iframeRef}
+        title="Export preview"
+        className="hidden"
+        aria-hidden="true"
+        // Defense-in-depth for the PDF print frame: the srcdoc embeds user
+        // message text, so scripts/forms/navigation are all sandboxed off.
+        // allow-modals keeps the native print dialog working.
+        sandbox="allow-modals"
+      />
     </div>
   )
 }

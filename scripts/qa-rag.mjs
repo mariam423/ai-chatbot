@@ -19,7 +19,9 @@ page.on('response', async (r) => {
   const u = new URL(r.url())
   if (u.hostname.includes('vercel.app') && r.status() >= 400) {
     let body = ''
-    try { body = (await r.text()).slice(0, 200) } catch {}
+    try {
+      body = (await r.text()).slice(0, 200)
+    } catch {}
     console.log(`HTTP ${r.status()}: ${r.request().method()} ${u.pathname} — ${body}`)
   }
 })
@@ -55,11 +57,9 @@ fs.writeFileSync(`/tmp/${unique}.txt`, body)
 try {
   console.log('Uploading doc...')
   await docInput.setInputFiles(`/tmp/${unique}.txt`)
-  await page.waitForFunction(
-    (name) => (document.body.textContent ?? '').includes(name),
-    unique,
-    { timeout: 15_000 },
-  )
+  await page.waitForFunction((name) => (document.body.textContent ?? '').includes(name), unique, {
+    timeout: 15_000,
+  })
   console.log('✅ doc chip appeared:', unique)
 
   // 4. Wait for upload to actually complete server-side (a brief delay is
@@ -70,7 +70,9 @@ try {
   // 5. Ask for the unique passphrase — retry once on 429 (OpenRouter
   // free tier limits bursts aggressively).
   const composer = await page.$('textarea')
-  await composer.fill(`What is the secret passphrase in the uploaded document? Reply with only the passphrase and nothing else.`)
+  await composer.fill(
+    `What is the secret passphrase in the uploaded document? Reply with only the passphrase and nothing else.`,
+  )
   const send = await page.$('button[aria-label="Send"]')
   await send.click()
 
@@ -79,11 +81,9 @@ try {
   let lastBody = ''
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await page.waitForFunction(
-        (t) => (document.body.textContent ?? '').includes(t),
-        target,
-        { timeout: 30_000 },
-      )
+      await page.waitForFunction((t) => (document.body.textContent ?? '').includes(t), target, {
+        timeout: 30_000,
+      })
       console.log(`✅ RAG retrieved unique fact: ${target}`)
       process.exit(0)
     } catch {
@@ -98,7 +98,9 @@ try {
         // Resend the same prompt
         const c2 = await page.$('textarea')
         if (c2) {
-          await c2.fill(`What is the secret passphrase in the uploaded document? Reply with only the passphrase and nothing else.`)
+          await c2.fill(
+            `What is the secret passphrase in the uploaded document? Reply with only the passphrase and nothing else.`,
+          )
           const s2 = await page.$('button[aria-label="Send"]')
           await s2?.click()
         }
@@ -111,7 +113,9 @@ try {
   console.log('Last 400 chars of body:', lastBody)
   process.exit(1)
 } finally {
-  try { fs.unlinkSync(`/tmp/${unique}.txt`) } catch {}
+  try {
+    fs.unlinkSync(`/tmp/${unique}.txt`)
+  } catch {}
 }
 
 await browser.close()

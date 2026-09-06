@@ -20,12 +20,19 @@ vi.mock('../lib/db', () => ({ prisma: prismaFixture.prisma }))
 let auth: typeof import('../app/actions/auth')
 const headersMock = vi.mocked(headers)
 
-beforeEach(async () => {
-  prismaFixture.reset()
-  auth = await import('../app/actions/auth')
-  headersMock.mockReset()
-  headersMock.mockResolvedValue(new Headers({ 'x-forwarded-for': '203.0.113.55' }))
-})
+beforeEach(
+  async () => {
+    prismaFixture.reset()
+    auth = await import('../app/actions/auth')
+    headersMock.mockReset()
+    headersMock.mockResolvedValue(new Headers({ 'x-forwarded-for': '203.0.113.55' }))
+  },
+  // Importing app/actions/auth pulls the whole server-actions graph (prisma,
+  // security, billing, encryption, redis). Under parallel full-suite load the
+  // first import can exceed the default 10s hook timeout — give it room, the
+  // same treatment actions.test.ts gives its beforeAll.
+  30_000,
+)
 
 afterAll(() => {
   // nothing to clean up — no temp DB was provisioned for this suite.

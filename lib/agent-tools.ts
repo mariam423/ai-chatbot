@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { assertSafeUrl } from '@/lib/ssrf'
+import { assertSafeUrl, safeFetch } from '@/lib/ssrf'
 import {
   CodeStructuredOutputSchema,
   RechartsStructuredOutputSchema,
@@ -158,7 +158,7 @@ async function webSearch(args: Record<string, unknown>): Promise<unknown> {
     // even when an operator misconfigures WEB_SEARCH_URL.
     const safe = await assertSafeUrl(endpoint)
     if (!safe.ok) throw new Error(`Search provider rejected: ${safe.reason}`)
-    const response = await fetch(endpoint, {
+    const response = await safeFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ query }),

@@ -17,6 +17,21 @@ const eslintConfig = defineConfig([
       '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
+  {
+    // Test mocks name unused mock-fn arguments with a `_` prefix on purpose —
+    // the arguments exist so the fake has the right arity/shape. The project
+    // convention is a leading underscore, not the default argsIgnorePattern.
+    // Note: `no-console` is already off (prettier preset), so the removed
+    // per-line disables are gone and the debug `console.log` calls in
+    // `tests/_prisma-mock.ts` are intentional test diagnostics.
+    files: ['tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -28,6 +43,10 @@ const eslintConfig = defineConfig([
     'test-results/**',
     'playwright-report/**',
     'coverage/**',
+    // Local database data directories (dev-only, gitignored): traversing the
+    // Postgres catalog / Redis dump makes `eslint .` hang.
+    '.pg/**',
+    '.redis/**',
   ]),
 ])
 

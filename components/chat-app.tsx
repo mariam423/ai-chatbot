@@ -14,6 +14,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useSession, signOut } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   clearChatSession,
@@ -63,6 +64,7 @@ function formatCompactNumber(value: number): string {
 }
 
 export default function ChatApp() {
+  const router = useRouter()
   const { data: session } = useSession()
   const [sessionId, setSessionIdState] = useState<string | null>(null)
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
@@ -403,7 +405,7 @@ export default function ChatApp() {
         onTogglePin={handleTogglePin}
         onToggleArchive={handleToggleArchive}
         onToggleArchivedView={() => setShowArchived((prev) => !prev)}
-        onOpenSettings={() => (window.location.href = '/settings')}
+        onOpenSettings={() => router.push('/settings')}
         onClose={() => setMenuOpen(false)}
       />
 
@@ -423,7 +425,7 @@ export default function ChatApp() {
         }}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => {
-          window.location.href = '/settings'
+          router.push('/settings')
           setCommandPaletteOpen(false)
         }}
       />

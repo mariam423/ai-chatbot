@@ -133,6 +133,7 @@ export default function MediaUpload({
       </button>
       {imageDataUrl && (
         <div className="flex items-center gap-1" aria-label="Image attachment">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imageDataUrl}
             alt="Attached image preview"
@@ -174,6 +175,7 @@ export default function MediaUpload({
       )}
       {frames.length > 0 && (
         <div className="flex items-center gap-1" aria-label="Video frames">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={frames[0]!.dataUrl}
             alt={`Video frame at ${Math.round(frames[0]!.timestamp)} seconds`}

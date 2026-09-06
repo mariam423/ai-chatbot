@@ -594,7 +594,12 @@ export async function togglePinSession(
     })
     if (!session) return { ok: false, error: 'Session not found.' }
     const pinned = !session.pinned
-    await prisma.chatSession.update({ where: { id: sessionId }, data: { pinned } })
+    // updateMany scopes the write by userId too, so a TOCTOU between the
+    // ownership check and the write can't touch another user's session.
+    await prisma.chatSession.updateMany({
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
+      data: { pinned },
+    })
     await invalidateCachedSessionLists(userId)
     return { ok: true, pinned }
   } catch {
@@ -616,7 +621,12 @@ export async function toggleArchiveSession(
     })
     if (!session) return { ok: false, error: 'Session not found.' }
     const archived = !session.archived
-    await prisma.chatSession.update({ where: { id: sessionId }, data: { archived } })
+    // updateMany scopes the write by userId too, so a TOCTOU between the
+    // ownership check and the write can't touch another user's session.
+    await prisma.chatSession.updateMany({
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
+      data: { archived },
+    })
     await invalidateCachedSessionLists(userId)
     return { ok: true, archived }
   } catch {
@@ -727,15 +737,24 @@ export async function createCustomAgentEmbedToken(input: {
   if (!agentId.success) return { ok: false, error: 'Invalid custom agent.' }
   const userId = await getCurrentUserId()
   if (!userId) return { ok: false, error: 'Not authenticated.' }
+  const requestedOrigin = input.origin?.trim()
+  if (!requestedOrigin) {
+    // No silent '*' default: a token scoped to `*` is usable from any site, so
+    // the publisher must explicitly opt in to that.
+    return {
+      ok: false,
+      error: 'Embed origin is required. Enter the hosting site, or * to allow any site.',
+    }
+  }
+  let origin: string
+  try {
+    origin = normalizeEmbedOrigin(requestedOrigin)
+  } catch {
+    return { ok: false, error: 'Embed origin must be a valid URL.' }
+  }
   try {
     const agent = await prisma.customAgent.findFirst({ where: { id: agentId.data, userId } })
     if (!agent) return { ok: false, error: 'Custom agent not found.' }
-    let origin: string
-    try {
-      origin = normalizeEmbedOrigin(input.origin)
-    } catch {
-      return { ok: false, error: 'Embed origin must be a valid URL.' }
-    }
     return { ok: true, token: createEmbedToken({ agentId: agent.id, userId, origin }) }
   } catch {
     return { ok: false, error: 'Could not create embed token.' }

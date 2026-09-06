@@ -2,14 +2,22 @@ import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../app/api/webhooks/stripe/route'
 
-// The webhook only touches prisma.user; mock the client so no DB is needed.
+// The webhook only touches prisma.user + prisma.webhookEvent; mock the client
+// so no DB is needed.
 const userUpdate = vi.fn()
 const userFindFirst = vi.fn()
+const eventCreate = vi.fn()
+const eventDelete = vi.fn()
 vi.mock('../lib/db', () => ({
   prisma: {
     user: {
       update: (...args: unknown[]) => userUpdate(...args),
       findFirst: (...args: unknown[]) => userFindFirst(...args),
+    },
+    webhookEvent: {
+      create: (...args: unknown[]) => eventCreate(...args),
+      // The route awaits `.catch(...)` on this, so it must resolve.
+      delete: (...args: unknown[]) => Promise.resolve(eventDelete(...args)),
     },
   },
 }))
@@ -49,6 +57,8 @@ afterEach(() => {
   vi.unstubAllEnvs()
   userUpdate.mockClear()
   userFindFirst.mockReset()
+  eventCreate.mockReset()
+  eventDelete.mockReset()
   addTaskMock.mockReset()
   invalidateBilling.mockClear()
   invalidateUserMeta.mockClear()
@@ -269,5 +279,109 @@ describe('POST /api/webhooks/stripe', () => {
     expect(invalidateBilling).toHaveBeenCalledWith('user-456')
     expect(invalidateUserMeta).toHaveBeenCalledWith('user-456')
     expect(invalidateDailyUsage).toHaveBeenCalledWith('user-456')
+  })
+
+  it('acknowledges a duplicate event id without re-applying (idempotency)', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    // A prior delivery already claimed evt_dupe — the replay is a no-op.
+    eventCreate.mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002' }))
+    const payload = JSON.stringify({
+      id: 'evt_dupe',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          client_reference_id: 'user-123',
+          customer: 'cus_abc',
+          subscription: 'sub_xyz',
+        },
+      },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(200)
+    expect(eventCreate).toHaveBeenCalledWith({
+      data: { eventId: 'evt_dupe', type: 'checkout.session.completed', userId: 'user-123' },
+    })
+    expect(userUpdate).not.toHaveBeenCalled()
+  })
+
+  it('claims the event id before applying a plan change', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    eventCreate.mockResolvedValue({ eventId: 'evt_claim1' })
+    const payload = JSON.stringify({
+      id: 'evt_claim1',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          client_reference_id: 'user-123',
+          customer: 'cus_abc',
+          subscription: 'sub_xyz',
+        },
+      },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(200)
+    expect(eventCreate).toHaveBeenCalledWith({
+      data: { eventId: 'evt_claim1', type: 'checkout.session.completed', userId: 'user-123' },
+    })
+    expect(userUpdate).toHaveBeenCalled()
+    expect(eventDelete).not.toHaveBeenCalled()
+  })
+
+  it('rolls the claim back when applying the plan change fails', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    eventCreate.mockResolvedValue({ eventId: 'evt_fail' })
+    userUpdate.mockRejectedValueOnce(new Error('db down'))
+    const payload = JSON.stringify({
+      id: 'evt_fail',
+      type: 'checkout.session.completed',
+      data: { object: { client_reference_id: 'user-123', customer: 'cus_abc' } },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(500)
+    // The claim is released so Stripe's retry re-processes the event.
+    expect(eventDelete).toHaveBeenCalledWith({ where: { eventId: 'evt_fail' } })
+  })
+
+  it('degrades to legacy processing when the ledger table is not migrated (P2021)', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    // A pre-migration instance has no webhook_events table — behave exactly
+    // like before so a rolling deploy never breaks the endpoint.
+    eventCreate.mockRejectedValueOnce(Object.assign(new Error('table missing'), { code: 'P2021' }))
+    const payload = JSON.stringify({
+      id: 'evt_legacy',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          client_reference_id: 'user-123',
+          customer: 'cus_abc',
+          subscription: 'sub_xyz',
+        },
+      },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(200)
+    expect(userUpdate).toHaveBeenCalledWith({
+      where: { id: 'user-123' },
+      data: {
+        plan: 'pro',
+        role: 'PRO',
+        stripeCustomerId: 'cus_abc',
+        stripeSubscriptionId: 'sub_xyz',
+      },
+    })
+    expect(eventDelete).not.toHaveBeenCalled()
+  })
+
+  it('does not claim unhandled event types', async () => {
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test')
+    const payload = JSON.stringify({
+      id: 'evt_invoice',
+      type: 'invoice.paid',
+      data: { object: {} },
+    })
+    const res = await POST(webhookRequest(payload, signedHeader(payload, 'whsec_test')))
+    expect(res.status).toBe(200)
+    expect(eventCreate).not.toHaveBeenCalled()
+    expect(userUpdate).not.toHaveBeenCalled()
   })
 })

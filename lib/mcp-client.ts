@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { assertSafeUrl } from '@/lib/ssrf'
+import { assertSafeUrl, safeFetch } from '@/lib/ssrf'
 
 const MAX_TOOL_RESPONSE_LENGTH = 64_000
 const MCP_TIMEOUT_MS = 12_000
@@ -204,7 +204,7 @@ async function requestRpc(
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS)
   try {
-    const response = await fetch(session.config.url, {
+    const response = await safeFetch(session.config.url, {
       method: 'POST',
       headers: rpcHeaders(session),
       body: JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }),

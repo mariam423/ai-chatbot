@@ -10,10 +10,17 @@ export async function GET() {
   if (!current) return;
   const agentId = current.dataset.agentId;
   const token = current.dataset.token;
+  const origin = current.dataset.origin || '';
   if (!agentId || !token) return;
   const frame = document.createElement('iframe');
   const base = new URL(current.src).origin;
-  frame.src = base + '/embed/' + encodeURIComponent(agentId) + '?token=' + encodeURIComponent(token);
+  // The token rides in the URL fragment (#…), never the query string — so it
+  // is not sent to the server, is not written to access logs, and never
+  // appears in Referer headers. The embed page reads it on the client, scrubs
+  // the fragment, and verifies it before mounting the chat surface.
+  frame.src = base + '/embed/' + encodeURIComponent(agentId)
+    + '#token=' + encodeURIComponent(token)
+    + (origin ? '&origin=' + encodeURIComponent(origin) : '');
   frame.title = current.dataset.title || 'AI assistant';
   frame.loading = 'lazy';
   frame.allow = 'microphone';

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { createSign } from 'node:crypto'
 import type { AgentToolResult } from '@/lib/agent-tools'
 import type { OpenAITool } from '@/lib/mcp-client'
-import { assertSafeUrl } from '@/lib/ssrf'
+import { assertSafeUrl, safeFetch } from '@/lib/ssrf'
 import {
   CodeAnalyzeSchema,
   DiagramRenderSchema,
@@ -110,7 +110,7 @@ async function renderDiagram(
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS)
   try {
-    const response = await fetch(`${baseUrl}/${DIAGRAM_KROKI_TYPES[language]}/svg`, {
+    const response = await safeFetch(`${baseUrl}/${DIAGRAM_KROKI_TYPES[language]}/svg`, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain',
@@ -202,7 +202,7 @@ async function lookupWeather(location: string, units: 'metric' | 'imperial'): Pr
     // SSRF guard (OWASP A10): refuse to POST to a private/loopback destination.
     const safe = await assertSafeUrl(endpoint)
     if (!safe.ok) throw new Error(`Weather provider rejected: ${safe.reason}`)
-    const response = await fetch(endpoint, {
+    const response = await safeFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ location, units }),

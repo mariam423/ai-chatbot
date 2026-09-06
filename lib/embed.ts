@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 
-const EMBED_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
+const EMBED_TOKEN_TTL_SECONDS = 24 * 60 * 60
 
 const EmbedPayloadSchema = z.object({
   agentId: z.string().min(1).max(100),
@@ -45,11 +45,40 @@ export function createEmbedToken(input: {
   return `${encoded}.${signature(encoded)}`
 }
 
-/** Verify a token and optionally enforce the request origin. */
+/** Normalize any origin-looking signal to its base origin component. */
+function baseOrigin(value: string): string {
+  try {
+    return new URL(value).origin
+  } catch {
+    return value.toLowerCase()
+  }
+}
+
+/**
+ * Enforce a token's origin claim. A `*` claim allows any embedding page;
+ * a bound claim must be present among the request-origin signals (the HTTP
+ * `Origin` header, the script-provided `X-Embed-Parent-Origin`, and the
+ * `Referer` origin). Browsers omit `Origin` on some navigations, so no
+ * realistic request is origin-less here — rejecting when no signal matches
+ * stops a scraped token from being replayed from an unrelated site.
+ */
+function originMatches(
+  payloadOrigin: string,
+  candidates: Array<string | null | undefined>,
+): boolean {
+  if (payloadOrigin === '*') return true
+  const signals = candidates.filter(
+    (candidate): candidate is string => typeof candidate === 'string',
+  )
+  if (signals.length === 0) return false
+  return signals.some((candidate) => baseOrigin(candidate) === payloadOrigin)
+}
+
+/** Verify a token and optionally enforce the request origin(s). */
 export function verifyEmbedToken(
   token: string | null | undefined,
   expectedAgentId: string,
-  requestOrigin?: string | null,
+  requestOrigins?: string | Array<string | null | undefined> | null,
   now = Date.now(),
 ): EmbedPayload | null {
   if (!token) return null
@@ -67,7 +96,8 @@ export function verifyEmbedToken(
     return null
   }
   if (payload.agentId !== expectedAgentId || payload.exp <= Math.floor(now / 1000)) return null
-  if (payload.origin !== '*' && requestOrigin && payload.origin !== requestOrigin) return null
+  const candidates = Array.isArray(requestOrigins) ? requestOrigins : [requestOrigins]
+  if (!originMatches(payload.origin, candidates)) return null
   return payload
 }
 

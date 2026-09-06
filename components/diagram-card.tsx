@@ -96,6 +96,9 @@ export default function DiagramCard({ src, alt }: DiagramCardProps) {
 
   // Defensive: non-SVG or undecodable sources render as a plain image.
   if (svgMarkup === null) {
+    // next/image can't serve arbitrary data: URLs (and here it'd break the
+    // script-safe <img>-based diagram rendering) — raw <img> is intentional.
+    // eslint-disable-next-line @next/next/no-img-element
     return <img src={src} alt={alt ?? 'Diagram'} />
   }
 

@@ -18,6 +18,8 @@ import { invalidateCachedDailyUsage } from '@/lib/billing/tier-rate-limit'
  * the stable Stripe ids saved at checkout time.
  */
 const StripeEventSchema = z.object({
+  // Top-level event id — the idempotency key for the webhook ledger.
+  id: z.string().optional(),
   type: z.string().min(1),
   data: z
     .object({
@@ -36,6 +38,25 @@ const StripeEventSchema = z.object({
 })
 
 type StripeEvent = z.infer<typeof StripeEventSchema>
+
+/** Event types we act on (and therefore idempotency-claim). */
+const HANDLED_EVENT_TYPES = new Set([
+  'checkout.session.completed',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+])
+
+/** Prisma error code (e.g. P2002 unique violation, P2021 missing table). */
+function prismaErrorCode(error: unknown): string | undefined {
+  if (
+    error &&
+    typeof error === 'object' &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
+    return (error as { code: string }).code
+  }
+  return undefined
+}
 
 /**
  * Dispatch the post-webhook side-effects (cache invalidation) to the BullMQ
@@ -129,6 +150,10 @@ export async function POST(request: Request) {
           : null
   const customerId = typeof object.customer === 'string' ? object.customer : null
   const subscriptionId = typeof object.id === 'string' ? object.id : null
+  const eventId = typeof event.id === 'string' && event.id.length > 0 ? event.id : null
+  // Idempotency claim — declared in the outer scope so the error handler can
+  // roll it back when the action below fails.
+  let eventClaim: 'claimed' | 'unsupported' | null = null
 
   try {
     // Subscription events may not contain Checkout's client_reference_id.
@@ -146,6 +171,31 @@ export async function POST(request: Request) {
         select: { id: true },
       })
       userId = matched?.id ?? null
+    }
+
+    // Idempotency claim: record the event id before acting so a duplicate
+    // delivery (Stripe auto-retry, delayed redelivery, or a replayed request)
+    // is acknowledged without re-applying the plan change. P2002 (the event
+    // id is already recorded) means a prior delivery won the race — ack and
+    // skip. P2021 (the table isn't migrated on this instance yet) degrades to
+    // the legacy behavior so the endpoint never breaks mid-rolling-deploy;
+    // the claim only exists for handled events with a resolvable user.
+    if (eventId !== null && userId && HANDLED_EVENT_TYPES.has(event.type)) {
+      try {
+        await prisma.webhookEvent.create({
+          data: { eventId, type: event.type, userId },
+        })
+        eventClaim = 'claimed'
+      } catch (claimError) {
+        if (prismaErrorCode(claimError) === 'P2002') {
+          return NextResponse.json({ received: true })
+        }
+        if (prismaErrorCode(claimError) === 'P2021') {
+          eventClaim = 'unsupported'
+        } else {
+          throw claimError
+        }
+      }
     }
 
     switch (event.type) {
@@ -228,6 +278,12 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ received: true })
   } catch {
+    // Roll the claim back so Stripe's retry re-processes the event instead of
+    // silently swallowing the failed plan change. Best-effort: the cleanup
+    // must never mask the 500.
+    if (eventClaim === 'claimed' && eventId !== null) {
+      await prisma.webhookEvent.delete({ where: { eventId } }).catch(() => undefined)
+    }
     return NextResponse.json({ error: 'Could not update billing state.' }, { status: 500 })
   }
 }

@@ -41,7 +41,10 @@ type Db = {
 //   - `children` — the child rows (used to populate `include` lookups
 //     and to set the foreign key on a nested create).
 // `childKey` is the foreign key on the child side (e.g. documentId).
-const RELATIONS: Record<string, { field: string; parent: Row[]; children: Row[]; childKey: string }> = {
+const RELATIONS: Record<
+  string,
+  { field: string; parent: Row[]; children: Row[]; childKey: string }
+> = {
   chatSession: { field: 'messages', parent: [], children: [], childKey: 'sessionId' },
   document: { field: 'chunks', parent: [], children: [], childKey: 'documentId' },
 }
@@ -133,16 +136,15 @@ function applySelect(row: Row | null, select: Record<string, unknown> | undefine
       // wire format for a nested select is
       // `{ document: { select: { name: true } } }` (parent name wraps
       // a `select` sub-key). Look up the relation either way.
-      const relation =
-        (RELATIONS[key] ?? Object.values(RELATIONS).find((r) => r.field === key))
+      const relation = RELATIONS[key] ?? Object.values(RELATIONS).find((r) => r.field === key)
       if (relation) {
         const parentId = row[relation.childKey]
         const related = relation.parent.find((p) => p['id'] === parentId)
         if (related) {
           const subValue = value as Record<string, unknown>
-          const subSelect = ('select' in subValue
-            ? (subValue.select as Record<string, unknown>)
-            : subValue) as Record<string, unknown>
+          const subSelect = (
+            'select' in subValue ? (subValue.select as Record<string, unknown>) : subValue
+          ) as Record<string, unknown>
           out[key] = applySelect(related, subSelect)
         } else {
           out[key] = null
@@ -467,7 +469,6 @@ export function makeInMemoryPrisma() {
           }
         }
         if (Array.isArray(first)) {
-          // eslint-disable-next-line no-console
           console.log(
             '[mock] joined all fragments length:',
             first.map((s) => String(s)).join('').length,
@@ -532,7 +533,6 @@ function synthesizeSessionList(db: Db, raw: string): Row[] {
   // is the actual term (group 1 is the leading `%`).
   const searchMatch = raw.match(/(?:LIKE|ILIKE)\s+'?(%)?([^'%]*)(%)?'?(?:\s+COLLATE\s+NOCASE)?/s)
   const searchTerm = searchMatch?.[2] ? searchMatch[2].toLowerCase() : ''
-  // eslint-disable-next-line no-console
   console.log('[mock] searchMatch:', searchMatch?.[0], '| searchTerm:', searchTerm)
   const filtered = sessions
     .filter((cs) => Boolean(cs.archived) === archived)
@@ -548,9 +548,7 @@ function synthesizeSessionList(db: Db, raw: string): Row[] {
           m.content.toLowerCase().includes(searchTerm),
       )
     })
-  // eslint-disable-next-line no-console
   if (searchTerm) {
-    // eslint-disable-next-line no-console
     console.log(
       '[mock] search term:',
       searchTerm,

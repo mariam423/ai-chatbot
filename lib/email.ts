@@ -147,6 +147,16 @@ export function sendWelcomeEmail(to: string, name?: string | null): Promise<Emai
   )
 }
 
+export function sendPasswordResetEmail(to: string, resetUrl: string): Promise<EmailDeliveryResult> {
+  const safeLink = escapeHtml(resetUrl)
+  return sendTransactionalEmail({
+    to,
+    subject: 'Reset your Pulse AI password',
+    html: `<!doctype html><html><body style="font-family:Arial,sans-serif;line-height:1.6;color:#17231c"><h1>Reset your password</h1><p>We received a request to reset your Pulse AI password. Click the link below to choose a new one (expires in 1 hour):</p><p><a href="${safeLink}">Reset password</a></p><p>If you did not request this, you can safely ignore this email — your password will not change.</p></body></html>`,
+    text: `Reset your Pulse AI password:\n\n${resetUrl}\n\nThis link expires in 1 hour. If you did not request this, you can safely ignore this email.`,
+  })
+}
+
 export function sendSubscriptionActivatedEmail(to: string): Promise<EmailDeliveryResult> {
   return sendTransactionalEmail(
     lifecycleEmail(

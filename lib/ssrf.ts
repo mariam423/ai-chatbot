@@ -18,7 +18,8 @@
  * then fetches it, so a hostname could theoretically be re-pointed between
  * the check and the request. Fully pinning would require replacing the
  * hostname with a validated IP (which breaks TLS SNI); for operator-configured
- * endpoints this window is acceptable.
+ * endpoints this window is acceptable. Redirect hops are NOT residual — the
+ * `safeFetch` companion re-runs the guard on every `Location` it follows.
  */
 
 import { lookup } from 'node:dns/promises'
@@ -96,14 +97,25 @@ function parseIpv6(addr: string): number[] | null {
   return [...head, ...Array(missing).fill(0), ...tail]
 }
 
-/** IPv4-mapped IPv6 (`::ffff:a.b.c.d` / `::a.b.c.d`) → dotted-quad, else null. */
+/**
+ * IPv4-carried IPv6 → dotted-quad, else null. Covers:
+ *  - IPv4-mapped `::ffff:a.b.c.d` (RFC 4291) and the obsolete IPv4-compatible
+ *    `::a.b.c.d` — marker hextet in position 5, quad in the trailing two.
+ *  - IPv4-translated `::ffff:0:a.b.c.d` (RFC 6052 general mapped form) — the
+ *    marker sits in position 4 with a single zero in 5; WITHOUT this form a
+ *    translated private address like `::ffff:0:127.0.0.1` slips through.
+ */
 function ipv4FromMappedIpv6(groups: number[]): string | null {
   if (groups.length !== 8) return null
-  const headZero = groups.slice(0, 5).every((group) => group === 0)
-  if (!headZero) return null
-  const marker = groups[5]
-  if (marker !== 0xffff && marker !== 0) return null
-  return `${groups[6]! >> 8}.${groups[6]! & 0xff}.${groups[7]! >> 8}.${groups[7]! & 0xff}`
+  const quad = `${groups[6]! >> 8}.${groups[6]! & 0xff}.${groups[7]! >> 8}.${groups[7]! & 0xff}`
+  if (groups.slice(0, 5).every((group) => group === 0)) {
+    const marker = groups[5]
+    if (marker === 0xffff || marker === 0) return quad
+  }
+  if (groups.slice(0, 4).every((group) => group === 0) && groups[4] === 0xffff && groups[5] === 0) {
+    return quad
+  }
+  return null
 }
 
 function isBlockedIpv6(addr: string): boolean {
@@ -112,6 +124,10 @@ function isBlockedIpv6(addr: string): boolean {
   const embedded = ipv4FromMappedIpv6(groups)
   if (embedded && isBlockedIpv4(embedded)) return true
   const g0 = groups[0]!
+  // 64:ff9b::/96 — the IETF well-known NAT64 discovery prefix (RFC 6052).
+  // Any address under it is translated through a gateway to an embedded IPv4,
+  // so the whole prefix is unusable as an external destination.
+  if (g0 === 0x0064 && groups[1] === 0xff9b) return true
   // :: and ::1
   if (groups.every((group) => group === 0)) return true
   if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true
@@ -175,4 +191,70 @@ export async function assertSafeUrl(raw: string): Promise<SafeUrlResult> {
     return { ok: false, reason: 'URL resolves to a blocked IP range.' }
   }
   return { ok: true, url }
+}
+
+/* ------------------------------------------------------------------ */
+/* Redirect-guarded fetch                                              */
+/* ------------------------------------------------------------------ */
+
+/** Thrown when a guarded fetch hits an unsafe destination or redirect chain. */
+export class SafeFetchError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SafeFetchError'
+  }
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+const SAFE_FETCH_MAX_REDIRECTS = 3
+
+/**
+ * Fetch with the SSRF guard applied to every hop.
+ *
+ * A bare `fetch` validates only the first URL — a 3xx to a private/loopback
+ * target is followed unconditionally, turning an operator-configured endpoint
+ * into an SSRF pivot. `safeFetch` runs the request with `redirect: 'manual'`,
+ * re-validates each `Location` via `assertSafeUrl` (resolving relative
+ * redirects against the current URL), and follows at most 3 hops. 303s (and
+ * browser-style 301/302 POST rewrites) are degraded to a bodyless GET, as
+ * fetch would do. A blocked or unbounded chain throws `SafeFetchError` so the
+ * caller's error path (a tool fallback / connection failure) handles it.
+ */
+export async function safeFetch(raw: string, init: RequestInit = {}): Promise<Response> {
+  let current = raw
+  let method = (init.method ?? 'GET').toUpperCase()
+  let body = init.body
+
+  for (let hop = 0; hop <= SAFE_FETCH_MAX_REDIRECTS; hop++) {
+    const safe = await assertSafeUrl(current)
+    if (!safe.ok) {
+      throw new SafeFetchError(`Redirect target rejected: ${safe.reason}`)
+    }
+    const response = await fetch(safe.url, {
+      ...init,
+      method,
+      body,
+      redirect: 'manual',
+    })
+
+    if (!REDIRECT_STATUSES.has(response.status)) return response
+    const location = response.headers.get('location')
+    if (!location) return response
+    const next = new URL(location, safe.url.toString())
+
+    // RFC 7231 redirect semantics: 303 always becomes GET; 301/302 rewrite a
+    // POST/PUT/PATCH to GET, exactly as global fetch does when following.
+    const rewriteToGet =
+      response.status === 303 ||
+      ((response.status === 301 || response.status === 302) &&
+        method !== 'GET' &&
+        method !== 'HEAD')
+    if (rewriteToGet) {
+      method = 'GET'
+      body = undefined
+    }
+    current = next.toString()
+  }
+
+  throw new SafeFetchError('Too many redirects.')
 }

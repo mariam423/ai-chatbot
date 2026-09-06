@@ -30,9 +30,12 @@ export default function EmbedGenerator({ agentId, assistantName }: EmbedGenerato
       return
     }
     const base = appOrigin()
-    const url = `${base}/embed/${encodeURIComponent(agentId)}?token=${encodeURIComponent(result.token)}`
+    const originParam = origin.trim()
+    // Token in the URL *fragment* (never the query string) so it doesn't land
+    // in server access logs or Referer headers.
+    const url = `${base}/embed/${encodeURIComponent(agentId)}#token=${encodeURIComponent(result.token)}${originParam ? `&origin=${encodeURIComponent(originParam)}` : ''}`
     const iframe = `<iframe src="${url}" title="${assistantName.replace(/"/g, '&quot;')}" width="100%" height="600" loading="lazy" style="border:0;border-radius:16px;overflow:hidden" allow="microphone"></iframe>`
-    const script = `<script async src="${base}/embed-widget.js" data-agent-id="${agentId}" data-token="${result.token}" data-origin="${origin || '*'}"></script>`
+    const script = `<script async src="${base}/embed-widget.js" data-agent-id="${agentId}" data-token="${result.token}" data-origin="${originParam || '*'}"></script>`
     setSnippet({ iframe, script })
     setStatus(
       'Snippet generated. Keep it private: the signed token grants access to this assistant.',
@@ -53,8 +56,9 @@ export default function EmbedGenerator({ agentId, assistantName }: EmbedGenerato
       <div>
         <p className="text-xs font-semibold text-[var(--text-secondary)]">Embed assistant</p>
         <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-          Generate a signed, expiring widget link for an external site. Optionally restrict requests
-          to one site origin.
+          Generate a signed, expiring widget link for an external site. Enter the site that will
+          host it to lock the token to that origin (or <span className="font-mono">*</span> to allow
+          any site).
         </p>
       </div>
       <div className="flex gap-2">
@@ -62,7 +66,7 @@ export default function EmbedGenerator({ agentId, assistantName }: EmbedGenerato
           aria-label={`Embed origin for ${assistantName}`}
           value={origin}
           onChange={(event) => setOrigin(event.target.value)}
-          placeholder="https://your-site.example (optional)"
+          placeholder="https://your-site.example"
           className="min-w-0 flex-1 rounded-lg px-2.5 py-2 text-xs text-[var(--text-primary)] outline-none"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border-medium)' }}
         />

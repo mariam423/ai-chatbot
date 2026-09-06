@@ -1375,3 +1375,85 @@ describe('distributed cache wiring (fake Redis)', () => {
     }
   })
 })
+
+describe('embed tokens (createCustomAgentEmbedToken)', () => {
+  let embedActions: typeof import('../app/actions')
+
+  beforeAll(async () => {
+    embedActions = await import('../app/actions')
+    const { prisma } = await import('../lib/db')
+    await prisma.user.upsert({
+      where: { id: 'embed-user' },
+      create: { id: 'embed-user', email: 'embed@example.com' },
+      update: {},
+    })
+  }, 30_000)
+
+  beforeEach(async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue('embed-user')
+    const { prisma } = await import('../lib/db')
+    await prisma.customAgent.deleteMany()
+  })
+
+  afterEach(async () => {
+    vi.mocked(getCurrentUserId).mockResolvedValue(null)
+  })
+
+  function saveAgent(): Promise<string> {
+    return embedActions
+      .saveCustomAgent({
+        name: 'Embed agent',
+        description: 'test',
+        systemPrompt: 'Be nice.',
+        baselineModel: undefined,
+        selectedTools: [],
+        theme: 'emerald',
+      } as Parameters<typeof embedActions.saveCustomAgent>[0])
+      .then((result) => {
+        if (!result.ok) throw new Error('failed to save agent')
+        return result.agent.id
+      })
+  }
+
+  it('requires an explicit embed origin (no silent wildcard)', async () => {
+    const agentId = await saveAgent()
+    const result = await embedActions.createCustomAgentEmbedToken({ agentId })
+    expect(result).toEqual({
+      ok: false,
+      error: 'Embed origin is required. Enter the hosting site, or * to allow any site.',
+    })
+  })
+
+  it('mints a token bound to the given origin for an owned agent', async () => {
+    vi.stubEnv('AUTH_SECRET', 'test-secret')
+    try {
+      const agentId = await saveAgent()
+      const result = await embedActions.createCustomAgentEmbedToken({
+        agentId,
+        origin: 'https://site.example',
+      })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const { verifyEmbedToken } = await import('../lib/embed')
+      expect(verifyEmbedToken(result.token, agentId, 'https://site.example')).toMatchObject({
+        agentId,
+        userId: 'embed-user',
+        origin: 'https://site.example',
+      })
+      expect(verifyEmbedToken(result.token, agentId, 'https://other.example')).toBeNull()
+      expect(verifyEmbedToken(result.token, agentId)).toBeNull()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('rejects tokens for other users’ agents', async () => {
+    const agentId = await saveAgent()
+    vi.mocked(getCurrentUserId).mockResolvedValue('someone-else')
+    const result = await embedActions.createCustomAgentEmbedToken({
+      agentId,
+      origin: 'https://site.example',
+    })
+    expect(result).toEqual({ ok: false, error: 'Custom agent not found.' })
+  })
+})

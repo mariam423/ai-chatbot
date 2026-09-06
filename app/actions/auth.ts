@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
 import { checkAuthRateLimit, clientIpFromHeaders } from '@/lib/security'
 import { DEFAULT_USER_ROLE } from '@/lib/roles'
-import { sendWelcomeEmail } from '@/lib/email'
+import { sendWelcomeEmail, sendPasswordResetEmail } from '@/lib/email'
 
 const RegisterSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(100),
@@ -86,13 +86,26 @@ const ResetPasswordSchema = z.object({
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
 
+/** Canonical deployment origin for email links (matches lib/security.ts). */
+function appBaseUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_APP_URL
+  if (explicit) return explicit.replace(/\/+$/, '')
+  const authUrl = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL
+  if (authUrl) return authUrl.replace(/\/+$/, '')
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
+  return 'http://localhost:3000'
+}
+
 /**
  * Request a password reset link. Always returns ok (beyond validation) so the
  * endpoint can't be used to probe which emails have accounts. The token is
- * stored hashed (SHA-256); only the raw value rides in the reset link.
+ * stored hashed (SHA-256); only the raw value rides in the reset link, which
+ * is delivered by the configured email provider (Resend/SendGrid).
  *
- * No email provider is configured yet, so the link is logged server-side.
- * Swap the `console.info` for a real send call when SMTP/Resend is added.
+ * The raw link is only printed to the server console in non-production
+ * environments (local development has no email provider); in production the
+ * token never appears in logs — anyone with log access could otherwise reset
+ * any account.
  */
 export async function requestPasswordReset(input: {
   email: string
@@ -125,9 +138,15 @@ export async function requestPasswordReset(input: {
           expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
         },
       })
-      console.info(
-        `[password-reset] link for ${normalisedEmail}: /reset-password?token=${rawToken}`,
-      )
+      const resetUrl = `${appBaseUrl()}/reset-password?token=${encodeURIComponent(rawToken)}`
+      // Local dev only: with no provider configured, print where to test the
+      // reset. In production this is a leak into function logs — never here.
+      if (process.env.NODE_ENV !== 'production') {
+        console.info(`[password-reset] link for ${normalisedEmail}: ${resetUrl}`)
+      }
+      // Best-effort delivery — a provider outage must never break the flow
+      // or reveal whether the account exists.
+      void sendPasswordResetEmail(user.email, resetUrl).catch(() => undefined)
     }
     return { ok: true }
   } catch {

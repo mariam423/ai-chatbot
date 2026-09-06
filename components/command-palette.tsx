@@ -3,7 +3,7 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Search01Icon, ChatIcon, PinIcon, Archive01Icon } from '@hugeicons/core-free-icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatSessionSummary } from '@/lib/types'
 
 interface CommandPaletteProps {
@@ -44,67 +44,82 @@ export default function CommandPalette({
   const listRef = useRef<HTMLDivElement>(null)
   const reducedMotion = useReducedMotion()
 
-  // Build action list
-  const actions: PaletteAction[] = [
-    {
-      id: 'new-chat',
-      label: 'New Chat',
-      description: 'Start a fresh conversation',
-      section: 'Actions',
-      shortcut: '⌘N',
-      perform: () => {
-        onNewChat()
-        onClose()
+  // Build action list (stable across renders so the memoized results below
+  // and the keyboard-callback dependencies don't churn every render).
+  const actions: PaletteAction[] = useMemo(
+    () => [
+      {
+        id: 'new-chat',
+        label: 'New Chat',
+        description: 'Start a fresh conversation',
+        section: 'Actions',
+        shortcut: '⌘N',
+        perform: () => {
+          onNewChat()
+          onClose()
+        },
       },
-    },
-    {
-      id: 'toggle-theme',
-      label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-      description: 'Toggle the app theme',
-      section: 'Actions',
-      shortcut: '⌘.',
-      perform: () => {
-        onToggleTheme()
-        onClose()
+      {
+        id: 'toggle-theme',
+        label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+        description: 'Toggle the app theme',
+        section: 'Actions',
+        shortcut: '⌘.',
+        perform: () => {
+          onToggleTheme()
+          onClose()
+        },
       },
-    },
-    {
-      id: 'open-settings',
-      label: 'Open Settings',
-      description: 'Manage your profile, API key, and presets',
-      section: 'Actions',
-      shortcut: '⌘,',
-      perform: () => {
-        onOpenSettings()
-        onClose()
+      {
+        id: 'open-settings',
+        label: 'Open Settings',
+        description: 'Manage your profile, API key, and presets',
+        section: 'Actions',
+        shortcut: '⌘,',
+        perform: () => {
+          onOpenSettings()
+          onClose()
+        },
       },
-    },
-  ]
+    ],
+    [theme, onNewChat, onClose, onToggleTheme, onOpenSettings],
+  )
 
   // Search sessions
   const queryLower = query.toLowerCase()
-  const matchingSessions = queryLower
-    ? sessions.filter(
-        (s) =>
-          s.title.toLowerCase().includes(queryLower) || s.id.toLowerCase().includes(queryLower),
-      )
-    : sessions
+  const matchingSessions = useMemo(
+    () =>
+      queryLower
+        ? sessions.filter(
+            (s) =>
+              s.title.toLowerCase().includes(queryLower) || s.id.toLowerCase().includes(queryLower),
+          )
+        : sessions,
+    [queryLower, sessions],
+  )
 
   // Combined items: actions matching query + sessions
-  const matchingActions = queryLower
-    ? actions.filter(
-        (a) =>
-          a.label.toLowerCase().includes(queryLower) ||
-          a.description?.toLowerCase().includes(queryLower),
-      )
-    : []
+  const matchingActions = useMemo(
+    () =>
+      queryLower
+        ? actions.filter(
+            (a) =>
+              a.label.toLowerCase().includes(queryLower) ||
+              a.description?.toLowerCase().includes(queryLower),
+          )
+        : [],
+    [queryLower, actions],
+  )
 
   const allItems: Array<
     { type: 'action'; action: PaletteAction } | { type: 'session'; session: ChatSessionSummary }
-  > = [
-    ...matchingActions.map((action) => ({ type: 'action' as const, action })),
-    ...matchingSessions.map((session) => ({ type: 'session' as const, session })),
-  ]
+  > = useMemo(
+    () => [
+      ...matchingActions.map((action) => ({ type: 'action' as const, action })),
+      ...matchingSessions.map((session) => ({ type: 'session' as const, session })),
+    ],
+    [matchingActions, matchingSessions],
+  )
 
   // Reset on open. The synchronous resets are intentional (fresh query each
   // time the palette opens); the focus is deferred so it isn't synchronous.
@@ -384,9 +399,7 @@ export default function CommandPalette({
                               : 'text-[var(--text-muted)]'
                           }
                         />
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          {session.title}
-                        </span>
+                        <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
                         {session.pinned && (
                           <HugeiconsIcon
                             icon={PinIcon}

@@ -176,7 +176,10 @@ export default function Markdown({ content, sessionId = null }: MarkdownProps) {
         if (typeof src === 'string' && isSvgDataUrl(src)) {
           return <DiagramCard src={src} alt={alt} />
         }
-        return <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={typeof src === 'string' ? src : undefined} alt={alt ?? ''} {...props} />
+        )
       },
     }),
     [],

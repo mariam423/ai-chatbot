@@ -28,10 +28,43 @@ vi.mock('@/lib/auth', () => ({
   auth: vi.fn().mockResolvedValue({ user: { id: 'test-user' } }),
 }))
 
+// The free-plan clamp tests run signed-in, which walks the tier + usage DB
+// path (plan read, usage increment) and the per-user credential lookup.
+const { dbUserFindUnique, dbUserUpdate, dbPrefFindUnique } = vi.hoisted(() => ({
+  dbUserFindUnique: vi.fn(),
+  dbUserUpdate: vi.fn(),
+  dbPrefFindUnique: vi.fn(),
+}))
+vi.mock('@/lib/db', () => ({
+  prisma: {
+    user: {
+      findUnique: (...args: unknown[]) => dbUserFindUnique(...args),
+      update: (...args: unknown[]) => dbUserUpdate(...args),
+    },
+    userPreference: {
+      findUnique: (...args: unknown[]) => dbPrefFindUnique(...args),
+    },
+  },
+}))
+// usage.ts + the route fire-and-forget cache invalidations; keep them no-ops
+// so the signed-in path never needs real Redis.
+vi.mock('@/lib/cache', () => ({
+  getCachedUserMeta: vi.fn(async () => null),
+  getCachedBillingStatus: vi.fn(async () => null),
+  invalidateCachedBillingStatus: vi.fn(async () => {}),
+}))
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   vi.mocked(getCurrentUserId).mockResolvedValue(null)
+  // Restore the tier-limiter defaults — the bundled-limits test replaces
+  // getCachedDailyUsage/checkTierLimits per call and never resets them.
+  vi.mocked(getCachedDailyUsage).mockResolvedValue(null)
+  vi.mocked(checkTierLimits).mockResolvedValue({ allowed: true })
+  dbUserFindUnique.mockReset()
+  dbUserUpdate.mockReset()
+  dbPrefFindUnique.mockReset()
 })
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -794,6 +827,74 @@ describe('POST /api/chat', () => {
     expect(payload.max_tokens).toBe(4096)
   })
 
+  it('clamps free-plan output to the operator budget even when the client asks for more', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    const today = new Date().toISOString().slice(0, 10)
+    dbUserFindUnique.mockResolvedValue({ plan: 'free', usageCount: 0, usageDate: today })
+    dbUserUpdate.mockResolvedValue({ id: 'user-1' })
+    dbPrefFindUnique.mockResolvedValue(null)
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'long reply please' }],
+          maxTokens: 4096,
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    // 4096 requested → clamped to the operator's free-plan budget so a client
+    // knob can't bill the operator's key for a full-length completion.
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      max_tokens?: number
+    }
+    expect(payload.max_tokens).toBe(2000)
+  })
+
+  it('does not clamp pro-plan or bring-your-own-key requests', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.mocked(getCurrentUserId).mockResolvedValue('user-1')
+    const today = new Date().toISOString().slice(0, 10)
+    dbUserFindUnique.mockResolvedValue({ plan: 'pro', usageCount: 0, usageDate: today })
+    dbUserUpdate.mockResolvedValue({ id: 'user-1' })
+    dbPrefFindUnique.mockResolvedValue(null)
+    const sse = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(sse, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'pro tier' }],
+          maxTokens: 4096,
+        }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as {
+      max_tokens?: number
+    }
+    expect(payload.max_tokens).toBe(4096)
+  })
+
   it('rejects out-of-range temperature and maxTokens with 400', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     for (const body of [
@@ -978,8 +1079,11 @@ describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(400)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const body = (await res.json()) as { detail?: string }
-    expect(body.detail).toContain('bad request')
+    const body = (await res.json()) as { error?: string; detail?: string }
+    expect(body.error).toBe('LLM API error (400).')
+    // Upstream error text is never relayed to the client (it can echo request
+    // data) — the status-only message is the contract.
+    expect(body.detail).toBeUndefined()
   })
 
   it('treats 408 as retryable: retries with the same provider backup model', async () => {

@@ -270,6 +270,7 @@ export default function SettingsPage() {
     preferredModel,
     temperature,
     maxCompletionTokens,
+    showModelCaptions,
   ])
 
   const testConnection = useCallback(async () => {

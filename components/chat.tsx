@@ -184,7 +184,7 @@ export default function Chat({
     return () => {
       cancelled = true
     }
-  }, [sessionId])
+  }, [sessionId, commitThread])
 
   // External clear (sidebar New Chat / delete-active while sessionId is null):
   // the [sessionId] restore effect above only re-runs when the id CHANGES, so

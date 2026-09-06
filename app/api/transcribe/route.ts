@@ -203,11 +203,12 @@ export async function POST(request: Request) {
       signal: controller.signal,
     })
     if (!response.ok) {
-      const detail = await response.text().catch(() => '')
+      // Drain so the connection is reusable; the body is never relayed to the
+      // client — provider error text can echo request data.
+      await response.text().catch(() => '')
       return NextResponse.json(
         {
           error: `Transcription service error (${response.status}).`,
-          detail: detail.slice(0, 500),
         },
         { status: response.status },
       )

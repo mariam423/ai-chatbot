@@ -251,7 +251,7 @@ Pulse AI is a fully installable Progressive Web App. Once installed, it launches
 
 | Platform                    | How to install                                                                                                                                                |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chrome / Edge (desktop)** | Click the **install icon** in the address bar, or open the browser menu and choose "Install Pulse AI".                                                       |
+| **Chrome / Edge (desktop)** | Click the **install icon** in the address bar, or open the browser menu and choose "Install Pulse AI".                                                        |
 | **Android (Chrome)**        | Tap the browser menu → "Install app" (or "Add to Home screen"). The app appears in the launcher with the emerald icon.                                        |
 | **iOS / iPadOS (Safari)**   | Tap **Share → Add to Home Screen**. iOS doesn't surface the install icon, but the manifest and Apple-specific meta tags make the home-screen experience work. |
 | **ChromeOS**                | The install icon appears in the address bar; the app installs like a native app.                                                                              |
@@ -310,27 +310,30 @@ Pulse AI can be packaged as a **Trusted Web Activity (TWA)** for native distribu
 
 A TWA wraps the PWA in an Android app shell using [Bubblewrap](https://github.com/nicedoc/nicedoc) or the [PWABuilder](https://www.pwabuilder.com) CLI. The key requirements:
 
-| Requirement                          | Status in Pulse AI                                                                                       |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Requirement                          | Status in Pulse AI                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | Valid `manifest.webmanifest`         | ✅ `public/manifest.webmanifest` — `display: standalone`, maskable icons, `start_url: /`.               |
-| HTTPS origin                         | ✅ Vercel provides this automatically.                                                                   |
-| `assetlinks.json` at `/.well-known/` | ✅ `public/.well-known/assetlinks.json` — placeholder entry; replace with your signing key fingerprint.  |
+| HTTPS origin                         | ✅ Vercel provides this automatically.                                                                  |
+| `assetlinks.json` at `/.well-known/` | ✅ `public/.well-known/assetlinks.json` — placeholder entry; replace with your signing key fingerprint. |
 | Service worker registered            | ✅ `public/sw/service-worker.js` — registered via `app/sw-init.tsx`.                                    |
 | Offline fallback                     | ✅ `app/offline/page.tsx` — precached by the SW on first visit.                                         |
 
 ### Packaging steps
 
 1. **Generate a signing key** for your Android app:
+
    ```bash
    keytool -genkey -v -keystore pulse-ai.keystore -alias pulse-ai -keyalg RSA -keysize 2048 -validity 10000
    ```
 
 2. **Get the SHA-256 fingerprint** of your signing key:
+
    ```bash
    keytool -list -v -keystore pulse-ai.keystore -alias pulse-ai
    ```
 
 3. **Update `assetlinks.json`** with your app's package name and signing key SHA-256 fingerprint:
+
    ```json
    [
      {
@@ -345,6 +348,7 @@ A TWA wraps the PWA in an Android app shell using [Bubblewrap](https://github.co
    ```
 
 4. **Build the TWA** using [Bubblewrap](https://github.com/nicedoc/nicedoc):
+
    ```bash
    npx @nicedoc/nicedoc init
    # Follow the prompts, pointing to your deployed Pulse AI URL
@@ -355,13 +359,13 @@ A TWA wraps the PWA in an Android app shell using [Bubblewrap](https://github.co
 
 ### Installing across platforms
 
-| Platform        | Install method                                                                         |
-| --------------- | -------------------------------------------------------------------------------------- |
-| **Android**     | Google Play Store (TWA), or Chrome → "Install app"                                     |
-| **iOS / iPadOS**| Safari → Share → Add to Home Screen                                                    |
-| **Desktop**     | Chrome / Edge address bar install icon, or download via PWABuilder                     |
-| **Mac**         | Chrome → "Install Pulse AI" (creates a .app in Applications)                           |
-| **Windows**     | Edge → "Install Pulse AI" (creates a Start Menu shortcut)                              |
+| Platform         | Install method                                                     |
+| ---------------- | ------------------------------------------------------------------ |
+| **Android**      | Google Play Store (TWA), or Chrome → "Install app"                 |
+| **iOS / iPadOS** | Safari → Share → Add to Home Screen                                |
+| **Desktop**      | Chrome / Edge address bar install icon, or download via PWABuilder |
+| **Mac**          | Chrome → "Install Pulse AI" (creates a .app in Applications)       |
+| **Windows**      | Edge → "Install Pulse AI" (creates a Start Menu shortcut)          |
 
 ---
 

@@ -30,6 +30,11 @@ export function proxy(req: NextRequest) {
   // Allow NextAuth API routes, login page, and static assets through.
   if (
     pathname.startsWith('/api/auth') ||
+    // Stripe webhook deliveries are server-to-server and never carry a session
+    // cookie — gating them here would 307 every billing event to /login before
+    // the route's signature verification can run. The webhook's real auth is
+    // the Stripe signature check + per-IP flood brake in ROUTE_GUARDS.
+    pathname === '/api/webhooks/stripe' ||
     pathname.startsWith('/api/embed') ||
     pathname.startsWith('/embed') ||
     pathname === '/api/health' ||
