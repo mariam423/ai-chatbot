@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { POST } from '../app/api/chat/route'
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../lib/llm-config'
+import { DEFAULT_OPENROUTER_FALLBACK_MODEL, OPENROUTER_FREE_MODELS } from '../lib/models'
 import { getCurrentUserId } from '@/lib/auth-context'
 import { checkTierLimits, getCachedDailyUsage } from '@/lib/billing/tier-rate-limit'
 import { recordGatewayProviderFailure, resetGatewayBreakers } from '../lib/gateway'
@@ -206,7 +207,7 @@ describe('POST /api/chat', () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('OPENROUTER_APP_NAME', 'Pulse AI')
     // The dev .env.local may export MODEL_NAME — pin it so the resolved
-    // default (minimax/minimax-m3:free) is asserted, not the override.
+    // default (the verified live free pool head) is asserted, not the override.
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
     const sse = new ReadableStream<Uint8Array>({
@@ -225,15 +226,15 @@ describe('POST /api/chat', () => {
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
     // Free-first: the provider default is the genuinely free, live
-    // `minimax/minimax-m3:free` route (verified against the catalog + live API).
-    expect(payload.model).toBe('minimax/minimax-m3:free')
+    // `google/gemma-4-31b-it:free` route (verified against the catalog + live API).
+    expect(payload.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(init!.headers).toMatchObject({
       Authorization: 'Bearer sk-or-v1-test',
       'X-Title': 'Pulse AI',
     })
     // The streaming response reports the served model back to the client —
     // and, with no swap in play, the override flag stays false.
-    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
+    expect(res.headers.get('x-served-model')).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(res.headers.get('x-served-model-overridden')).toBe('false')
   })
 
@@ -269,8 +270,8 @@ describe('POST /api/chat', () => {
       messages: Array<{ role: string; content: unknown }>
     }
     // The text-only provider default is swapped for the free vision fallback
-    // (minimax/minimax-m3:free is 0-cost AND vision-capable — verified live).
-    expect(payload.model).toBe('minimax/minimax-m3:free')
+    // (google/gemma-4-31b-it:free is 0-cost AND vision-capable — verified live).
+    expect(payload.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     // The image rides along as a multimodal part on the user message.
     expect(payload.messages.at(-1)).toEqual({
       role: 'user',
@@ -311,8 +312,8 @@ describe('POST /api/chat', () => {
     // the served model differs from the selection, but this is routing, not
     // a failure: the override flag stays false so the caption stays neutral.
     const payload = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
-    expect(payload.model).toBe('minimax/minimax-m3:free')
-    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
+    expect(payload.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
+    expect(res.headers.get('x-served-model')).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(res.headers.get('x-served-model-overridden')).toBe('false')
   })
 
@@ -381,13 +382,13 @@ describe('POST /api/chat', () => {
       max_tokens?: number
     }
     expect(first.model).toBe('google/gemini-2.0-flash-lite-001')
-    expect(second.model).toBe('minimax/minimax-m3:free')
+    expect(second.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     // The retry keeps the explicit conservative cap (pre-auth stays tiny).
     expect(second.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS)
     // The response reports the model that actually served the reply — the
     // fallback, not the dead selection — and flags the swap for the UI's
     // amber warning caption.
-    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
+    expect(res.headers.get('x-served-model')).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(res.headers.get('x-served-model-overridden')).toBe('true')
   })
 
@@ -474,8 +475,8 @@ describe('POST /api/chat', () => {
       const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
       const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
       expect(first.model).toBe('moonshotai/kimi-k3')
-      expect(second.model).toBe('minimax/minimax-m3:free')
-      expect(response.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
+      expect(second.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
+      expect(response.headers.get('x-served-model')).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
       expect(response.headers.get('x-served-model-overridden')).toBe('true')
     }
   })
@@ -508,7 +509,7 @@ describe('POST /api/chat', () => {
       expect(res.status, `status ${status}`).toBe(200)
       expect(fetchMock, `status ${status}`).toHaveBeenCalledTimes(2)
       const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
-      expect(second.model).toBe('minimax/minimax-m3:free')
+      expect(second.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     }
   })
 
@@ -601,28 +602,62 @@ describe('POST /api/chat', () => {
     expect(second.model).toBe('custom/gemini-backup')
   })
 
-  it('does not loop when the chosen model is already the fallback', async () => {
+  it('recovers across the verified free pool when the default free model is dead', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
-    // The provider default resolves to minimax/minimax-m3:free — if IT 404s, there
-    // is no backup left to retry with (and the guard prevents a loop).
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(404, { error: 'not found' }))
+    vi.stubEnv('FALLBACK_MODEL', undefined)
+    // The provider default is a `:free` route, so the verified-free-pool
+    // cascade kicks in: a permanent 404 on the default hops to the next free
+    // model instead of failing the chat — the fix for the retired
+    // `minimax/minimax-m3:free` (404 "unavailable for free").
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(404, { error: 'model unavailable' }))
     vi.stubGlobal('fetch', fetchMock)
 
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(404)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Every pool member answered 404; 404 is retryable, so the chain
+    // exhausted after each pool id was tried exactly once.
+    expect(fetchMock).toHaveBeenCalledTimes(OPENROUTER_FREE_MODELS.length)
+    const bodies = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(init!.body as string) as { model: string },
+    )
+    expect(bodies.map((b) => b.model)).toEqual([...OPENROUTER_FREE_MODELS])
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toBe(
+      `LLM API error (404) from openrouter (${OPENROUTER_FREE_MODELS[OPENROUTER_FREE_MODELS.length - 1]}).`,
+    )
   })
 
-  it('re-probes the sole model after honoring Retry-After when it 429s', async () => {
+  it('does not duplicate an attempt when the chosen model is already the provider fallback', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MODEL_NAME', 'custom/paid-model')
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    vi.stubEnv('FALLBACK_MODEL', 'custom/paid-model')
+    // A paid configuration: selected AND backup are the same id — no duplicate
+    // attempt (the no-loop guard) and no free-pool cascade (neither id is a
+    // `:free` route). The single attempt 429s (retryable through the bounded
+    // re-probes) and then surfaces.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(429, { error: 'rate limited' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(429)
+    // Initial probe + MAX_429_RETRIES re-probes — never a duplicate model call.
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const bodies = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(init!.body as string) as { model: string },
+    )
+    expect(bodies.every((b) => b.model === 'custom/paid-model')).toBe(true)
+  })
+
+  it('hops to the next verified free model after honoring Retry-After when the default 429s', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
-    // The provider default IS the provider's backup — a single attempt. A
-    // transient model-scoped 429 must recover via a bounded same-model
-    // re-probe (Retry-After: 0 keeps the test instant; the wait honors the
-    // header up to MAX_429_BACKOFF_MS in production).
+    // A transient shared-pool 429 on the default is exactly the free-tier
+    // failure mode. Instead of burning a same-model re-probe (the old
+    // sole-model behavior), the cascade hops straight to the next free model.
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(429, { error: 'rate limited' }, { 'Retry-After': '0' }))
@@ -632,13 +667,13 @@ describe('POST /api/chat', () => {
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    // No swap happened — the same provider+model served, so the override flag
-    // stays false (a transient rate window is not a fallback).
-    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
-    expect(res.headers.get('x-served-model-overridden')).toBe('false')
+    // The pool's second member served — a real swap, so it IS flagged (a
+    // throttled free route is a failure, unlike neutral vision routing).
+    expect(res.headers.get('x-served-model')).toBe(OPENROUTER_FREE_MODELS[1])
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
   })
 
-  it('surfaces 429 only after the bounded re-probes for the sole model are exhausted', async () => {
+  it('surfaces 429 only after the free pool and bounded re-probes are exhausted', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
@@ -649,10 +684,13 @@ describe('POST /api/chat', () => {
 
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(429)
-    // Initial probe + MAX_429_RETRIES re-probes, all rate-limited.
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // The whole free pool 429s (3 attempts), then the final attempt re-probes
+    // MAX_429_RETRIES times.
+    expect(fetchMock).toHaveBeenCalledTimes(OPENROUTER_FREE_MODELS.length + 2)
     const body = (await res.json()) as { error?: string }
-    expect(body.error).toBe('LLM API error (429).')
+    expect(body.error).toBe(
+      `LLM API error (429) from openrouter (${OPENROUTER_FREE_MODELS[OPENROUTER_FREE_MODELS.length - 1]}).`,
+    )
   })
 
   it('falls back to OPENAI_API_KEY and OpenAI defaults when OPENROUTER_API_KEY is unset', async () => {
@@ -1136,8 +1174,9 @@ describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
 
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(400)
-    // OpenRouter primary 400 → Gemini backup 400 (final) → surface.
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // OpenRouter primary 400 → Gemini backup 400 (mid-chain) → remaining free
+    // pool 400s → final attempt stays fatal.
+    expect(fetchMock).toHaveBeenCalledTimes(2 + OPENROUTER_FREE_MODELS.length - 1)
     const body = (await res.json()) as { error?: string; detail?: string }
     expect(body.error).toBe('LLM API error (400).')
     expect(body.detail).toBeUndefined()
@@ -1183,8 +1222,8 @@ describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
         .filter((arg): arg is string => typeof arg === 'string')
         .map((arg) => JSON.parse(arg) as Record<string, unknown>)
       expect(logged[0]).toMatchObject({
-        provider: 'gemini',
-        model: 'gemini-3.5-flash-lite',
+        provider: 'openrouter',
+        model: OPENROUTER_FREE_MODELS[OPENROUTER_FREE_MODELS.length - 1],
         status: 400,
       })
       expect(logged[0]!.body).toContain('model not found or params invalid')
@@ -1213,7 +1252,31 @@ describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
     const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
     const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
     expect(first.model).toBe('moonshotai/kimi-k3')
-    expect(second.model).toBe('minimax/minimax-m3:free')
+    expect(second.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
+    expect(res.headers.get('x-served-provider')).toBe('openrouter')
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
+  })
+
+  it('escapes a 403 harness-gated free model by hopping to the verified pool', async () => {
+    vi.stubEnv('GEMINI_API_KEY', '')
+    // A forced agentic-harness-only free route (e.g.
+    // `thinkingmachines/inkling:free`) 403s plain chat clients. Because it is
+    // a `:free` route the pool cascade is in play, so the 403 — treated as
+    // mid-chain retryable — hops to a pool member instead of failing.
+    vi.stubEnv('MODEL_NAME', 'thinkingmachines/inkling:free')
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(403, { error: 'harness-gated' }))
+      .mockResolvedValueOnce(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const first = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string) as { model: string }
+    const second = JSON.parse(fetchMock.mock.calls[1]![1]!.body as string) as { model: string }
+    expect(first.model).toBe('thinkingmachines/inkling:free')
+    expect(second.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(res.headers.get('x-served-provider')).toBe('openrouter')
     expect(res.headers.get('x-served-model-overridden')).toBe('true')
   })
@@ -1224,7 +1287,9 @@ describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
 
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(503)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // OpenRouter default 503 → Gemini 503 → remaining free pool 503s → the
+    // last retryable status surfaces once every attempt is spent.
+    expect(fetchMock).toHaveBeenCalledTimes(2 + OPENROUTER_FREE_MODELS.length - 1)
     const body = (await res.json()) as { error?: string }
     expect(body.error).toContain('503')
   })

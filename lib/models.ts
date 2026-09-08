@@ -28,7 +28,8 @@ export const MODEL_OPTIONS = [
     // Verified live on OpenRouter (2026-08-31). Replaces the dead
     // `qwen/qwen3.5-397b-a17b` slug, which now 404s. Paid route — the
     // free-tier key 402s here, and the chat route's retry-with-fallback
-    // path hands the request to the free minimax/minimax-m3:free default.
+    // path hands the request to the verified free pool head
+    // (google/gemma-4-31b-it:free).
     model: 'qwen/qwen3.8-flash',
     envVar: 'MODEL_QWEN_3_6',
     vision: true,
@@ -86,23 +87,76 @@ export const ModelKeySchema = z.enum(MODEL_KEYS)
 export type ModelKey = z.infer<typeof ModelKeySchema>
 
 /**
+ * OpenRouter free-tier pool, verified live against the catalog (2026-09-08).
+ * Free routes on OpenRouter are per-model throttled shared pools — a request
+ * can 404 (the model was retired from the free tier), 429 ("temporarily
+ * rate-limited upstream ... shared pool"), or 400 (flaky free route). There
+ * is no single reliable `:free` id; resilience comes from the POOL and the
+ * chat route cascading across it (`openRouterFreeCascadeModels`) until one
+ * streams. The ids here are the general-purpose (non-reasoning-only,
+ * non-harness-gated) free models that stream `delta.content`:
+ * - `google/gemma-4-31b-it:free` — dense 30.7B multimodal instruct (text +
+ *   image) — primary default + vision fallback
+ * - `google/gemma-4-26b-a4b-it:free` — 26B-A4B MoE multimodal instruct
+ * - `dots-studio/dots-3-note-preview:free` — open MoE (16B active / 280B)
+ *
+ * Deliberately EXCLUDED from the pool:
+ * - `thinkingmachines/inkling:free` — 403 gated to agentic harnesses
+ * - `nvidia/nemotron-3-*-...:free` / `liquid/lfm-2.5-2.6b:free` — reasoning
+ *   models that can stream into `delta.reasoning` (the content extractor
+ *   never sees it — the `z-ai/glm-5.3-flash` failure mode)
+ * - `inclusionai/ling-3.0-flash-*-sante|fin:free`, `cohere/north-mini-code:free`
+ *   — domain specialists
+ */
+export const OPENROUTER_FREE_MODELS = [
+  'google/gemma-4-31b-it:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'dots-studio/dots-3-note-preview:free',
+] as const
+
+/**
  * Default OpenRouter fallback model, used when FALLBACK_MODEL is unset. It
  * serves two purposes:
  * - the "Provider default" resolution when no env override is set, and
  * - the chat route's error fallback: when the chosen model returns 404 (dead
  *   slug), 402 (low-credit pre-auth), or 429 (model-scoped rate limit), the
- *   route retries once with this id instead of failing the chat.
+ *   route retries with this id instead of failing the chat — and then
+ *   cascades across `OPENROUTER_FREE_MODELS` until one streams.
  *
- * Verified live (2026-08-31). The free-tier key in this project works with
- * `:free` OpenRouter routes only — the previous `stealth/ox-alpha` default
- * was retired and 404s, and the official `z-ai/glm-5.3-flash` default
- * streams its reply into `delta.reasoning` (a reasoning-only model), which
- * the app's content extractor never sees. `minimax/minimax-m3:free` is the
- * stable free-tier OpenRouter route that streams `delta.content` and accepts
- * image inputs, so it doubles as the default chat model AND the vision
- * fallback on OpenRouter.
+ * The previous default `minimax/minimax-m3:free` now 404s on a free-tier key
+ * ("This model is unavailable for free ... use minimax/minimax-m3 instead" —
+ * verified live 2026-09-08), which is why every chat fell through to errors.
+ * `google/gemma-4-31b-it:free` replaces it: verified live, general-purpose,
+ * multimodal (so it doubles as the vision fallback), and streams
+ * `delta.content`.
  */
-export const DEFAULT_OPENROUTER_FALLBACK_MODEL = 'minimax/minimax-m3:free'
+export const DEFAULT_OPENROUTER_FALLBACK_MODEL = OPENROUTER_FREE_MODELS[0]
+
+/**
+ * Whether an OpenRouter model id rides the free-tier pool: it is one of the
+ * verified live free models, or it is ANY `:free`-suffixed route (a custom
+ * FALLBACK_MODEL into the free tier still inherits the pool's resilience).
+ */
+function isOpenRouterFreeModel(id: string): boolean {
+  return id.endsWith(':free') || (OPENROUTER_FREE_MODELS as readonly string[]).includes(id)
+}
+
+/**
+ * The verified free models to cascade to after the OpenRouter attempts for a
+ * request. Returns [] when neither the resolved selected model nor its backup
+ * is free-tier — a paid configuration (explicit FALLBACK_MODEL + paid
+ * selection) never drags free models into the chain. Order follows the pool
+ * so the primary default + backup are NOT repeated (the no-loop guard).
+ *
+ * Called by the chat route after building each provider's attempts: the
+ * cascade is appended AFTER all providers' own attempts, so a failure still
+ * hops cross-provider first (Gemini/OpenAI backups keep priority) and only
+ * exhausts the free pool when nothing else remains.
+ */
+export function openRouterFreeCascadeModels(selected: string, backup: string): string[] {
+  if (!isOpenRouterFreeModel(selected) && !isOpenRouterFreeModel(backup)) return []
+  return OPENROUTER_FREE_MODELS.filter((id) => id !== selected && id !== backup)
+}
 
 /**
  * Resolve the OpenRouter fallback model (provider default + error retry):
@@ -148,11 +202,12 @@ export function getProviderFallbackModel(provider: LlmProvider): string {
  * carries image/video/audio media and the selected option is not flagged
  * vision-capable (text-only options and the provider default). These ids are
  * curated stable routes — the free OpenRouter `:free` route (also the
- * chat-route error fallback — `minimax/minimax-m3:free` is the verified-live
- * `delta.content` streamer, vision-capable, on the project's free-tier key),
- * the plain Gemini name on the direct endpoint (`gemini-3.5-flash-lite`,
- * verified live 2026-08-31 — the older `gemini-2.5-flash-lite` 404s), and
- * a cheap OpenAI model elsewhere.
+ * chat-route error fallback and the verified free pool head — the
+ * `google/gemma-4-31b-it:free` route streams `delta.content`, is
+ * vision-capable, and runs on the project's free-tier key), the plain
+ * Gemini name on the direct endpoint (`gemini-3.5-flash-lite`, verified live
+ * 2026-08-31 — the older `gemini-2.5-flash-lite` 404s), and a cheap OpenAI
+ * model elsewhere.
  */
 export const VISION_FALLBACK_MODELS: Record<LlmProvider, string> = {
   openrouter: DEFAULT_OPENROUTER_FALLBACK_MODEL,
@@ -201,10 +256,10 @@ export function resolveModel(
     process.env.MODEL_NAME ??
     process.env.OPENAI_MODEL ??
     // Stable primary defaults — the OpenRouter default is the verified-live
-    // free `:free` route `minimax/minimax-m3:free` (zero-cost, vision-capable,
-    // and `delta.content` streams, so the provider default also satisfies
-    // media requests; FALLBACK_MODEL overrides it). Media requests on a
-    // text-only option auto-switch to the vision fallback above.
+    // free `:free` route `google/gemma-4-31b-it:free` (zero-cost,
+    // vision-capable, and `delta.content` streams, so the provider default
+    // also satisfies media requests; FALLBACK_MODEL overrides it). Media
+    // requests on a text-only option auto-switch to the vision fallback above.
     (provider === 'gemini'
       ? 'gemini-3.5-flash-lite'
       : provider === 'openrouter'

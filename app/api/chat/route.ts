@@ -13,7 +13,13 @@ import {
 } from '@/lib/skills/registry'
 import { listSkillTools } from '@/lib/skills/tools'
 import { DEFAULT_MAX_CONTEXT_TOKENS, estimateTokens, truncateHistory } from '@/lib/context'
-import { getProviderFallbackModel, resolveModel, ModelKeySchema, type ModelKey } from '@/lib/models'
+import {
+  getProviderFallbackModel,
+  openRouterFreeCascadeModels,
+  resolveModel,
+  ModelKeySchema,
+  type ModelKey,
+} from '@/lib/models'
 import { logSecurityEvent } from '@/lib/audit'
 import {
   isGatewayProviderOpen,
@@ -506,9 +512,12 @@ export async function POST(request: Request) {
   let servedModel = ''
   let servedProvider: LlmProvider = chain[0]!.provider
   let servedModelOverridden = false
-  // Last retryable failure — surfaced as a generic status-only error when the
-  // whole attempt chain is exhausted (upstream bodies are never relayed).
+  // Last retryable failure — surfaced as a status-only error when the whole
+  // attempt chain is exhausted (upstream bodies are never relayed). The
+  // provider + model that produced it ride along so the surfaced message and
+  // the server-side exhaustion log say where the chain died.
   let lastErrorStatus: number | null = null
+  let lastUpstreamFailure: { provider: string; model: string } | null = null
 
   // OpenRouter uses X-Title for app attribution (optional, OpenRouter only).
   const appTitle = process.env.OPENROUTER_APP_NAME
@@ -604,6 +613,27 @@ export async function POST(request: Request) {
         attempts.push({ candidate, modelId: backup, overridden: true })
       }
     })
+
+    // OpenRouter free-tier resilience: when the request rides a `:free` route
+    // (the default, or a custom FALLBACK_MODEL into the free tier), append the
+    // verified live free pool so a throttled/dead free route hops to the next
+    // one. The cascade goes AFTER all providers' own attempts — a paid/chosen
+    // model still fails over to Gemini/OpenAI first (cross-provider backups
+    // keep priority), and the free pool is only exhausted when nothing else
+    // remains. `openRouterFreeCascadeModels` skips the ids already in play and
+    // returns [] for fully paid configurations, so nothing changes there.
+    const openRouterCandidate = chain.find((candidate) => candidate.provider === 'openrouter')
+    if (openRouterCandidate) {
+      const selectedOpenRouter = resolveModel(selectedModelKey, 'openrouter', {
+        vision: hasMedia,
+      })
+      for (const modelId of openRouterFreeCascadeModels(
+        selectedOpenRouter,
+        getProviderFallbackModel('openrouter'),
+      )) {
+        attempts.push({ candidate: openRouterCandidate, modelId, overridden: true })
+      }
+    }
 
     // Failover is strictly PRE-STREAM: the loop stops the moment a provider
     // returns a streaming response head and the body passes straight through
@@ -701,15 +731,17 @@ export async function POST(request: Request) {
         continue
       }
       // 400 is normally fatal — a malformed request can't be fixed by
-      // retrying — but two real cases are recoverable when a different
+      // retrying — but three real cases are recoverable when a different
       // attempt remains: Gemini's endpoint 400s unknown models (INVALID
-      // ARGUMENT, its analogue of the 404 OpenRouter sends), and OpenRouter's
-      // `:free` routes occasionally reject with 400. Both resolve by falling
-      // to the next backup model/provider. The FINAL attempt stays fatal.
+      // ARGUMENT, its analogue of the 404 OpenRouter sends), OpenRouter's
+      // `:free` routes occasionally reject with 400, and some free routes
+      // 403-gate plain chat clients (agentic-harness-only models — e.g.
+      // `thinkingmachines/inkling:free`). All resolve by falling to the next
+      // backup model/provider; the FINAL attempt stays fatal.
       const retryable =
         RETRYABLE_STATUSES.has(result.status) ||
         result.status >= 500 ||
-        (result.status === 400 && i < attempts.length - 1)
+        ((result.status === 400 || result.status === 403) && i < attempts.length - 1)
       if (!retryable) {
         // Other 4xx statuses (400 on the final attempt, 401/403/…) surface
         // as-is: retrying cannot fix a malformed request, and a bad key is a
@@ -733,6 +765,7 @@ export async function POST(request: Request) {
         )
       }
       lastErrorStatus = result.status
+      lastUpstreamFailure = { provider: attempt.candidate.provider, model: attempt.modelId }
       if (isProviderExhausted) {
         void recordGatewayProviderFailure(attempt.candidate.provider)
       }
@@ -762,7 +795,9 @@ export async function POST(request: Request) {
   if (!upstream) {
     // Every attempt failed. Surface the last retryable upstream status when
     // there was one (the historical passthrough); a chain that died purely on
-    // connect failures has no status and becomes the canned 502.
+    // connect failures has no status and becomes the canned 502. The
+    // provider/model that last failed ride along in the message and log — the
+    // client still only ever sees the status, never the upstream body.
     if (lastErrorStatus !== null) {
       logSecurityEvent(
         'gateway_exhausted',
@@ -773,8 +808,17 @@ export async function POST(request: Request) {
         },
         'info',
       )
+      if (lastUpstreamFailure) {
+        console.error(
+          '[chat] upstream rejected the request (chain exhausted)',
+          JSON.stringify(lastUpstreamFailure),
+        )
+      }
+      const where = lastUpstreamFailure
+        ? ` from ${lastUpstreamFailure.provider} (${lastUpstreamFailure.model})`
+        : ''
       return NextResponse.json(
-        { error: `LLM API error (${lastErrorStatus}).` },
+        { error: `LLM API error (${lastErrorStatus})${where}.` },
         { status: lastErrorStatus },
       )
     }

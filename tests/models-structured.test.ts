@@ -3,6 +3,9 @@ import {
   DEFAULT_MODEL_KEY,
   getOpenRouterFallbackModel,
   getProviderFallbackModel,
+  openRouterFreeCascadeModels,
+  OPENROUTER_FREE_MODELS,
+  DEFAULT_OPENROUTER_FALLBACK_MODEL,
   resolveModel,
 } from '../lib/models'
 import { detectStructuredOutputKind, renderStructuredResponse } from '../lib/structured-output'
@@ -12,10 +15,10 @@ describe('model registry', () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'test-key')
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
-    // Free-first: the OpenRouter default is the genuinely free
-    // `minimax/minimax-m3:free` route (0-cost, vision-capable, streams
-    // `delta.content`) — verified live against OpenRouter 2026-08-31.
-    expect(resolveModel()).toBe('minimax/minimax-m3:free')
+    // Free-first: the OpenRouter default is the verified live free route
+    // `google/gemma-4-31b-it:free` (0-cost, vision-capable, streams
+    // `delta.content`) — verified live against OpenRouter 2026-09-08.
+    expect(resolveModel()).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(resolveModel(undefined, 'gemini')).toBe('gemini-3.5-flash-lite')
     expect(resolveModel(undefined, 'openai')).toBe('gpt-4o-mini')
     expect(DEFAULT_MODEL_KEY).toBe('provider-default')
@@ -27,8 +30,8 @@ describe('model registry', () => {
     vi.stubEnv('OPENAI_MODEL', undefined)
     vi.stubEnv('FALLBACK_MODEL', undefined)
     // Default is the free vision-capable route; the provider default uses it.
-    expect(getOpenRouterFallbackModel()).toBe('minimax/minimax-m3:free')
-    expect(resolveModel()).toBe('minimax/minimax-m3:free')
+    expect(getOpenRouterFallbackModel()).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
+    expect(resolveModel()).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     // FALLBACK_MODEL env override flows through to both callers.
     vi.stubEnv('FALLBACK_MODEL', 'custom/backup')
     expect(getOpenRouterFallbackModel()).toBe('custom/backup')
@@ -37,7 +40,7 @@ describe('model registry', () => {
     // (provider-default has vision: false) still routes to the
     // vision-capable model, not the FALLBACK_MODEL override.
     expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
-      'minimax/minimax-m3:free',
+      DEFAULT_OPENROUTER_FALLBACK_MODEL,
     )
     vi.unstubAllEnvs()
   })
@@ -47,7 +50,7 @@ describe('model registry', () => {
     vi.stubEnv('GEMINI_FALLBACK_MODEL', undefined)
     vi.stubEnv('OPENAI_FALLBACK_MODEL', undefined)
     // Every provider has a backup id valid on its own endpoint.
-    expect(getProviderFallbackModel('openrouter')).toBe('minimax/minimax-m3:free')
+    expect(getProviderFallbackModel('openrouter')).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(getProviderFallbackModel('gemini')).toBe('gemini-3.5-flash-lite')
     expect(getProviderFallbackModel('openai')).toBe('gpt-4o-mini')
     // Per-provider env overrides flow through.
@@ -60,6 +63,19 @@ describe('model registry', () => {
     vi.unstubAllEnvs()
   })
 
+  it('exposes the verified live free pool and cascades across it', () => {
+    const pool = [...OPENROUTER_FREE_MODELS]
+    expect(pool.length).toBeGreaterThanOrEqual(2)
+    expect(OPENROUTER_FREE_MODELS[0]).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
+    // The selected model and its backup are skipped — the no-loop guard.
+    expect(openRouterFreeCascadeModels(pool[0]!, pool[1]!)).toEqual([pool[2]])
+    expect(openRouterFreeCascadeModels(pool[1]!, pool[1]!)).toEqual([pool[0]!, pool[2]!])
+    // A fully paid configuration never drags free models into the chain.
+    expect(openRouterFreeCascadeModels('openai/gpt-5.6-luna', 'moonshotai/kimi-k3')).toEqual([])
+    // Any `:free`-suffixed custom fallback still inherits the pool's resilience.
+    expect(openRouterFreeCascadeModels('custom/paid', 'custom/other:free')).toEqual(pool)
+  })
+
   it('auto-routes media requests to a stable vision-capable model', () => {
     vi.stubEnv('MODEL_NAME', undefined)
     vi.stubEnv('OPENAI_MODEL', undefined)
@@ -67,14 +83,16 @@ describe('model registry', () => {
     vi.stubEnv('MODEL_DEEPSEEK_V4_FLASH', undefined)
     // Provider default is text-only (vision: false); media on it routes to
     // the provider's vision fallback. The fallback is the free OpenRouter
-    // `:free` route (minimax/minimax-m3:free) which is vision-capable and
+    // `:free` route (google/gemma-4-31b-it:free) which is vision-capable and
     // also the chat-route error fallback.
     expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
-      'minimax/minimax-m3:free',
+      DEFAULT_OPENROUTER_FALLBACK_MODEL,
     )
     // Provider default + vision → the free vision-capable default itself
-    // (minimax/minimax-m3:free is vision-capable, so the default satisfies media).
-    expect(resolveModel(undefined, 'openrouter', { vision: true })).toBe('minimax/minimax-m3:free')
+    // (google/gemma-4-31b-it:free is vision-capable, so the default satisfies media).
+    expect(resolveModel(undefined, 'openrouter', { vision: true })).toBe(
+      DEFAULT_OPENROUTER_FALLBACK_MODEL,
+    )
     expect(resolveModel(undefined, 'gemini', { vision: true })).toBe('gemini-3.5-flash-lite')
     expect(resolveModel('provider-default', 'gemini', { vision: true })).toBe(
       'gemini-3.5-flash-lite',
@@ -91,7 +109,7 @@ describe('model registry', () => {
     // The vision swap beats a MODEL_* env override on the text-only default.
     vi.stubEnv('MODEL_DEEPSEEK_V4_FLASH', 'custom/deepseek')
     expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
-      'minimax/minimax-m3:free',
+      DEFAULT_OPENROUTER_FALLBACK_MODEL,
     )
     vi.unstubAllEnvs()
   })
