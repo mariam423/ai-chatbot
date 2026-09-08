@@ -39,9 +39,9 @@ export interface TierConfig {
 
 export const TIER_CONFIGS: Record<string, TierConfig> = {
   free: {
-    // Env-tunable, mirroring FREE_PLAN_DAILY_LIMIT below (default 20/min).
+    // Env-tunable, mirroring FREE_PLAN_DAILY_LIMIT below (default 100/day).
     requestsPerMinute: Number(process.env.FREE_PLAN_BURST_PER_MINUTE) || 20,
-    requestsPerDay: Number(process.env.FREE_PLAN_DAILY_LIMIT) || 20,
+    requestsPerDay: Number(process.env.FREE_PLAN_DAILY_LIMIT) || 100,
     tokensPerDay: null,
   },
   pro: {

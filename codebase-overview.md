@@ -255,7 +255,7 @@ pre-stream so a 429/5xx on one provider never interrupts a reply.
   degrades to a shared in-memory fallback while Redis is unreachable so a
   limiter outage never blocks requests.
 - **`lib/billing/plans.ts`** — Plan tiers (free: `FREE_PLAN_DAILY_LIMIT`
-  daily chat cap, default 20; pro: unlimited) + `parsePlanKey`/`getPlan`/
+  daily chat cap, default 100; pro: unlimited) + `parsePlanKey`/`getPlan`/
   `isOverDailyLimit` helpers shared by the route guard, webhook, and UI.
 - **`lib/billing/usage.ts`** — `checkAndRecordUsage(userId)`: reads the user's
   plan + today's counter and either increments (allowing) or returns an
@@ -265,7 +265,7 @@ pre-stream so a 429/5xx on one provider never interrupts a reply.
   cap against a possibly stale cached count. Enforced in `/api/chat` before
   any RAG/provider work when the user is signed in.
 - **`lib/billing/tier-rate-limit.ts`** — Redis sliding-window burst limiter
-  plus daily caps (`TIER_CONFIGS`: free 20/min burst + 20/day, pro 120/min
+  plus daily caps (`TIER_CONFIGS`: free 20/min burst + 100/day, pro 120/min
   and unlimited/day; `FREE_PLAN_BURST_PER_MINUTE` / `FREE_PLAN_DAILY_LIMIT`
   env knobs). `checkTierLimits` denies with a guard-shaped 429 + `Retry-After`
   before the request touches the DB write path; the sorted-set window falls

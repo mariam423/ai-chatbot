@@ -26,7 +26,7 @@ export const PLANS: Record<PlanKey, PlanTier> = {
   free: {
     key: 'free',
     label: 'Free',
-    dailyChatRequests: Number(process.env.FREE_PLAN_DAILY_LIMIT) || 20,
+    dailyChatRequests: Number(process.env.FREE_PLAN_DAILY_LIMIT) || 100,
     stripePriceId: null,
   },
   pro: {

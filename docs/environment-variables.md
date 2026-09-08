@@ -103,8 +103,8 @@ To enable DB-side vector search: apply `prisma/vector-column.sql` once (`psql "$
 | Variable                       | Purpose                                                                                                                                                                                                                 |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REDIS_URL`                    | Central Redis for the distributed cache (`lib/cache.ts`), the tier rate limiter, and the BullMQ task queue. Without it each consumer degrades gracefully: in-memory rate limits, no-op cache, synchronous job fallback. |
-| `FREE_PLAN_DAILY_LIMIT`        | Free-tier daily LLM request cap (default `20`). Pro is unlimited.                                                                                                                                                       |
-| `FREE_PLAN_BURST_PER_MINUTE`   | Free-tier per-minute burst cap (default `20`, mirroring the daily cap). Pro is `120`/min.                                                                                                                               |
+| `FREE_PLAN_DAILY_LIMIT`        | Free-tier daily LLM request cap (default `100`). Pro is unlimited.                                                                                                                                                      |
+| `FREE_PLAN_BURST_PER_MINUTE`   | Free-tier per-minute burst cap (default `20`). Pro is `120`/min.                                                                                                                                                        |
 | `POSTHOG_KEY` / `POSTHOG_HOST` | Self-hosted PostHog for analytics (optional).                                                                                                                                                                           |
 
 ## App configuration
