@@ -67,10 +67,10 @@ afterEach(() => {
   dbPrefFindUnique.mockReset()
 })
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   })
 }
 
@@ -615,6 +615,46 @@ describe('POST /api/chat', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('re-probes the sole model after honoring Retry-After when it 429s', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    // The provider default IS the provider's backup — a single attempt. A
+    // transient model-scoped 429 must recover via a bounded same-model
+    // re-probe (Retry-After: 0 keeps the test instant; the wait honors the
+    // header up to MAX_429_BACKOFF_MS in production).
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(429, { error: 'rate limited' }, { 'Retry-After': '0' }))
+      .mockResolvedValueOnce(jsonResponse(200, 'ok'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // No swap happened — the same provider+model served, so the override flag
+    // stays false (a transient rate window is not a fallback).
+    expect(res.headers.get('x-served-model')).toBe('minimax/minimax-m3:free')
+    expect(res.headers.get('x-served-model-overridden')).toBe('false')
+  })
+
+  it('surfaces 429 only after the bounded re-probes for the sole model are exhausted', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-v1-test')
+    vi.stubEnv('MODEL_NAME', undefined)
+    vi.stubEnv('OPENAI_MODEL', undefined)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(429, { error: 'rate limited' }, { 'Retry-After': '0' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(429)
+    // Initial probe + MAX_429_RETRIES re-probes, all rate-limited.
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toBe('LLM API error (429).')
+  })
+
   it('falls back to OPENAI_API_KEY and OpenAI defaults when OPENROUTER_API_KEY is unset', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', '')
     vi.stubEnv('OPENROUTER_BASE_URL', undefined)
@@ -1072,18 +1112,85 @@ describe('POST /api/chat — multi-provider failover (Phase 4)', () => {
     expect(res.headers.get('x-served-model-overridden')).toBe('true')
   })
 
-  it('surfaces a non-retryable 4xx from the primary without trying the backup provider', async () => {
+  it('surfaces a non-retryable 401 without trying the backup provider', async () => {
+    // 401 = bad key: a configuration error, never provider sickness. It must
+    // surface immediately, not burn backup attempts.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(401, { error: 'bad key' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(401)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = (await res.json()) as { error?: string; detail?: string }
+    expect(body.error).toBe('LLM API error (401).')
+    // Upstream error text is never relayed to the client (it can echo request
+    // data) — the status-only message is the contract.
+    expect(body.detail).toBeUndefined()
+  })
+
+  it('surfaces 400 only after the attempt chain exhausts (final attempt stays fatal)', async () => {
+    // 400 is recoverable only while a different attempt remains — a chain
+    // that 400s end-to-end surfaces the status once the final attempt fails.
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { error: 'bad request' }))
     vi.stubGlobal('fetch', fetchMock)
 
     const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
     expect(res.status).toBe(400)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // OpenRouter primary 400 → Gemini backup 400 (final) → surface.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     const body = (await res.json()) as { error?: string; detail?: string }
     expect(body.error).toBe('LLM API error (400).')
-    // Upstream error text is never relayed to the client (it can echo request
-    // data) — the status-only message is the contract.
     expect(body.detail).toBeUndefined()
+  })
+
+  it('recovers from a primary 400 by falling to the backup (Gemini 400s unknown models)', async () => {
+    // Gemini's OpenAI-compatible endpoint answers unknown models with 400
+    // INVALID_ARGUMENT — its analogue of OpenRouter's 404. A 400 on the
+    // primary must fall through to the next attempt instead of failing the
+    // chat (the same recovery path as a dead-model 404).
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(400, { error: 'invalid argument' }))
+      .mockResolvedValueOnce(sseResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(res.headers.get('x-served-provider')).toBe('gemini')
+    expect(res.headers.get('x-served-model')).toBe('gemini-3.5-flash-lite')
+    expect(res.headers.get('x-served-model-overridden')).toBe('true')
+  })
+
+  it('logs provider/model/status/body server-side on a non-retryable 4xx (never relays it)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(jsonResponse(400, { error: 'model not found or params invalid' })),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const res = await POST(chatRequest([{ role: 'user', content: 'hi' }]))
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { error?: string; detail?: string }
+      expect(body.error).toBe('LLM API error (400).')
+      // The upstream body is drained for the ops log and never echoed to the
+      // client — the status-only comment stays the wire contract.
+      expect(body.detail).toBeUndefined()
+      const logged = errorSpy.mock.calls
+        .map((call) => call[1] as string | undefined)
+        .filter((arg): arg is string => typeof arg === 'string')
+        .map((arg) => JSON.parse(arg) as Record<string, unknown>)
+      expect(logged[0]).toMatchObject({
+        provider: 'gemini',
+        model: 'gemini-3.5-flash-lite',
+        status: 400,
+      })
+      expect(logged[0]!.body).toContain('model not found or params invalid')
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('treats 408 as retryable: retries with the same provider backup model', async () => {

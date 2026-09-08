@@ -70,8 +70,54 @@ const TOTAL_TIMEOUT_MS = Number(process.env.CHAT_TOTAL_TIMEOUT_MS) || 90_000
  * is strictly pre-stream — the attempt loop below stops the moment a
  * streaming response head arrives, and mid-stream errors surface to the
  * client as partial content (never another attempt).
+ *
+ * 400 is NOT in the set here but becomes retryable at the attempt site when a
+ * different model/provider attempt remains: Gemini's OpenAI-compatible
+ * endpoint answers unknown models with 400 INVALID_ARGUMENT (its analogue of
+ * OpenRouter's 404), and OpenRouter's flaky `:free` routes occasionally
+ * reject with 400. A 400 from the FINAL attempt stays fatal — a real
+ * configuration error, not transient provider behavior.
  */
 const RETRYABLE_STATUSES = new Set([404, 402, 408, 429])
+
+/**
+ * A model-scoped 429 is a transient rate window, not provider sickness. When
+ * the selected model IS the provider's backup (the no-loop guard collapses
+ * them into a single attempt — e.g. the free OpenRouter `:free` default), a
+ * 429 would otherwise fail the chat immediately. The route therefore
+ * re-probes the FINAL attempt with the same model after honoring Retry-After
+ * (bounded), before surfacing the error. When a distinct backup exists the
+ * re-probe is skipped — falling to the next model is the faster recovery.
+ */
+const MAX_429_RETRIES = 2
+/** Upper bound on a single 429 backoff wait (Retry-After is capped here). */
+const MAX_429_BACKOFF_MS = 5_000
+/** Used when the provider sends no Retry-After header. */
+const DEFAULT_429_BACKOFF_MS = 1_000
+
+function backoffMsFor429(retryAfter: string | null): number {
+  const seconds = retryAfter ? Number(retryAfter) : NaN
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, MAX_429_BACKOFF_MS)
+  }
+  return DEFAULT_429_BACKOFF_MS
+}
+
+/** Sleep that resolves early when the abort signal fires (total-time guard). */
+function sleepMs(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
 
 /**
  * Hard cap on the raw request body, checked before buffering: the per-field
@@ -573,28 +619,59 @@ export async function POST(request: Request) {
       const isProviderExhausted =
         i === attempts.length - 1 ||
         attempts[i + 1]!.candidate.provider !== attempt.candidate.provider
-      let response: Response
-      try {
-        response = await fetch(`${attempt.candidate.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${attempt.candidate.apiKey}`,
-            ...(attempt.candidate.provider === 'openrouter' ? extraHeaders : {}),
-          },
-          body: buildRequestBody(attempt.modelId),
-          signal: request.signal,
-        })
-      } catch {
-        // Pre-stream connect failure (DNS/TLS/refused/abort) — the provider
-        // never produced a response head. Try the next attempt; a canned 502
-        // is only returned when nothing is left to try.
-        if (isProviderExhausted) {
-          void recordGatewayProviderFailure(attempt.candidate.provider)
+      // One upstream call, optionally re-probed on a final-attempt 429. A
+      // status result keeps the drained error body and Retry-After for the
+      // bounded same-model backoff below.
+      const probe = async (): Promise<
+        | { kind: 'stream'; response: Response }
+        | { kind: 'connect-failure' }
+        | { kind: 'ok-degenerate' }
+        | { kind: 'status'; status: number; errorBody: string; retryAfter: string | null }
+      > => {
+        try {
+          const response = await fetch(`${attempt.candidate.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${attempt.candidate.apiKey}`,
+              ...(attempt.candidate.provider === 'openrouter' ? extraHeaders : {}),
+            },
+            body: buildRequestBody(attempt.modelId),
+            signal: request.signal,
+          })
+          if (response.ok && response.body) return { kind: 'stream', response }
+          // Non-ok (or a body-less 2xx): drain the error body so the
+          // connection is reusable. The body is retained only for the
+          // server-side diagnostic log — it is never relayed to the client.
+          const errorBody = await response.text().catch(() => '')
+          if (response.ok) return { kind: 'ok-degenerate' }
+          return {
+            kind: 'status',
+            status: response.status,
+            errorBody,
+            retryAfter: response.headers.get('retry-after'),
+          }
+        } catch {
+          // Pre-stream connect failure (DNS/TLS/refused/abort) — the provider
+          // never produced a response head.
+          return { kind: 'connect-failure' }
         }
-        continue
       }
-      if (response.ok && response.body) {
+
+      let result = await probe()
+      if (result.kind === 'status' && result.status === 429 && i === attempts.length - 1) {
+        for (
+          let reprobe = 0;
+          reprobe < MAX_429_RETRIES && !totalController.signal.aborted;
+          reprobe++
+        ) {
+          if (result.kind !== 'status') break
+          await sleepMs(backoffMsFor429(result.retryAfter), totalController.signal)
+          result = await probe()
+        }
+      }
+
+      if (result.kind === 'stream') {
         // The stream head arrived — this provider is healthy. Record success
         // (fire-and-forget; it closes the breaker) and hand the body back.
         void recordGatewayProviderSuccess(attempt.candidate.provider)
@@ -613,30 +690,49 @@ export async function POST(request: Request) {
             'info',
           )
         }
-        upstream = response
+        upstream = result.response
         break
       }
-      // Non-ok (or a body-less 2xx): drain the error body so the connection
-      // is reusable, then classify the failure.
-      await response.text().catch(() => '')
-      if (response.ok) {
-        // Degenerate 2xx with no stream body — treat as a failed attempt.
+      if (result.kind !== 'status') {
+        // Connect failure or a degenerate 2xx with no stream body — treat as
+        // a failed attempt. A canned 502 is only returned when nothing is
+        // left to try.
         if (isProviderExhausted) void recordGatewayProviderFailure(attempt.candidate.provider)
         continue
       }
-      const retryable = RETRYABLE_STATUSES.has(response.status) || response.status >= 500
+      // 400 is normally fatal — a malformed request can't be fixed by
+      // retrying — but two real cases are recoverable when a different
+      // attempt remains: Gemini's endpoint 400s unknown models (INVALID
+      // ARGUMENT, its analogue of the 404 OpenRouter sends), and OpenRouter's
+      // `:free` routes occasionally reject with 400. Both resolve by falling
+      // to the next backup model/provider. The FINAL attempt stays fatal.
+      const retryable =
+        RETRYABLE_STATUSES.has(result.status) ||
+        result.status >= 500 ||
+        (result.status === 400 && i < attempts.length - 1)
       if (!retryable) {
-        // Other 4xx statuses (400/401/403/…) surface as-is: retrying another
-        // model or provider cannot fix a malformed request, and a bad key is
-        // a configuration error, not provider sickness. The body is drained
+        // Other 4xx statuses (400 on the final attempt, 401/403/…) surface
+        // as-is: retrying cannot fix a malformed request, and a bad key is a
+        // configuration error, not provider sickness. The body is drained
         // above but never relayed — provider error text can echo request
-        // data and must not reach the client.
+        // data and must not reach the client. It IS logged server-side so a
+        // failing failure can be diagnosed from Vercel logs.
+        console.error(
+          '[chat] upstream rejected the request',
+          JSON.stringify({
+            provider: attempt.candidate.provider,
+            model: attempt.modelId,
+            baseUrl: attempt.candidate.baseUrl,
+            status: result.status,
+            body: result.errorBody.slice(0, 1000),
+          }),
+        )
         return NextResponse.json(
-          { error: `LLM API error (${response.status}).` },
-          { status: response.status },
+          { error: `LLM API error (${result.status}).` },
+          { status: result.status },
         )
       }
-      lastErrorStatus = response.status
+      lastErrorStatus = result.status
       if (isProviderExhausted) {
         void recordGatewayProviderFailure(attempt.candidate.provider)
       }

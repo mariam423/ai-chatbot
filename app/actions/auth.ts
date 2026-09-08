@@ -259,6 +259,12 @@ export async function signInWithCredentials(
       const digest = String((err as { digest?: string }).digest ?? '')
       if (digest.startsWith('NEXT_REDIRECT')) throw err
     }
+    // Non-redirect failure (authorize returned null, a rate-limit trip, a
+    // DB outage, etc.). Stay generic to the user (anti-enumeration) but log
+    // the underlying error so the real cause is visible in Vercel Logs —
+    // this endpoint is the one that shows an endless spinner when something
+    // upstream hangs.
+    console.error('[signInWithCredentials] failed for', email, err)
     return { error: 'Invalid email or password.' }
   }
 }

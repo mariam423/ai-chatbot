@@ -12,6 +12,13 @@
  *    function instance is short-lived and Neon's pooler (the pooled
  *    `DATABASE_URL`) is what actually bounds connection counts — a fat
  *    per-instance pool multiplies connections across concurrent instances.
+ *  - On a serverless runtime the connection timeout defaults to 5s instead
+ *    of node-postgres's "wait forever" (0). A stuck database — Neon
+ *    autosuspend waking, a direct-URL connection-limit queue, a rotated
+ *    password — must fail fast so the request surfaces a proper error
+ *    instead of holding the serverless function open until the platform
+ *    kills it (which looks like an endless spinner on login). Long-lived
+ *    processes keep the node-postgres default (0 = wait forever).
  *  - All envs are optional; invalid values (non-numeric, negative, zero
  *    where nonsensical) fall back to the default instead of throwing, so a
  *    typo in an env file can never take the app down.
@@ -40,6 +47,16 @@ const PG_DEFAULT_CONNECTION_TIMEOUT_MS = 0
  * standard serverless shape.
  */
 const SERVERLESS_POOL_MAX = 1
+
+/**
+ * Max seconds to wait for a new Postgres connection on a serverless
+ * runtime. node-postgres's own default is 0 = wait forever, which is correct
+ * for long-lived processes but pathological in serverless: a database that
+ * is temporarily unreachable (Neon autosuspend cold start, connection-
+ * limit queue on a direct URL, a speed-of-light misconfiguration) would
+ * pin the function until the platform timeout instead of failing cleanly.
+ */
+const SERVERLESS_CONNECTION_TIMEOUT_MS = 5_000
 
 /**
  * Env-shaped input: `Record` (not `NodeJS.ProcessEnv`) so callers can pass
@@ -87,7 +104,9 @@ export function parsePoolTuning(env: DbEnv = process.env): PoolTuning {
     ),
     connectionTimeoutMillis: positiveIntEnv(
       env.DATABASE_POOL_CONNECTION_TIMEOUT_MS,
-      PG_DEFAULT_CONNECTION_TIMEOUT_MS,
+      isServerlessRuntime(env)
+        ? SERVERLESS_CONNECTION_TIMEOUT_MS
+        : PG_DEFAULT_CONNECTION_TIMEOUT_MS,
     ),
   }
 }

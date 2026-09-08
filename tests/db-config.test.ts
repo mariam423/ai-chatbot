@@ -42,13 +42,29 @@ describe('parsePoolTuning', () => {
     })
   })
 
-  it('caps the pool at 1 connection per instance on a serverless runtime', () => {
+  it('caps the pool at 1 connection and fails fast on a serverless runtime', () => {
     expect(parsePoolTuning({ VERCEL: '1' }).max).toBe(1)
     expect(parsePoolTuning({ VERCEL: '1' })).toEqual({
       max: 1,
       min: 0,
       idleTimeoutMillis: 10_000,
-      connectionTimeoutMillis: 0,
+      // node-postgres's "wait forever" (0) would pin a serverless function
+      // on a stuck DB — the serverless default fails fast instead.
+      connectionTimeoutMillis: 5_000,
+    })
+  })
+
+  it('the serverless connection timeout falls back to 5s on garbage input', () => {
+    expect(
+      parsePoolTuning({
+        VERCEL: '1',
+        DATABASE_POOL_CONNECTION_TIMEOUT_MS: 'not-a-number',
+      }),
+    ).toEqual({
+      max: 1,
+      min: 0,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 5_000,
     })
   })
 

@@ -210,33 +210,51 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const email = String(credentials.email).toLowerCase().trim()
         const password = String(credentials.password)
 
-        // Abuse brake: per-IP flood cap + per-account guessing cap, checked
-        // before bcrypt (the expensive step). A throttled attempt returns
-        // null — the same generic failure as a wrong password, so nothing
-        // leaks about which limit tripped.
-        const allowed = await checkLoginRateLimit(clientIp(request), email)
-        if (!allowed) return null
+        // Any infrastructure fault (DB unavailability, Redis outage, rate-
+        // limiter misconfiguration, bcrypt error) must degrade to the same
+        // generic failure as a wrong password — never a 500, and never a
+        // hung request that leaves the login button spinning (the caller
+        // relies on authorize returning null to render "Invalid credentials").
+        try {
+          // Abuse brake: per-IP flood cap + per-account guessing cap, checked
+          // before bcrypt (the expensive step). A throttled attempt returns
+          // null — the same generic failure as a wrong password, so nothing
+          // leaks about which limit tripped.
+          const allowed = await checkLoginRateLimit(clientIp(request), email)
+          if (!allowed) return null
 
-        const user = await prisma.user.findUnique({ where: { email } })
-        if (!user?.passwordHash) {
-          logSecurityEvent('auth_failed', { email, ip: clientIp(request), reason: 'no_account' })
+          const user = await prisma.user.findUnique({ where: { email } })
+          if (!user?.passwordHash) {
+            logSecurityEvent('auth_failed', {
+              email,
+              ip: clientIp(request),
+              reason: 'no_account',
+            })
+            return null
+          }
+
+          const valid = await bcrypt.compare(password, user.passwordHash)
+          if (!valid) {
+            logSecurityEvent('auth_failed', {
+              email,
+              ip: clientIp(request),
+              reason: 'bad_password',
+            })
+            return null
+          }
+
+          logSecurityEvent('auth_succeeded', { userId: user.id, email }, 'info')
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            image: user.image,
+            role: normalizeUserRole(user.role),
+            plan: normalizePlan(user.plan),
+          }
+        } catch (err) {
+          console.error('[auth] credentials authorize failed for', email, err)
           return null
-        }
-
-        const valid = await bcrypt.compare(password, user.passwordHash)
-        if (!valid) {
-          logSecurityEvent('auth_failed', { email, ip: clientIp(request), reason: 'bad_password' })
-          return null
-        }
-
-        logSecurityEvent('auth_succeeded', { userId: user.id, email }, 'info')
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          image: user.image,
-          role: normalizeUserRole(user.role),
-          plan: normalizePlan(user.plan),
         }
       },
     }),
@@ -268,7 +286,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         user.role = persisted.role
         user.plan = persisted.plan
         return true
-      } catch {
+      } catch (err) {
+        // The failure must still gate the login (no user id → no JWT), but
+        // surface the real cause in the server logs: Vercel's function logs
+        // are the only place an intermittent DB blip on OAuth account
+        // persistence shows up. The returned value stays `false` — the
+        // user-facing error page and anti-enumeration behavior are unchanged.
+        console.error('[auth] oauth signIn callback failed for provider', account.provider, err)
         return false
       }
     },
