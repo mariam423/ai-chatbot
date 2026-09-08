@@ -29,7 +29,7 @@ export const MODEL_OPTIONS = [
     // `qwen/qwen3.5-397b-a17b` slug, which now 404s. Paid route — the
     // free-tier key 402s here, and the chat route's retry-with-fallback
     // path hands the request to the verified free pool head
-    // (google/gemma-4-31b-it:free).
+    // (poolside/laguna-s-2.1:free).
     model: 'qwen/qwen3.8-flash',
     envVar: 'MODEL_QWEN_3_6',
     vision: true,
@@ -87,31 +87,36 @@ export const ModelKeySchema = z.enum(MODEL_KEYS)
 export type ModelKey = z.infer<typeof ModelKeySchema>
 
 /**
- * OpenRouter free-tier pool, verified live against the catalog (2026-09-08).
- * Free routes on OpenRouter are per-model throttled shared pools — a request
- * can 404 (the model was retired from the free tier), 429 ("temporarily
+ * OpenRouter free-tier pool, verified live against the catalog + live probes
+ * (2026-09-08). Free routes on OpenRouter are per-model throttled shared
+ * pools — a request can 404 (retired from the free tier), 429 ("temporarily
  * rate-limited upstream ... shared pool"), or 400 (flaky free route). There
  * is no single reliable `:free` id; resilience comes from the POOL and the
  * chat route cascading across it (`openRouterFreeCascadeModels`) until one
  * streams. The ids here are the general-purpose (non-reasoning-only,
  * non-harness-gated) free models that stream `delta.content`:
+ * - `poolside/laguna-s-2.1:free` — fastest first-token (~1s, measured) + a
+ *   genuine `delta.content` streamer — primary default + vision fallback
  * - `google/gemma-4-31b-it:free` — dense 30.7B multimodal instruct (text +
- *   image) — primary default + vision fallback
+ *   image); higher first-token latency (~1.6s measured) but the most stable
+ *   general model in the pool
  * - `google/gemma-4-26b-a4b-it:free` — 26B-A4B MoE multimodal instruct
- * - `dots-studio/dots-3-note-preview:free` — open MoE (16B active / 280B)
  *
  * Deliberately EXCLUDED from the pool:
- * - `thinkingmachines/inkling:free` — 403 gated to agentic harnesses
- * - `nvidia/nemotron-3-*-...:free` / `liquid/lfm-2.5-2.6b:free` — reasoning
- *   models that can stream into `delta.reasoning` (the content extractor
- *   never sees it — the `z-ai/glm-5.3-flash` failure mode)
- * - `inclusionai/ling-3.0-flash-*-sante|fin:free`, `cohere/north-mini-code:free`
- *   — domain specialists
+ * - `dots-studio/dots-3-note-preview:free` — probes stream only
+ *   `delta.reasoning` (no `delta.content`): the `z-ai/glm-5.3-flash` empty
+ *   reply failure mode. Its HTTP 200 gave a falsely-green earlier probe,
+ *   but the app's content extractor would never see a caret.
+ * - `thinkingmachines/inkling:free` / `inkling-small:free` — 403 gated to
+ *   agentic harnesses
+ * - `nvidia/nemotron-3-*-...:free`, `liquid/lfm-2.5-2.6b:free`, the
+ *   `inclusionai/ling-3.0-flash-*-*|sante|fin:free`, `cohere/north-mini-code:free`
+ *   — reasoning-only streamers and domain specialists
  */
 export const OPENROUTER_FREE_MODELS = [
+  'poolside/laguna-s-2.1:free',
   'google/gemma-4-31b-it:free',
   'google/gemma-4-26b-a4b-it:free',
-  'dots-studio/dots-3-note-preview:free',
 ] as const
 
 /**
@@ -126,9 +131,9 @@ export const OPENROUTER_FREE_MODELS = [
  * The previous default `minimax/minimax-m3:free` now 404s on a free-tier key
  * ("This model is unavailable for free ... use minimax/minimax-m3 instead" —
  * verified live 2026-09-08), which is why every chat fell through to errors.
- * `google/gemma-4-31b-it:free` replaces it: verified live, general-purpose,
- * multimodal (so it doubles as the vision fallback), and streams
- * `delta.content`.
+ * The verified live pool head `poolside/laguna-s-2.1:free` replaces it:
+ * fastest first-token (~1s, measured), genuine `delta.content` streamer, and
+ * general-purpose (so it doubles as the vision fallback).
  */
 export const DEFAULT_OPENROUTER_FALLBACK_MODEL = OPENROUTER_FREE_MODELS[0]
 
@@ -201,13 +206,12 @@ export function getProviderFallbackModel(provider: LlmProvider): string {
  * Stable vision-capable fallback model per provider, used when the request
  * carries image/video/audio media and the selected option is not flagged
  * vision-capable (text-only options and the provider default). These ids are
- * curated stable routes — the free OpenRouter `:free` route (also the
- * chat-route error fallback and the verified free pool head — the
- * `google/gemma-4-31b-it:free` route streams `delta.content`, is
- * vision-capable, and runs on the project's free-tier key), the plain
- * Gemini name on the direct endpoint (`gemini-3.5-flash-lite`, verified live
- * 2026-08-31 — the older `gemini-2.5-flash-lite` 404s), and a cheap OpenAI
- * model elsewhere.
+ * curated stable routes — the free OpenRouter `:free` pool head
+ * (poolside/laguna-s-2.1:free: fastest first-token (~1s, measured), genuine
+ * `delta.content` streamer, and general-purpose — also the chat-route error
+ * fallback), the plain Gemini name on the direct endpoint
+ * (`gemini-3.5-flash-lite`, verified live 2026-08-31 — the older
+ * `gemini-2.5-flash-lite` 404s), and a cheap OpenAI model elsewhere.
  */
 export const VISION_FALLBACK_MODELS: Record<LlmProvider, string> = {
   openrouter: DEFAULT_OPENROUTER_FALLBACK_MODEL,
@@ -256,10 +260,11 @@ export function resolveModel(
     process.env.MODEL_NAME ??
     process.env.OPENAI_MODEL ??
     // Stable primary defaults — the OpenRouter default is the verified-live
-    // free `:free` route `google/gemma-4-31b-it:free` (zero-cost,
-    // vision-capable, and `delta.content` streams, so the provider default
-    // also satisfies media requests; FALLBACK_MODEL overrides it). Media
-    // requests on a text-only option auto-switch to the vision fallback above.
+    // free `:free` pool head `poolside/laguna-s-2.1:free` (zero-cost,
+    // fastest first-token, vision-capable, and `delta.content` streams, so
+    // the provider default also satisfies media requests; FALLBACK_MODEL
+    // overrides it). Media requests on a text-only option auto-switch to the
+    // vision fallback above.
     (provider === 'gemini'
       ? 'gemini-3.5-flash-lite'
       : provider === 'openrouter'

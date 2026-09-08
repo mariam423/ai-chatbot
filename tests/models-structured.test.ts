@@ -83,13 +83,13 @@ describe('model registry', () => {
     vi.stubEnv('MODEL_DEEPSEEK_V4_FLASH', undefined)
     // Provider default is text-only (vision: false); media on it routes to
     // the provider's vision fallback. The fallback is the free OpenRouter
-    // `:free` route (google/gemma-4-31b-it:free) which is vision-capable and
-    // also the chat-route error fallback.
+    // `:free` pool head (poolside/laguna-s-2.1:free) which is vision-capable
+    // and also the chat-route error fallback.
     expect(resolveModel('provider-default', 'openrouter', { vision: true })).toBe(
       DEFAULT_OPENROUTER_FALLBACK_MODEL,
     )
-    // Provider default + vision → the free vision-capable default itself
-    // (google/gemma-4-31b-it:free is vision-capable, so the default satisfies media).
+    // Provider default + vision → the free vision-capable pool head itself
+    // (poolside/laguna-s-2.1:free is vision-capable, so the default satisfies media).
     expect(resolveModel(undefined, 'openrouter', { vision: true })).toBe(
       DEFAULT_OPENROUTER_FALLBACK_MODEL,
     )

@@ -226,7 +226,8 @@ describe('POST /api/chat', () => {
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions')
     const payload = JSON.parse(init!.body as string) as { model: string }
     // Free-first: the provider default is the genuinely free, live
-    // `google/gemma-4-31b-it:free` route (verified against the catalog + live API).
+    // `poolside/laguna-s-2.1:free` route (fastest measured first-token in
+    // the verified free pool — verified against the catalog + live API).
     expect(payload.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     expect(init!.headers).toMatchObject({
       Authorization: 'Bearer sk-or-v1-test',
@@ -270,7 +271,8 @@ describe('POST /api/chat', () => {
       messages: Array<{ role: string; content: unknown }>
     }
     // The text-only provider default is swapped for the free vision fallback
-    // (google/gemma-4-31b-it:free is 0-cost AND vision-capable — verified live).
+    // (poolside/laguna-s-2.1:free is 0-cost, vision-capable, and the fastest
+    // content streamer in the verified pool — verified live).
     expect(payload.model).toBe(DEFAULT_OPENROUTER_FALLBACK_MODEL)
     // The image rides along as a multimodal part on the user message.
     expect(payload.messages.at(-1)).toEqual({
@@ -610,7 +612,9 @@ describe('POST /api/chat', () => {
     // The provider default is a `:free` route, so the verified-free-pool
     // cascade kicks in: a permanent 404 on the default hops to the next free
     // model instead of failing the chat — the fix for the retired
-    // `minimax/minimax-m3:free` (404 "unavailable for free").
+    // `minimax/minimax-m3:free` (404 "unavailable for free") and reasoning-only
+    // streamers like `dots-studio/dots-3-note-preview:free` which drop
+    // `delta.content`.
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(404, { error: 'model unavailable' }))
     vi.stubGlobal('fetch', fetchMock)
 
